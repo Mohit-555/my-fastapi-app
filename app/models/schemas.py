@@ -1,0 +1,568 @@
+from __future__ import annotations
+
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import datetime
+
+
+# ─── Zone ─────────────────────────────────────────────────────────────────────
+
+class ZoneBase(BaseModel):
+    zone_name: str
+    zone_code: str
+    zone_id_hex: str
+
+class ZoneCreate(ZoneBase):
+    pass
+
+class ZoneUpdate(BaseModel):
+    zone_name: Optional[str] = None
+    zone_code: Optional[str] = None
+    zone_id_hex: Optional[str] = None
+
+class ZoneResponse(ZoneBase):
+    id: int
+    class Config:
+        from_attributes = True
+
+class ZoneWithDivisions(ZoneResponse):
+    divisions: List["DivisionResponse"] = []
+
+
+# ─── Division ─────────────────────────────────────────────────────────────────
+
+class DivisionBase(BaseModel):
+    division_name: str
+    division_code: str
+    division_id_hex: str
+    zone_id: int
+
+class DivisionCreate(DivisionBase):
+    pass
+
+class DivisionUpdate(BaseModel):
+    division_name: Optional[str] = None
+    division_code: Optional[str] = None
+    division_id_hex: Optional[str] = None
+    zone_id: Optional[int] = None
+
+class DivisionResponse(BaseModel):
+    id: int
+    division_name: str
+    division_code: str
+    division_id_hex: str
+    zone_id: int
+    class Config:
+        from_attributes = True
+
+class DivisionWithStations(DivisionResponse):
+    stations: List["StationResponse"] = []
+
+
+# ─── Station ──────────────────────────────────────────────────────────────────
+
+class StationBase(BaseModel):
+    station_name: str
+    station_code: str
+    station_id_hex: str
+    division_id: int
+
+class StationCreate(StationBase):
+    pass
+
+class StationUpdate(BaseModel):
+    station_name: Optional[str] = None
+    station_code: Optional[str] = None
+    station_id_hex: Optional[str] = None
+    division_id: Optional[int] = None
+
+class StationResponse(BaseModel):
+    id: int
+    station_name: str
+    station_code: str
+    station_id_hex: str
+    division_id: int
+    class Config:
+        from_attributes = True
+
+
+# ─── Gateway ──────────────────────────────────────────────────────────────────
+
+class GatewayResponse(BaseModel):
+    id: int
+    stngw_id: str
+    imei: Optional[str]
+    station_id: Optional[int]
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
+
+# ─── Telemetry (Gateway Ingestion) ────────────────────────────────────────────
+
+class ParameterPayload(BaseModel):
+    para_id: str
+    prv: List[float]
+    prt: List[str]
+
+class GatewayDataPayload(BaseModel):
+    imei: str
+    stngw_id: str
+    parameters: List[ParameterPayload]
+
+class TelemetryResponse(BaseModel):
+    id: int
+    gateway_id: int
+    para_id: str
+    prv: Optional[float]
+    prt: Optional[str]
+    received_at: datetime
+    class Config:
+        from_attributes = True
+
+
+class TelemetryPoint(BaseModel):
+    """Single time-series data point used in chart responses."""
+    t: str            # ISO timestamp string (prt from gateway, or received_at)
+    v: Optional[float]
+
+
+class TelemetrySeriesResponse(BaseModel):
+    """
+    A single parameter series for one asset — returned by the telemetry query endpoint.
+    Contains everything the frontend needs to render a chart panel.
+    """
+    para_id: str
+    asset_type_hex: str
+    asset_type_name: Optional[str]
+    asset_type_code: Optional[str]
+    asset_number_hex: str               # bytes 2-3 of para_id
+    parameter_type_hex: str             # bytes 4-5 of para_id
+    parameter_name: Optional[str]       # e.g. "Peak Current"
+    parameter_unit: Optional[str]       # e.g. "A"
+    representation: Optional[str]       # e.g. "Maximum"
+    stngw_id: str
+    data: List[TelemetryPoint]
+    latest_value: Optional[float]
+    threshold_warning_low: Optional[float] = None
+    threshold_warning_high: Optional[float] = None
+    threshold_critical_low: Optional[float] = None
+    threshold_critical_high: Optional[float] = None
+
+
+class TelemetryQueryResponse(BaseModel):
+    """Top-level response for GET /telemetry — groups series by asset."""
+    station_id: Optional[int]
+    station_name: Optional[str]
+    asset_type_hex: Optional[str]
+    asset_number: Optional[str]
+    from_time: Optional[str]
+    to_time: Optional[str]
+    series: List[TelemetrySeriesResponse]
+
+
+# ─── Assets ───────────────────────────────────────────────────────────────────
+
+class AssetTypeOption(BaseModel):
+    """One entry in the Asset Type dropdown."""
+    hex_id: str          # e.g. "00"
+    code: str            # e.g. "EOP"
+    label: str           # e.g. "Point Machine"
+    group_label: str     # display group for the UI, e.g. "Point Machine"
+
+
+class AssetTypeGroupOption(BaseModel):
+    """
+    Grouped option for the dashboard Asset Type dropdown.
+    Each group maps to one of the friendly labels in ASSET_TYPE_DISPLAY_GROUPS.
+    """
+    group_label: str
+    asset_type_hexes: List[str]
+    members: List[AssetTypeOption]
+
+
+class ParameterTypeOption(BaseModel):
+    """One entry in a parameter type listing."""
+    hex_id: str          # e.g. "02"
+    code: str            # e.g. "PEAK_CUR"
+    label: str           # e.g. "Peak Current"
+    unit: str            # e.g. "A"
+
+
+class ParameterReprOption(BaseModel):
+    """One entry in the representation listing."""
+    hex_id: str
+    code: str
+    label: str
+
+
+# ─── Asset Inventory / Detail ─────────────────────────────────────────────────
+
+class AssetInventoryBase(BaseModel):
+    station_id: int
+    asset_type_hex: str
+    asset_make: str
+    count: int
+
+class AssetInventoryCreate(AssetInventoryBase):
+    pass
+
+class AssetInventoryUpdate(BaseModel):
+    station_id: Optional[int] = None
+    asset_type_hex: Optional[str] = None
+    asset_make: Optional[str] = None
+    count: Optional[int] = None
+
+class AssetInventoryResponse(AssetInventoryBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    class Config:
+        from_attributes = True
+
+class AssetMakeOption(BaseModel):
+    label: str
+    value: str
+
+class AssetDetailRow(BaseModel):
+    sr: int
+    zone_id: int
+    zone: str
+    division_id: int
+    division: str
+    station_id: int
+    station: str
+    asset_type_hex: str
+    asset_type: str
+    asset_make: str
+    count: int
+
+class AssetDetailResponse(BaseModel):
+    as_on: str
+    total: int
+    rows: List[AssetDetailRow]
+
+
+# ─── Alert Summary ────────────────────────────────────────────────────────────
+
+class AlertEventBase(BaseModel):
+    station_id: int
+    alert_type: str
+    asset_type_hex: str
+    asset_no: str
+    cause: str
+    alert_status: str = "Active"
+    feedback: Optional[str] = None
+    acknowledged: bool = False
+    remark: Optional[str] = None
+    alert_time: Optional[datetime] = None
+    rectification_time: Optional[datetime] = None
+    feedback_time: Optional[datetime] = None
+    maintainer_name: Optional[str] = None
+    designation: Optional[str] = None
+    mobile: Optional[str] = None
+
+
+class AlertEventCreate(AlertEventBase):
+    pass
+
+
+class AlertEventUpdate(BaseModel):
+    alert_type: Optional[str] = None
+    asset_type_hex: Optional[str] = None
+    asset_no: Optional[str] = None
+    cause: Optional[str] = None
+    alert_status: Optional[str] = None
+    feedback: Optional[str] = None
+    acknowledged: Optional[bool] = None
+    remark: Optional[str] = None
+    alert_time: Optional[datetime] = None
+    rectification_time: Optional[datetime] = None
+    feedback_time: Optional[datetime] = None
+    maintainer_name: Optional[str] = None
+    designation: Optional[str] = None
+    mobile: Optional[str] = None
+
+
+class AlertEventResponse(BaseModel):
+    id: int
+    station_id: int
+    alert_type: str
+    asset_type_hex: str
+    asset_no: str
+    cause: str
+    alert_status: str
+    feedback: Optional[str]
+    acknowledged: bool
+    remark: Optional[str]
+    alert_time: datetime
+    rectification_time: Optional[datetime]
+    feedback_time: Optional[datetime]
+    maintainer_name: Optional[str]
+    designation: Optional[str]
+    mobile: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    class Config:
+        from_attributes = True
+
+
+class AlertHistoryRow(BaseModel):
+    sr: int
+    id: int
+    zone_id: int
+    zone: str
+    division_id: int
+    division: str
+    station_id: int
+    station: str
+    alert_type: str
+    asset_type_hex: str
+    asset_type: str
+    asset_no: str
+    alert_status: str
+    cause: str
+    feedback: Optional[str]
+    incidence_date_time: str
+    rectification_date_time: Optional[str]
+    duration_min: Optional[float]
+    feedback_date_time: Optional[str]
+    maintainer_name: Optional[str]
+    designation: Optional[str]
+    mobile: Optional[str]
+    remarks: Optional[str]
+
+
+class AlertHistoryResponse(BaseModel):
+    from_time: Optional[str]
+    to_time: Optional[str]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    rows: List[AlertHistoryRow]
+
+
+class AlertLiveSummary(BaseModel):
+    predictive: int
+    failure: int
+    total: int
+
+
+class AlertLiveCard(BaseModel):
+    id: int
+    zone_id: int
+    zone: str
+    division_id: int
+    division: str
+    station_id: int
+    station: str
+    title: str
+    alert_type: str
+    asset_type_hex: str
+    asset_type: str
+    asset_no: str
+    alert_status: str
+    cause: str
+    feedback: Optional[str]
+    acknowledged: bool
+    incidence_date_time: str
+    remarks: Optional[str]
+
+
+class AlertLiveResponse(BaseModel):
+    summary: AlertLiveSummary
+    alerts: List[AlertLiveCard]
+
+
+class AlertFeedbackUpdate(BaseModel):
+    feedback: str
+    feedback_time: Optional[datetime] = None
+
+
+class AlertRemarkUpdate(BaseModel):
+    remark: str
+
+
+class AlertRectificationUpdate(BaseModel):
+    rectification_time: Optional[datetime] = None
+    alert_status: str = "Cleared"
+    maintainer_name: Optional[str] = None
+    designation: Optional[str] = None
+    mobile: Optional[str] = None
+    remarks: Optional[str] = None
+
+
+class AlertSummaryRow(BaseModel):
+    sr: int
+    zone_id: int
+    zone: str
+    division_id: int
+    division: str
+    station_id: int
+    station: str
+    alert_type: str
+    asset_type_hex: str
+    asset_type: str
+    asset_no: str
+    cause: str
+    total: int
+    true: int
+    partially_true: int
+    percentage: float
+
+
+class AlertSummaryResponse(BaseModel):
+    from_time: Optional[str]
+    to_time: Optional[str]
+    total: int
+    total_rows: int
+    page: int
+    page_size: int
+    total_pages: int
+    rows: List[AlertSummaryRow]
+
+
+class AlertEventsResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    rows: List[AlertEventResponse]
+
+
+class AlertFilterOption(BaseModel):
+    label: str
+    value: str
+
+
+class AlertFiltersResponse(BaseModel):
+    zones: List[DropdownOption]
+    divisions: List[DropdownOption]
+    stations: List[DropdownOption]
+    alert_types: List[AlertFilterOption]
+    asset_types: List[AssetTypeGroupOption]
+    causes: List[AlertFilterOption]
+    feedbacks: List[AlertFilterOption]
+    alert_statuses: List[AlertFilterOption]
+
+
+# ─── Thresholds ───────────────────────────────────────────────────────────────
+
+class ThresholdBase(BaseModel):
+    asset_type_hex: str
+    parameter_type_hex: str
+    station_id: Optional[int] = None
+    warning_low: Optional[float] = None
+    warning_high: Optional[float] = None
+    critical_low: Optional[float] = None
+    critical_high: Optional[float] = None
+    unit: Optional[str] = None
+    description: Optional[str] = None
+
+class ThresholdCreate(ThresholdBase):
+    pass
+
+class ThresholdUpdate(BaseModel):
+    warning_low: Optional[float] = None
+    warning_high: Optional[float] = None
+    critical_low: Optional[float] = None
+    critical_high: Optional[float] = None
+    unit: Optional[str] = None
+    description: Optional[str] = None
+
+class ThresholdResponse(ThresholdBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    class Config:
+        from_attributes = True
+
+
+# ─── Decode ───────────────────────────────────────────────────────────────────
+
+class GatewayDecodeResponse(BaseModel):
+    stngw_id: str
+    zone_id_hex: str
+    division_id_hex: str
+    station_id_hex: str
+    gateway_number_hex: str
+    zone_name: Optional[str] = None
+    zone_code: Optional[str] = None
+    division_name: Optional[str] = None
+    division_code: Optional[str] = None
+    station_name: Optional[str] = None
+    station_code: Optional[str] = None
+
+class ParaDecodeResponse(BaseModel):
+    para_id: str
+    asset_type_id_hex: str
+    asset_number_id_hex: str
+    parameter_type_id_hex: str
+    parameter_representation_id_hex: str
+    asset_type_name: Optional[str] = None
+    asset_type_code: Optional[str] = None
+    parameter_name: Optional[str] = None
+    parameter_unit: Optional[str] = None
+    representation: Optional[str] = None
+
+
+# ─── Dropdown ─────────────────────────────────────────────────────────────────
+
+class DropdownOption(BaseModel):
+    id: int
+    label: str
+    code: str
+    hex_id: str
+
+
+# Forward refs
+ZoneWithDivisions.model_rebuild()
+DivisionWithStations.model_rebuild()
+# ─── Auth ─────────────────────────────────────────────────────────────────────
+
+class UserRegisterRequest(BaseModel):
+    full_name: str
+    employee_id: str
+    designation: str
+    zone_id: Optional[int] = None
+    division_id: Optional[int] = None
+    mobile_number: str
+    email: str
+    password: str
+    confirm_password: str
+    reporting_officer_id: Optional[int] = None
+
+class UserLoginRequest(BaseModel):
+    employee_id: str
+    password: str
+    remember_me: bool = False
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+class LogoutResponse(BaseModel):
+    message: str
+
+class UserResponse(BaseModel):
+    id: int
+    full_name: str
+    employee_id: str
+    designation: str
+    zone_id: Optional[int] = None
+    division_id: Optional[int] = None
+    email: str
+    mobile_number: str
+    is_active: bool
+    created_at: datetime
+    class Config:
+        from_attributes = True

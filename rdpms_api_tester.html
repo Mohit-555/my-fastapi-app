@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RDPMS API Tester</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=DM+Sans:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --bg3: #21262d;
+    --bg4: #2d333b;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text2: #8b949e;
+    --text3: #484f58;
+    --accent: #58a6ff;
+    --accent2: #1f6feb;
+    --green: #3fb950;
+    --green-bg: #0d2818;
+    --red: #f85149;
+    --red-bg: #2d1317;
+    --yellow: #d29922;
+    --yellow-bg: #2b2008;
+    --purple: #bc8cff;
+    --orange: #ffa657;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: 260px;
+    min-width: 260px;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #sidebar-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  #sidebar-header h1 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: .04em;
+  }
+
+  #sidebar-header p {
+    font-size: 11px;
+    color: var(--text2);
+    margin-top: 2px;
+  }
+
+  #base-url-wrap,
+  #auth-token-wrap {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  #base-url-wrap label,
+  #auth-token-wrap label,
+  #refresh-token-wrap label {
+    font-size: 10px;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  #base-url,
+  #auth-token,
+  #refresh-token {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 6px 8px;
+    outline: none;
+  }
+
+  #base-url:focus,
+  #auth-token:focus,
+  #refresh-token:focus { border-color: var(--accent2); }
+
+  #auth-token,
+  #refresh-token {
+    min-height: 58px;
+    resize: vertical;
+    line-height: 1.45;
+  }
+
+  #auth-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  #auth-actions button {
+    flex: 1;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    font-size: 11px;
+    padding: 5px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: var(--sans);
+  }
+
+  #auth-actions button:hover { color: var(--text); border-color: var(--text2); }
+
+  #auth-status {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--text3);
+  }
+
+  #nav { overflow-y: auto; flex: 1; padding: 8px 0; }
+
+  .nav-group { margin-bottom: 2px; }
+
+  .nav-group-title {
+    padding: 6px 16px 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    cursor: pointer;
+    border-radius: 0;
+    transition: background .1s;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    color: var(--text2);
+    font-family: var(--sans);
+    font-size: 12px;
+  }
+
+  .nav-item:hover { background: var(--bg3); color: var(--text); }
+  .nav-item.active { background: var(--bg4); color: var(--accent); }
+
+  .method-badge {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 5px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    min-width: 36px;
+    text-align: center;
+  }
+
+  .GET    { background: #0d2818; color: #3fb950; }
+  .POST   { background: #1a2433; color: #58a6ff; }
+  .PUT    { background: #2b2008; color: #d29922; }
+  .DELETE { background: #2d1317; color: #f85149; }
+
+  /* ── Main ── */
+  #main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #request-panel {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+  }
+
+  #endpoint-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text2);
+    margin-bottom: 10px;
+    font-family: var(--mono);
+  }
+
+  #url-bar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  #method-display {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 8px 12px;
+    border-radius: 6px;
+    min-width: 60px;
+    text-align: center;
+  }
+
+  #url-input {
+    flex: 1;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 8px 12px;
+    outline: none;
+  }
+
+  #url-input:focus { border-color: var(--accent2); }
+
+  #send-btn {
+    background: var(--accent2);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 20px;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+  }
+
+  #send-btn:hover { background: var(--accent); }
+  #send-btn:active { opacity: .8; }
+  #send-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* params/body tabs */
+  #req-tabs {
+    display: flex;
+    gap: 0;
+    margin-top: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .req-tab {
+    padding: 6px 14px;
+    font-size: 12px;
+    color: var(--text2);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color .1s;
+  }
+
+  .req-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .req-tab:hover { color: var(--text); }
+
+  #req-content { margin-top: 12px; }
+
+  .params-grid {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .params-grid label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text2);
+  }
+
+  .params-grid input, .params-grid select {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 5px 8px;
+    outline: none;
+    width: 100%;
+  }
+
+  .params-grid input:focus,
+  .params-grid select:focus { border-color: var(--accent2); }
+
+  .params-grid select option { background: var(--bg3); }
+
+  #body-editor {
+    width: 100%;
+    height: 120px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 10px 12px;
+    outline: none;
+    resize: vertical;
+    line-height: 1.6;
+  }
+
+  #body-editor:focus { border-color: var(--accent2); }
+
+  /* ── Response ── */
+  #response-panel {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #response-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    flex-shrink: 0;
+  }
+
+  #response-header span { font-size: 12px; color: var(--text2); }
+
+  #status-badge {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: 20px;
+  }
+
+  .status-ok  { background: var(--green-bg); color: var(--green); }
+  .status-err { background: var(--red-bg);   color: var(--red); }
+  .status-warn { background: var(--yellow-bg); color: var(--yellow); }
+
+  #response-time { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+
+  #copy-btn {
+    margin-left: auto;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: var(--sans);
+    transition: color .1s, border-color .1s;
+  }
+
+  #copy-btn:hover { color: var(--text); border-color: var(--text2); }
+
+  #response-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 24px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  #response-body.empty { color: var(--text3); font-family: var(--sans); font-size: 13px; padding-top: 40px; text-align: center; }
+
+  /* JSON syntax highlight */
+  .j-key    { color: #79c0ff; }
+  .j-str    { color: #a5d6ff; }
+  .j-num    { color: var(--orange); }
+  .j-bool   { color: var(--purple); }
+  .j-null   { color: var(--text3); }
+
+  /* ── Loading spinner ── */
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+    display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* scrollbars */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <div id="sidebar-header">
+    <h1>⬡ RDPMS API Tester</h1>
+    <p>RDSO/SPN/257/2025 — v1.1.0</p>
+  </div>
+  <div id="base-url-wrap">
+    <label>Base URL</label>
+    <input id="base-url" value="http://localhost:8000" />
+  </div>
+  <div id="auth-token-wrap">
+    <label>Bearer Token</label>
+    <textarea id="auth-token" placeholder="Login response token appears here"></textarea>
+    <label style="margin-top:8px">Refresh Token</label>
+    <textarea id="refresh-token" placeholder="Login/refresh response token appears here"></textarea>
+    <div id="auth-actions">
+      <button id="save-token-btn" type="button">Save</button>
+      <button id="clear-token-btn" type="button">Clear</button>
+    </div>
+    <div id="auth-status">No token saved</div>
+  </div>
+  <nav id="nav"></nav>
+</div>
+
+<div id="main">
+  <div id="request-panel">
+    <div id="endpoint-title">Select an endpoint from the sidebar</div>
+    <div id="url-bar">
+      <div id="method-display" class="GET">GET</div>
+      <input id="url-input" placeholder="/zones" />
+      <button id="send-btn">Send</button>
+    </div>
+    <div id="req-tabs">
+      <div class="req-tab active" data-tab="params">Params</div>
+      <div class="req-tab" data-tab="body">Body</div>
+    </div>
+    <div id="req-content">
+      <div id="tab-params"><div class="params-grid" id="params-grid"></div></div>
+      <div id="tab-body" style="display:none">
+        <textarea id="body-editor" placeholder="JSON request body..."></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div id="response-panel">
+    <div id="response-header">
+      <span>Response</span>
+      <div id="status-badge" style="display:none"></div>
+      <div id="response-time" style="display:none"></div>
+      <button id="copy-btn" style="display:none">Copy</button>
+    </div>
+    <div id="response-body" class="empty">Hit Send to see the response</div>
+  </div>
+</div>
+
+<script>
+const ENDPOINTS = [
+  // ── Health ──────────────────────────────────────────────────────────────
+  { group:"Health", method:"GET", path:"/", label:"Health check", params:[], body:null },
+
+  // ── Auth ────────────────────────────────────────────────────────────────
+  { group:"Auth", method:"POST", path:"/auth/register", label:"Register user", params:[], body:'{\n  "full_name": "Test User",\n  "employee_id": "EMP001",\n  "designation": "SSE Signal",\n  "zone_id": 1,\n  "division_id": 1,\n  "mobile_number": "9876543210",\n  "email": "test.user@example.com",\n  "password": "Password@123",\n  "confirm_password": "Password@123",\n  "reporting_officer_id": null\n}' },
+  { group:"Auth", method:"POST", path:"/auth/login", label:"Login user", params:[], body:'{\n  "employee_id": "EMP001",\n  "password": "Password@123",\n  "remember_me": true\n}' },
+  { group:"Auth", method:"POST", path:"/auth/refresh", label:"Refresh access token", params:[], body:'{\n  "refresh_token": "{{refresh_token}}"\n}' },
+  { group:"Auth", method:"POST", path:"/auth/logout", label:"Logout session", params:[], body:'{\n  "refresh_token": "{{refresh_token}}"\n}' },
+  { group:"Auth", method:"GET", path:"/auth/me", label:"Current user", params:[], body:null },
+
+  // ── Zones ───────────────────────────────────────────────────────────────
+  { group:"Zones", method:"GET",  path:"/zones/",         label:"List all zones",         params:[], body:null },
+  { group:"Zones", method:"GET",  path:"/zones/dropdown", label:"Zones dropdown",         params:[], body:null },
+  { group:"Zones", method:"GET",  path:"/zones/{zone_id}",label:"Get zone with divisions",params:[{name:"zone_id",in:"path",default:"1"}], body:null },
+  { group:"Zones", method:"POST", path:"/zones/",         label:"Create zone",            params:[], body:'{\n  "zone_name": "TEST RAILWAY",\n  "zone_code": "TR",\n  "zone_id_hex": "FF"\n}' },
+  { group:"Zones", method:"PUT",  path:"/zones/{zone_id}",label:"Update zone",            params:[{name:"zone_id",in:"path",default:"1"}], body:'{\n  "zone_name": "UPDATED RAILWAY"\n}' },
+  { group:"Zones", method:"DELETE",path:"/zones/{zone_id}",label:"Delete zone",           params:[{name:"zone_id",in:"path",default:"99"}], body:null },
+
+  // ── Divisions ───────────────────────────────────────────────────────────
+  { group:"Divisions", method:"GET", path:"/divisions/",                        label:"List all divisions",         params:[], body:null },
+  { group:"Divisions", method:"GET", path:"/divisions/by-zone/{zone_id}",       label:"Divisions by zone",          params:[{name:"zone_id",in:"path",default:"1"}], body:null },
+  { group:"Divisions", method:"GET", path:"/divisions/by-zone/{zone_id}/dropdown",label:"Divisions dropdown",       params:[{name:"zone_id",in:"path",default:"1"}], body:null },
+  { group:"Divisions", method:"GET", path:"/divisions/{division_id}",           label:"Get division + stations",    params:[{name:"division_id",in:"path",default:"1"}], body:null },
+  { group:"Divisions", method:"POST",path:"/divisions/",                        label:"Create division",            params:[], body:'{\n  "division_name": "TEST DIVISION",\n  "division_code": "TSTD",\n  "division_id_hex": "FF",\n  "zone_id": 1\n}' },
+  { group:"Divisions", method:"PUT", path:"/divisions/{division_id}",           label:"Update division",            params:[{name:"division_id",in:"path",default:"1"}], body:'{\n  "division_name": "UPDATED DIVISION"\n}' },
+  { group:"Divisions", method:"DELETE",path:"/divisions/{division_id}",         label:"Delete division",            params:[{name:"division_id",in:"path",default:"99"}], body:null },
+
+  // ── Stations ────────────────────────────────────────────────────────────
+  { group:"Stations", method:"GET", path:"/stations/",                              label:"List all stations",       params:[], body:null },
+  { group:"Stations", method:"GET", path:"/stations/by-division/{division_id}",     label:"Stations by division",    params:[{name:"division_id",in:"path",default:"1"}], body:null },
+  { group:"Stations", method:"GET", path:"/stations/by-division/{division_id}/dropdown",label:"Stations dropdown",   params:[{name:"division_id",in:"path",default:"1"}], body:null },
+  { group:"Stations", method:"GET", path:"/stations/{station_id}",                  label:"Get station",             params:[{name:"station_id",in:"path",default:"1"}], body:null },
+  { group:"Stations", method:"POST",path:"/stations/",                              label:"Create station",          params:[], body:'{\n  "station_name": "TEST STATION",\n  "station_code": "TST",\n  "station_id_hex": "FF",\n  "division_id": 1\n}' },
+  { group:"Stations", method:"PUT", path:"/stations/{station_id}",                  label:"Update station",          params:[{name:"station_id",in:"path",default:"1"}], body:'{\n  "station_name": "UPDATED STATION"\n}' },
+  { group:"Stations", method:"DELETE",path:"/stations/{station_id}",                label:"Delete station",          params:[{name:"station_id",in:"path",default:"99"}], body:null },
+
+  // ── Gateway ─────────────────────────────────────────────────────────────
+  { group:"Gateway", method:"GET",  path:"/gateway/list",             label:"List all gateways",       params:[], body:null },
+  { group:"Gateway", method:"GET",  path:"/gateway/{stngw_id}/info",  label:"Get gateway info",        params:[{name:"stngw_id",in:"path",default:"05011200"}], body:null },
+  { group:"Gateway", method:"GET",  path:"/gateway/data/{stngw_id}",  label:"Get gateway telemetry",   params:[{name:"stngw_id",in:"path",default:"05011200"},{name:"para_id",in:"query",default:""},{name:"limit",in:"query",default:"100"}], body:null },
+  { group:"Gateway", method:"POST", path:"/gateway/data",             label:"Ingest telemetry packet", params:[], body:'{\n  "imei": "867409070579912",\n  "stngw_id": "05011200",\n  "parameters": [\n    {\n      "para_id": "00010102",\n      "prv": [3.29],\n      "prt": ["31-05-2026 15:15:53.000"]\n    },\n    {\n      "para_id": "00010202",\n      "prv": [7.63],\n      "prt": ["31-05-2026 15:15:53.000"]\n    },\n    {\n      "para_id": "00010302",\n      "prv": [2508],\n      "prt": ["31-05-2026 15:15:53.000"]\n    },\n    {\n      "para_id": "00010402",\n      "prv": [11.96],\n      "prt": ["31-05-2026 15:15:53.000"]\n    }\n  ]\n}' },
+  { group:"Gateway", method:"POST", path:"/gateway/{stngw_id}/link-station", label:"Link gateway to station", params:[{name:"stngw_id",in:"path",default:"05011200"}], body:null },
+
+  // ── Telemetry Query ──────────────────────────────────────────────────────
+  { group:"Telemetry", method:"GET", path:"/telemetry",              label:"Query telemetry",         params:[{name:"zone_id",in:"query",default:""},{name:"division_id",in:"query",default:""},{name:"station_id",in:"query",default:"1"},{name:"asset_type_hex",in:"query",default:"00"},{name:"asset_number_hex",in:"query",default:""},{name:"parameter_type_hex",in:"query",default:""},{name:"from_time",in:"query",default:""},{name:"to_time",in:"query",default:""},{name:"limit",in:"query",default:"500"}], body:null },
+  { group:"Telemetry", method:"GET", path:"/telemetry/latest/{station_id}", label:"Latest by station",   params:[{name:"station_id",in:"path",default:"1"},{name:"asset_type_hex",in:"query",default:""}], body:null },
+
+  // ── Assets ──────────────────────────────────────────────────────────────
+  { group:"Assets", method:"GET", path:"/assets/types",         label:"List asset types (flat)",    params:[], body:null },
+  { group:"Assets", method:"GET", path:"/assets/types/grouped", label:"List asset types (grouped)", params:[], body:null },
+  { group:"Assets", method:"GET", path:"/assets/parameters",    label:"List parameter types",       params:[{name:"asset_type_hex",in:"query",default:""}], body:null },
+  { group:"Assets", method:"GET", path:"/assets/representations",label:"List representations",      params:[], body:null },
+  { group:"Assets", method:"GET", path:"/assets/detail",         label:"Asset detail report",       params:[{name:"zone_id",in:"query",default:""},{name:"division_id",in:"query",default:""},{name:"station_id",in:"query",default:""},{name:"asset_type_hex",in:"query",default:""},{name:"asset_make",in:"query",default:""},{name:"view",in:"query",default:"table"}], body:null },
+  { group:"Assets", method:"GET", path:"/assets/detail/download",label:"Download asset detail CSV", params:[{name:"zone_id",in:"query",default:""},{name:"division_id",in:"query",default:""},{name:"station_id",in:"query",default:""},{name:"asset_type_hex",in:"query",default:""},{name:"asset_make",in:"query",default:""}], body:null },
+  { group:"Assets", method:"GET", path:"/assets/makes",          label:"List asset makes",          params:[{name:"asset_type_hex",in:"query",default:""},{name:"station_id",in:"query",default:""}], body:null },
+  { group:"Assets", method:"GET", path:"/assets/inventory",      label:"List asset inventory",      params:[{name:"station_id",in:"query",default:""},{name:"asset_type_hex",in:"query",default:""},{name:"asset_make",in:"query",default:""}], body:null },
+  { group:"Assets", method:"POST",path:"/assets/inventory",      label:"Create asset inventory",    params:[], body:'{\n  "station_id": 1,\n  "asset_type_hex": "00",\n  "asset_make": "Alstom",\n  "count": 18\n}' },
+  { group:"Assets", method:"PUT", path:"/assets/inventory/{inventory_id}", label:"Update asset inventory", params:[{name:"inventory_id",in:"path",default:"1"}], body:'{\n  "count": 20\n}' },
+  { group:"Assets", method:"DELETE",path:"/assets/inventory/{inventory_id}", label:"Delete asset inventory", params:[{name:"inventory_id",in:"path",default:"1"}], body:null },
+
+  // ── Alerts ──────────────────────────────────────────────────────────────
+  { group:"Alerts", method:"GET", path:"/alerts/filters",          label:"Alert summary filters", params:[], body:null },
+  { group:"Alerts", method:"GET", path:"/alerts/live",             label:"Alert live cards",      params:[{name:"zone_id",in:"query",default:""},{name:"division_id",in:"query",default:""},{name:"station_id",in:"query",default:""},{name:"zone",in:"query",default:""},{name:"division",in:"query",default:""},{name:"station",in:"query",default:""},{name:"alert_type",in:"query",default:""},{name:"asset_type_hex",in:"query",default:""},{name:"asset_type",in:"query",default:""},{name:"limit",in:"query",default:"100"}], body:null },
+  { group:"Alerts", method:"GET", path:"/alerts/summary",          label:"Alert summary report",  params:[{name:"zone_id",in:"query",default:""},{name:"division_id",in:"query",default:""},{name:"station_id",in:"query",default:""},{name:"zone",in:"query",default:""},{name:"division",in:"query",default:""},{name:"station",in:"query",default:""},{name:"alert_type",in:"query",default:""},{name:"asset_type_hex",in:"query",default:""},{name:"asset_type",in:"query",default:""},{name:"asset_no",in:"query",default:""},{name:"cause",in:"query",default:""},{name:"from_date",in:"query",default:""},{name:"from_time",in:"query",default:""},{name:"to_date",in:"query",default:""},{name:"to_time",in:"query",default:""},{name:"view",in:"query",default:"table"}], body:null },
+  { group:"Alerts", method:"GET", path:"/alerts/summary/download", label:"Download alert summary CSV", params:[{name:"zone_id",in:"query",default:""},{name:"division_id",in:"query",default:""},{name:"station_id",in:"query",default:""},{name:"alert_type",in:"query",default:""},{name:"asset_type_hex",in:"query",default:""},{name:"asset_no",in:"query",default:""},{name:"cause",in:"query",default:""},{name:"from_date",in:"query",default:""},{name:"from_time",in:"query",default:""},{name:"to_date",in:"query",default:""},{name:"to_time",in:"query",default:""}], body:null },
+  { group:"Alerts", method:"GET", path:"/alerts/history",          label:"Alert history report",  params:[{name:"zone_id",in:"query",default:""},{name:"division_id",in:"query",default:""},{name:"station_id",in:"query",default:""},{name:"zone",in:"query",default:""},{name:"division",in:"query",default:""},{name:"station",in:"query",default:""},{name:"alert_type",in:"query",default:""},{name:"asset_type_hex",in:"query",default:""},{name:"asset_type",in:"query",default:""},{name:"asset_no",in:"query",default:""},{name:"cause",in:"query",default:""},{name:"feedback",in:"query",default:""},{name:"alert_status",in:"query",default:""},{name:"from_date",in:"query",default:""},{name:"from_time",in:"query",default:""},{name:"to_date",in:"query",default:""},{name:"to_time",in:"query",default:""},{name:"limit",in:"query",default:"500"}], body:null },
+  { group:"Alerts", method:"GET", path:"/alerts/history/download", label:"Download alert history CSV", params:[{name:"zone_id",in:"query",default:""},{name:"division_id",in:"query",default:""},{name:"station_id",in:"query",default:""},{name:"alert_type",in:"query",default:""},{name:"asset_type_hex",in:"query",default:""},{name:"asset_no",in:"query",default:""},{name:"cause",in:"query",default:""},{name:"feedback",in:"query",default:""},{name:"alert_status",in:"query",default:""},{name:"from_date",in:"query",default:""},{name:"from_time",in:"query",default:""},{name:"to_date",in:"query",default:""},{name:"to_time",in:"query",default:""},{name:"limit",in:"query",default:"5000"}], body:null },
+  { group:"Alerts", method:"GET", path:"/alerts/events",           label:"List alert events",     params:[{name:"station_id",in:"query",default:""},{name:"alert_type",in:"query",default:""},{name:"asset_type_hex",in:"query",default:""},{name:"asset_no",in:"query",default:""},{name:"cause",in:"query",default:""},{name:"limit",in:"query",default:"100"}], body:null },
+  { group:"Alerts", method:"POST",path:"/alerts/events",           label:"Create alert event",    params:[], body:'{\n  "station_id": 1,\n  "alert_type": "Failure",\n  "asset_type_hex": "00",\n  "asset_no": "PT-103",\n  "cause": "PT-OBS",\n  "alert_status": "Active",\n  "feedback": "F",\n  "acknowledged": true,\n  "remark": "Created from API tester",\n  "alert_time": "2026-05-31T17:18:18"\n}' },
+  { group:"Alerts", method:"POST",path:"/alerts/{event_id}/feedback", label:"Update alert feedback", params:[{name:"event_id",in:"path",default:"1"}], body:'{\n  "feedback": "T"\n}' },
+  { group:"Alerts", method:"POST",path:"/alerts/{event_id}/remark", label:"Update alert remark", params:[{name:"event_id",in:"path",default:"1"}], body:'{\n  "remark": "Checked by maintainer"\n}' },
+  { group:"Alerts", method:"POST",path:"/alerts/{event_id}/acknowledge", label:"Acknowledge live alert", params:[{name:"event_id",in:"path",default:"1"}], body:null },
+  { group:"Alerts", method:"POST",path:"/alerts/{event_id}/rectification", label:"Update alert rectification", params:[{name:"event_id",in:"path",default:"1"}], body:'{\n  "alert_status": "Cleared",\n  "maintainer_name": "Ramesh Kumar",\n  "designation": "SSE Signal",\n  "mobile": "9876543210",\n  "remarks": "Fault rectified"\n}' },
+
+  // ── Thresholds ───────────────────────────────────────────────────────────
+  { group:"Thresholds", method:"GET",    path:"/assets/thresholds",             label:"List thresholds",          params:[{name:"asset_type_hex",in:"query",default:""},{name:"station_id",in:"query",default:""}], body:null },
+  { group:"Thresholds", method:"POST",   path:"/assets/thresholds",             label:"Create threshold",         params:[], body:'{\n  "asset_type_hex": "00",\n  "parameter_type_hex": "02",\n  "station_id": null,\n  "warning_high": 9.0,\n  "critical_high": 11.0,\n  "unit": "A",\n  "description": "Point Machine Peak Current threshold"\n}' },
+  { group:"Thresholds", method:"PUT",    path:"/assets/thresholds/{threshold_id}",label:"Update threshold",       params:[{name:"threshold_id",in:"path",default:"1"}], body:'{\n  "warning_high": 10.0,\n  "critical_high": 12.0\n}' },
+  { group:"Thresholds", method:"DELETE", path:"/assets/thresholds/{threshold_id}",label:"Delete threshold",       params:[{name:"threshold_id",in:"path",default:"1"}], body:null },
+  { group:"Thresholds", method:"GET",    path:"/assets/thresholds/resolve/{asset_type_hex}/{parameter_type_hex}", label:"Resolve effective threshold", params:[{name:"asset_type_hex",in:"path",default:"00"},{name:"parameter_type_hex",in:"path",default:"02"},{name:"station_id",in:"query",default:""}], body:null },
+
+  // ── Decode ──────────────────────────────────────────────────────────────
+  { group:"Decode", method:"GET", path:"/decode/stngw/{stngw_id}",            label:"Decode stngw_id",          params:[{name:"stngw_id",in:"path",default:"05011200"}], body:null },
+  { group:"Decode", method:"GET", path:"/decode/para/{para_id}",              label:"Decode para_id",           params:[{name:"para_id",in:"path",default:"00010202"}], body:null },
+  { group:"Decode", method:"GET", path:"/decode/full/{stngw_id}/{para_id}",   label:"Decode full context",      params:[{name:"stngw_id",in:"path",default:"05011200"},{name:"para_id",in:"path",default:"00010202"}], body:null },
+];
+
+// ── State ──────────────────────────────────────────────────────────────────
+let current = null;
+const TOKEN_KEY = 'rdpms_api_tester_token';
+const REFRESH_TOKEN_KEY = 'rdpms_api_tester_refresh_token';
+
+// ── Build sidebar ──────────────────────────────────────────────────────────
+function buildNav() {
+  const nav = document.getElementById('nav');
+  const groups = {};
+  ENDPOINTS.forEach((ep, i) => {
+    if (!groups[ep.group]) groups[ep.group] = [];
+    groups[ep.group].push({ ...ep, _idx: i });
+  });
+
+  for (const [group, eps] of Object.entries(groups)) {
+    const wrap = document.createElement('div');
+    wrap.className = 'nav-group';
+    wrap.innerHTML = `<div class="nav-group-title">${group}</div>`;
+    eps.forEach(ep => {
+      const btn = document.createElement('button');
+      btn.className = 'nav-item';
+      btn.dataset.idx = ep._idx;
+      btn.innerHTML = `<span class="method-badge ${ep.method}">${ep.method}</span>${ep.label}`;
+      btn.addEventListener('click', () => selectEndpoint(ep._idx));
+      wrap.appendChild(btn);
+    });
+    nav.appendChild(wrap);
+  }
+}
+
+// ── Select endpoint ────────────────────────────────────────────────────────
+function selectEndpoint(idx) {
+  current = ENDPOINTS[idx];
+
+  // sidebar highlight
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', +el.dataset.idx === idx);
+  });
+
+  // method display
+  const md = document.getElementById('method-display');
+  md.textContent = current.method;
+  md.className = current.method;
+
+  // title
+  document.getElementById('endpoint-title').textContent = current.path;
+
+  // url
+  buildUrl();
+
+  // params
+  buildParamsGrid();
+
+  // body
+  const bodyEditor = document.getElementById('body-editor');
+  bodyEditor.value = current.body || '';
+
+  // tab visibility
+  const hasBody = ['POST','PUT','PATCH'].includes(current.method);
+  document.querySelectorAll('.req-tab').forEach(t => {
+    t.style.display = t.dataset.tab === 'body' ? (hasBody ? '' : 'none') : '';
+  });
+  if (!hasBody) switchTab('params');
+
+  // clear response
+  clearResponse();
+}
+
+function buildParamsGrid() {
+  const grid = document.getElementById('params-grid');
+  grid.innerHTML = '';
+  const pathParams = (current.params || []).filter(p => p.in === 'path');
+  const queryParams = (current.params || []).filter(p => p.in === 'query');
+  const all = [...pathParams, ...queryParams];
+
+  if (all.length === 0) {
+    grid.innerHTML = '<span style="color:var(--text3);font-size:12px;grid-column:1/-1">No parameters</span>';
+    return;
+  }
+
+  all.forEach(p => {
+    const label = document.createElement('label');
+    label.textContent = `${p.in === 'path' ? '⬟' : '◇'} ${p.name}`;
+    label.style.color = p.in === 'path' ? 'var(--orange)' : 'var(--text2)';
+
+    const input = document.createElement('input');
+    input.id = `param-${p.name}`;
+    input.value = p.default || '';
+    input.placeholder = p.default || '';
+    input.addEventListener('input', buildUrl);
+
+    grid.appendChild(label);
+    grid.appendChild(input);
+  });
+}
+
+function buildUrl() {
+  if (!current) return;
+  let url = current.path;
+  const queryParts = [];
+
+  (current.params || []).forEach(p => {
+    const el = document.getElementById(`param-${p.name}`);
+    const val = el ? el.value.trim() : p.default || '';
+    if (p.in === 'path') {
+      url = url.replace(`{${p.name}}`, val || `{${p.name}}`);
+    } else if (val) {
+      queryParts.push(`${p.name}=${encodeURIComponent(val)}`);
+    }
+  });
+
+  if (queryParts.length) url += '?' + queryParts.join('&');
+  document.getElementById('url-input').value = url;
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.req-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.getElementById('tab-params').style.display = tab === 'params' ? '' : 'none';
+  document.getElementById('tab-body').style.display   = tab === 'body'   ? '' : 'none';
+}
+
+document.querySelectorAll('.req-tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+
+// ── Send request ───────────────────────────────────────────────────────────
+document.getElementById('send-btn').addEventListener('click', sendRequest);
+
+async function sendRequest() {
+  if (!current) return;
+  const base = document.getElementById('base-url').value.replace(/\/$/, '');
+  const path = document.getElementById('url-input').value;
+  const url  = base + path;
+  const btn  = document.getElementById('send-btn');
+  let body = document.getElementById('body-editor').value.trim();
+  body = body.replace('{{refresh_token}}', getRefreshToken());
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+
+  const opts = {
+    method: current.method,
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+  };
+  const token = getToken();
+  if (token) {
+    opts.headers.Authorization = `Bearer ${token}`;
+  }
+  if (body && ['POST','PUT','PATCH'].includes(current.method)) {
+    opts.body = body;
+  }
+
+  const t0 = performance.now();
+  try {
+    const res = await fetch(url, opts);
+    const elapsed = Math.round(performance.now() - t0);
+    let data;
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      data = await res.json();
+    } else {
+      data = await res.text();
+    }
+    maybeSaveToken(data);
+    if (res.ok && current.path === '/auth/logout') setTokens('', '');
+    showResponse(res.status, elapsed, data);
+  } catch (err) {
+    showResponse(0, Math.round(performance.now() - t0), { error: err.message });
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
+}
+
+// ── Auth token ─────────────────────────────────────────────────────────────
+function getToken() {
+  return document.getElementById('auth-token').value.trim();
+}
+
+function getRefreshToken() {
+  return document.getElementById('refresh-token').value.trim();
+}
+
+function setTokens(accessToken, refreshToken = getRefreshToken()) {
+  document.getElementById('auth-token').value = accessToken || '';
+  document.getElementById('refresh-token').value = refreshToken || '';
+  if (accessToken) {
+    localStorage.setItem(TOKEN_KEY, accessToken);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+  if (refreshToken) {
+    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  } else {
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+  }
+  updateAuthStatus();
+}
+
+function maybeSaveToken(data) {
+  if (!data || typeof data !== 'object' || !data.access_token) return;
+  setTokens(data.access_token, data.refresh_token || getRefreshToken());
+}
+
+function updateAuthStatus() {
+  const token = getToken();
+  const refreshToken = getRefreshToken();
+  const status = document.getElementById('auth-status');
+  status.textContent = token && refreshToken
+    ? 'Access and refresh tokens saved'
+    : token
+      ? 'Access token saved'
+      : 'No token saved';
+  status.style.color = token ? 'var(--green)' : 'var(--text3)';
+}
+
+document.getElementById('auth-token').addEventListener('input', updateAuthStatus);
+document.getElementById('refresh-token').addEventListener('input', updateAuthStatus);
+document.getElementById('save-token-btn').addEventListener('click', () => setTokens(getToken(), getRefreshToken()));
+document.getElementById('clear-token-btn').addEventListener('click', () => setTokens('', ''));
+
+// ── Response display ───────────────────────────────────────────────────────
+function showResponse(status, ms, data) {
+  const badge = document.getElementById('status-badge');
+  const timeEl = document.getElementById('response-time');
+  const copyBtn = document.getElementById('copy-btn');
+  const body = document.getElementById('response-body');
+
+  badge.style.display = '';
+  timeEl.style.display = '';
+  copyBtn.style.display = '';
+
+  badge.textContent = status === 0 ? 'Network Error' : `${status} ${statusText(status)}`;
+  badge.className = status >= 200 && status < 300 ? 'status-ok' : status >= 400 ? 'status-err' : 'status-warn';
+
+  timeEl.textContent = `${ms}ms`;
+
+  body.className = '';
+  if (status === 204) {
+    body.textContent = '// 204 No Content';
+    return;
+  }
+
+  const json = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  body.innerHTML = highlight(json);
+
+  copyBtn.onclick = () => {
+    navigator.clipboard.writeText(json);
+    copyBtn.textContent = 'Copied!';
+    setTimeout(() => copyBtn.textContent = 'Copy', 1500);
+  };
+}
+
+function clearResponse() {
+  document.getElementById('status-badge').style.display = 'none';
+  document.getElementById('response-time').style.display = 'none';
+  document.getElementById('copy-btn').style.display = 'none';
+  const body = document.getElementById('response-body');
+  body.className = 'empty';
+  body.textContent = 'Hit Send to see the response';
+}
+
+function statusText(s) {
+  const map = {200:'OK',201:'Created',202:'Accepted',204:'No Content',400:'Bad Request',401:'Unauthorized',403:'Forbidden',404:'Not Found',409:'Conflict',422:'Unprocessable',500:'Server Error'};
+  return map[s] || '';
+}
+
+// ── JSON syntax highlight ──────────────────────────────────────────────────
+function highlight(json) {
+  return json
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, m => {
+      if (/^"/.test(m)) {
+        if (/:$/.test(m)) return `<span class="j-key">${m}</span>`;
+        return `<span class="j-str">${m}</span>`;
+      }
+      if (/true|false/.test(m)) return `<span class="j-bool">${m}</span>`;
+      if (/null/.test(m))       return `<span class="j-null">${m}</span>`;
+      return `<span class="j-num">${m}</span>`;
+    });
+}
+
+// ── URL input live edit ────────────────────────────────────────────────────
+document.getElementById('url-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendRequest();
+});
+
+// ── Init ───────────────────────────────────────────────────────────────────
+setTokens(localStorage.getItem(TOKEN_KEY) || '', localStorage.getItem(REFRESH_TOKEN_KEY) || '');
+buildNav();
+selectEndpoint(0);
+</script>
+</body>
+</html>
