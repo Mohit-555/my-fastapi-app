@@ -56,3 +56,20 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")
     return user
+
+def get_current_user_from_token(token: str, db: Session):
+    """Validate a raw token string — used for SSE where headers aren't available."""
+    from app.models.models import User
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        employee_id: str = payload.get("sub")
+        token_type: str = payload.get("type")
+        if not employee_id or token_type != "access":
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    user = db.query(User).filter(User.employee_id == employee_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    return user

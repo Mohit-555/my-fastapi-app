@@ -404,10 +404,10 @@ async def _sse_event_generator(station_id: int, asset_type_hexes: Optional[List[
 
         await asyncio.sleep(poll_interval)
 
-
 @router.get("/live/{station_id}")
 async def live_telemetry_stream(
     station_id: int,
+    token: str = Query(..., description="Access token (required because EventSource cannot send headers)"),
     asset_type_hex: Optional[str] = Query(
         None,
         description="Comma-separated asset_type_hex values to subscribe to, e.g. '00' or '00,20'",
@@ -419,7 +419,7 @@ async def live_telemetry_stream(
     Server-Sent Events stream for live telemetry at a station.
 
     Connect with EventSource in the browser:
-      const es = new EventSource('/telemetry/live/12?asset_type_hex=00&poll_interval=5');
+      const es = new EventSource('/telemetry/live/12?token=YOUR_TOKEN&asset_type_hex=00&poll_interval=5');
       es.onmessage = (e) => { const d = JSON.parse(e.data); ... };
 
     Each event payload:
@@ -434,6 +434,9 @@ async def live_telemetry_stream(
       "threshold_critical_high": 11.0
     }
     """
+    from app.auth_utils import get_current_user_from_token
+    get_current_user_from_token(token, db)   # validates token — raises 401 if invalid
+
     station = db.query(Station).filter(Station.id == station_id).first()
     if not station:
         raise HTTPException(status_code=404, detail=f"Station {station_id} not found")
@@ -448,7 +451,7 @@ async def live_telemetry_stream(
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",    # disable nginx buffering
+            "X-Accel-Buffering": "no",
         },
     )
 # ── Telemetry History ─────────────────────────────────────────────────────────

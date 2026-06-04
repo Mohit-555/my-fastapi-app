@@ -276,6 +276,11 @@ class AssetDetailResponse(BaseModel):
     total: int
     rows: List[AssetDetailRow]
 
+class DropdownOption(BaseModel):
+    id: int
+    label: str
+    code: str
+    hex_id: str
 
 # ─── Alert Summary ────────────────────────────────────────────────────────────
 
@@ -543,16 +548,12 @@ class ParaDecodeResponse(BaseModel):
 
 # ─── Dropdown ─────────────────────────────────────────────────────────────────
 
-class DropdownOption(BaseModel):
-    id: int
-    label: str
-    code: str
-    hex_id: str
 
 
 # Forward refs
 ZoneWithDivisions.model_rebuild()
 DivisionWithStations.model_rebuild()
+AlertFiltersResponse.model_rebuild()
 # ─── Auth ─────────────────────────────────────────────────────────────────────
 
 class UserRegisterRequest(BaseModel):
