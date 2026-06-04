@@ -160,7 +160,41 @@ class TelemetryQueryResponse(BaseModel):
     to_time: Optional[str]
     series: List[TelemetrySeriesResponse]
 
+# ─── Telemetry History ────────────────────────────────────────────────────────
 
+class TelemetryHistoryRow(BaseModel):
+    """One timestamp row in the history table — values keyed by column label."""
+    timestamp: str                          # e.g. "2026-06-04T12:10:00"
+    asset_number_hex: str                   # e.g. "01"
+    stngw_id: str
+    values: dict                            # e.g. {"I_AVG (A)": 4.3, "I_PEAK (A)": 5.9}
+
+
+class TelemetryHistoryColumn(BaseModel):
+    """Metadata for one column in the history table."""
+    key: str                                # dict key used in TelemetryHistoryRow.values
+    parameter_name: str                     # e.g. "Avg Current"
+    parameter_unit: str                     # e.g. "A"
+    parameter_type_hex: str                 # e.g. "01"
+    threshold_warning_low: Optional[float] = None
+    threshold_warning_high: Optional[float] = None
+    threshold_critical_low: Optional[float] = None
+    threshold_critical_high: Optional[float] = None
+
+
+class TelemetryHistoryResponse(BaseModel):
+    station_id: Optional[int]
+    station_name: Optional[str]
+    asset_type_hex: Optional[str]
+    asset_number: Optional[str]
+    from_time: Optional[str]
+    to_time: Optional[str]
+    columns: List[TelemetryHistoryColumn]   # ordered list of columns for table headers
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    rows: List[TelemetryHistoryRow]
 # ─── Assets ───────────────────────────────────────────────────────────────────
 
 class AssetTypeOption(BaseModel):

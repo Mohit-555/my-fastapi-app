@@ -4,6 +4,8 @@ Telemetry query router — supports the dashboard's filter bar:
 
 Also provides a Server-Sent Events (SSE) endpoint for the LIVE indicator.
 """
+import csv
+import io
 import asyncio
 import json
 from datetime import datetime, timedelta
@@ -16,7 +18,10 @@ from sqlalchemy import and_
 
 from app.database import get_db, SessionLocal
 from app.models.models import Telemetry, Gateway, Station, Division, Zone, Threshold
-from app.models.schemas import TelemetryQueryResponse, TelemetrySeriesResponse, TelemetryPoint
+from app.models.schemas import (
+    TelemetryQueryResponse, TelemetrySeriesResponse, TelemetryPoint,
+    TelemetryHistoryResponse, TelemetryHistoryColumn, TelemetryHistoryRow,
+)
 from app.constants import ASSET_TYPE_MAP, PARAMETER_TYPE_MAP, PARAMETER_REPR_MAP
 
 router = APIRouter(prefix="/telemetry", tags=["Telemetry Query"])
@@ -445,4 +450,291 @@ async def live_telemetry_stream(
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",    # disable nginx buffering
         },
+    )
+# ── Telemetry History ─────────────────────────────────────────────────────────
+
+def _fetch_history_data(
+    db: Session,
+    zone_id: Optional[int],
+    division_id: Optional[int],
+    station_id: Optional[int],
+    asset_type_hex: Optional[str],
+    asset_number_hex: Optional[str],
+    parameter_type_hex: Optional[str],
+    from_time: datetime,
+    to_time: datetime,
+    limit: int = 10000,
+):
+    """
+    Shared data-fetch logic for history table and CSV download.
+    Returns (gateway_map, grouped_rows, asset_type_hexes_list).
+    grouped_rows: dict[(gateway_id, para_id)] → List[Telemetry] sorted asc by received_at
+    """
+    station_ids = _resolve_station_ids(db, zone_id, division_id, station_id)
+
+    gw_query = db.query(Gateway)
+    if station_ids is not None:
+        if not station_ids:
+            return {}, {}, []
+        gw_query = gw_query.filter(Gateway.station_id.in_(station_ids))
+
+    gateways = gw_query.all()
+    if not gateways:
+        return {}, {}, []
+
+    gateway_ids = [g.id for g in gateways]
+    gateway_map = {g.id: g for g in gateways}
+
+    asset_type_hexes = (
+        [h.strip().upper() for h in asset_type_hex.split(",")]
+        if asset_type_hex else None
+    )
+
+    rows_all = (
+        db.query(Telemetry)
+        .filter(
+            Telemetry.gateway_id.in_(gateway_ids),
+            Telemetry.received_at >= from_time,
+            Telemetry.received_at <= to_time,
+        )
+        .order_by(Telemetry.received_at.asc())
+        .limit(limit)
+        .all()
+    )
+
+    grouped: dict[tuple, list] = {}
+    for row in rows_all:
+        pid = row.para_id
+        if len(pid) != 8:
+            continue
+        at_hex = pid[0:2]
+        an_hex = pid[2:4]
+        pt_hex = pid[4:6]
+
+        if asset_type_hexes and at_hex not in asset_type_hexes:
+            continue
+        if asset_number_hex and an_hex != asset_number_hex.upper():
+            continue
+        if parameter_type_hex and pt_hex != parameter_type_hex.upper():
+            continue
+
+        key = (row.gateway_id, pid)
+        grouped.setdefault(key, []).append(row)
+
+    return gateway_map, grouped, asset_type_hexes
+
+
+def _build_history_columns_and_rows(
+    db: Session,
+    gateway_map: dict,
+    grouped: dict,
+    station_id: Optional[int],
+) -> tuple[list[TelemetryHistoryColumn], list[TelemetryHistoryRow]]:
+    """
+    Pivot grouped telemetry into history table columns and rows.
+
+    Columns  = one per unique parameter_type (e.g. I_AVG, I_PEAK, V_BATT …)
+    Rows     = one per (timestamp, asset_number_hex, stngw_id)
+    """
+    # ── Build columns from discovered para_ids ────────────────────────────────
+    # key: parameter_type_hex → TelemetryHistoryColumn
+    col_map: dict[str, TelemetryHistoryColumn] = {}
+    for (gw_id, pid) in grouped:
+        pt_hex = pid[4:6]
+        if pt_hex in col_map:
+            continue
+        param_info = PARAMETER_TYPE_MAP.get(pt_hex)
+        if not param_info:
+            continue
+        p_name = param_info[1]
+        p_unit = param_info[2]
+        col_key = f"{p_name} ({p_unit})" if p_unit else p_name
+
+        gw = gateway_map[gw_id]
+        at_hex = pid[0:2]
+        threshold = _get_threshold(db, at_hex, pt_hex, gw.station_id or station_id)
+
+        col_map[pt_hex] = TelemetryHistoryColumn(
+            key=col_key,
+            parameter_name=p_name,
+            parameter_unit=p_unit,
+            parameter_type_hex=pt_hex,
+            threshold_warning_low=threshold.warning_low if threshold else None,
+            threshold_warning_high=threshold.warning_high if threshold else None,
+            threshold_critical_low=threshold.critical_low if threshold else None,
+            threshold_critical_high=threshold.critical_high if threshold else None,
+        )
+
+    columns = sorted(col_map.values(), key=lambda c: c.parameter_type_hex)
+
+    # ── Pivot rows ────────────────────────────────────────────────────────────
+    # Each unique (timestamp_str, asset_number_hex, stngw_id) becomes one row.
+    # row_index: (ts, an_hex, stngw_id) → {col_key: value}
+    row_index: dict[tuple, dict] = {}
+
+    for (gw_id, pid), telem_rows in grouped.items():
+        pt_hex = pid[4:6]
+        an_hex = pid[2:4]
+        if pt_hex not in col_map:
+            continue
+        col_key = col_map[pt_hex].key
+        gw = gateway_map[gw_id]
+
+        for row in telem_rows:
+            ts = row.prt or row.received_at.isoformat()
+            index_key = (ts, an_hex, gw.stngw_id)
+            if index_key not in row_index:
+                row_index[index_key] = {}
+            row_index[index_key][col_key] = row.prv
+
+    # Sort by timestamp ascending
+    history_rows = [
+        TelemetryHistoryRow(
+            timestamp=ts,
+            asset_number_hex=an_hex,
+            stngw_id=stngw_id,
+            values=vals,
+        )
+        for (ts, an_hex, stngw_id), vals in sorted(row_index.items(), key=lambda x: x[0][0], reverse=True)
+    ]
+
+    return columns, history_rows
+
+
+@router.get("/history", response_model=TelemetryHistoryResponse)
+def get_telemetry_history(
+    zone_id:          Optional[int]      = Query(None),
+    division_id:      Optional[int]      = Query(None),
+    station_id:       Optional[int]      = Query(None),
+    asset_type_hex:   Optional[str]      = Query(None, description="Comma-separated, e.g. '00' or '2D,2E,2F'"),
+    asset_number_hex: Optional[str]      = Query(None, description="Asset number hex, e.g. '01'"),
+    parameter_type_hex: Optional[str]    = Query(None, description="Filter to one parameter type"),
+    from_time:        Optional[datetime] = Query(None, description="ISO 8601 start time"),
+    to_time:          Optional[datetime] = Query(None, description="ISO 8601 end time. Defaults to now."),
+    page:             int                = Query(1, ge=1),
+    page_size:        int                = Query(50, ge=1, le=500),
+    db:               Session            = Depends(get_db),
+):
+    """
+    Telemetry History — paginated, pivoted table rows.
+
+    Returns one row per timestamp with all parameter values as columns.
+    Used by the Telemetry History screen with date/time range pickers.
+
+    Example:
+      GET /telemetry/history?station_id=1&asset_type_hex=00&from_time=2026-06-04T10:00:00
+    """
+    now = datetime.utcnow()
+    if from_time is None:
+        from_time = now - timedelta(hours=24)
+    if to_time is None:
+        to_time = now
+
+    gateway_map, grouped, _ = _fetch_history_data(
+        db, zone_id, division_id, station_id,
+        asset_type_hex, asset_number_hex, parameter_type_hex,
+        from_time, to_time,
+    )
+
+    if not grouped:
+        stn_name = None
+        if station_id:
+            stn = db.query(Station).filter(Station.id == station_id).first()
+            stn_name = stn.station_name if stn else None
+        return TelemetryHistoryResponse(
+            station_id=station_id,
+            station_name=stn_name,
+            asset_type_hex=asset_type_hex,
+            asset_number=asset_number_hex,
+            from_time=from_time.isoformat(),
+            to_time=to_time.isoformat(),
+            columns=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            total_pages=0,
+            rows=[],
+        )
+
+    columns, all_rows = _build_history_columns_and_rows(db, gateway_map, grouped, station_id)
+
+    total = len(all_rows)
+    total_pages = (total + page_size - 1) // page_size if total else 0
+    offset = (page - 1) * page_size
+    paginated_rows = all_rows[offset: offset + page_size]
+
+    stn_name = None
+    if station_id:
+        stn = db.query(Station).filter(Station.id == station_id).first()
+        stn_name = stn.station_name if stn else None
+
+    return TelemetryHistoryResponse(
+        station_id=station_id,
+        station_name=stn_name,
+        asset_type_hex=asset_type_hex,
+        asset_number=asset_number_hex,
+        from_time=from_time.isoformat(),
+        to_time=to_time.isoformat(),
+        columns=columns,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        rows=paginated_rows,
+    )
+
+
+@router.get("/history/download")
+def download_telemetry_history(
+    zone_id:          Optional[int]      = Query(None),
+    division_id:      Optional[int]      = Query(None),
+    station_id:       Optional[int]      = Query(None),
+    asset_type_hex:   Optional[str]      = Query(None),
+    asset_number_hex: Optional[str]      = Query(None),
+    parameter_type_hex: Optional[str]    = Query(None),
+    from_time:        Optional[datetime] = Query(None),
+    to_time:          Optional[datetime] = Query(None),
+    db:               Session            = Depends(get_db),
+):
+    """
+    Download Telemetry History as CSV.
+    Same filters as GET /telemetry/history — no pagination, returns all rows up to 20,000.
+
+    Used by the Download button on the Telemetry History screen.
+    """
+    from datetime import date as date_type
+    now = datetime.utcnow()
+    if from_time is None:
+        from_time = now - timedelta(hours=24)
+    if to_time is None:
+        to_time = now
+
+    gateway_map, grouped, _ = _fetch_history_data(
+        db, zone_id, division_id, station_id,
+        asset_type_hex, asset_number_hex, parameter_type_hex,
+        from_time, to_time,
+        limit=20000,
+    )
+
+    columns, all_rows = _build_history_columns_and_rows(db, gateway_map, grouped, station_id)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Header row
+    writer.writerow(["DATE & TIME", "ASSET NO.", "GATEWAY"] + [c.key for c in columns])
+
+    # Data rows
+    for row in all_rows:
+        writer.writerow(
+            [row.timestamp, row.asset_number_hex, row.stngw_id]
+            + [row.values.get(c.key, "") for c in columns]
+        )
+
+    output.seek(0)
+    filename = f"telemetry_history_{date_type.today().isoformat()}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
