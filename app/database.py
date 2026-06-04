@@ -12,10 +12,18 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
 
+    @property
+    def database_url(self) -> str:
+        # Fix postgres:// -> postgresql:// for SQLAlchemy
+        url = self.DATABASE_URL
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
+        return url
+
 
 settings = Settings()
 
-engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
+engine = create_engine(settings.database_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
