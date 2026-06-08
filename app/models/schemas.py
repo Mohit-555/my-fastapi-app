@@ -567,6 +567,21 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
 
+class LoginUserResponse(BaseModel):
+    id: int
+    employee_id: str
+    fullName: str
+    role: Optional[int] = None
+
+class LoginDataResponse(BaseModel):
+    token: str
+    user: LoginUserResponse
+
+class LoginResponse(BaseModel):
+    status: bool
+    message: str
+    data: LoginDataResponse
+
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
 

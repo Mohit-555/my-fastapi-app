@@ -7,7 +7,7 @@ from app.models.models import RefreshToken, User
 from app.models.schemas import (
     UserRegisterRequest, UserLoginRequest,
     LogoutRequest, LogoutResponse, RefreshTokenRequest,
-    TokenResponse, UserResponse
+    LoginResponse, TokenResponse, UserResponse
 )
 from app.auth_utils import (
     hash_password, verify_password, create_access_token, create_refresh_token,
@@ -71,7 +71,7 @@ def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
     return user
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=LoginResponse)
 def login(payload: UserLoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.employee_id == payload.employee_id).first()
 
@@ -81,7 +81,20 @@ def login(payload: UserLoginRequest, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account is deactivated. Contact admin.")
 
-    return _issue_tokens(user, db, payload.remember_me)
+    tokens = _issue_tokens(user, db, payload.remember_me)
+    return {
+        "status": True,
+        "message": "Login successful",
+        "data": {
+            "token": tokens.access_token,
+            "user": {
+                "id": user.id,
+                "employee_id": user.employee_id,
+                "fullName": user.full_name,
+                "role": user.role_id,
+            },
+        },
+    }
 
 
 @router.post("/refresh", response_model=TokenResponse)
