@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 
 from app.database import get_db
-from app.models.models import Menu, RefreshToken, User
+from app.models.models import RefreshToken, User
 from app.models.schemas import (
     UserRegisterRequest, UserLoginRequest,
     LogoutRequest, LogoutResponse, RefreshTokenRequest,
@@ -17,55 +17,6 @@ from app.auth_utils import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
-
-
-def _build_menu_tree(user: User, db: Session) -> list[dict]:
-    if not user.role:
-        return []
-
-    assigned_menus = [
-        rm.menu
-        for rm in user.role.role_menus
-        if rm.menu and rm.menu.is_active
-    ]
-    parent_slugs = {menu.parent_slug for menu in assigned_menus if menu.parent_slug}
-    assigned_slugs = {menu.slug for menu in assigned_menus}
-
-    missing_parents = []
-    if parent_slugs:
-        missing_parents = (
-            db.query(Menu)
-            .filter(
-                Menu.slug.in_(parent_slugs - assigned_slugs),
-                Menu.is_active == True,
-            )
-            .all()
-        )
-
-    menus = {menu.slug: menu for menu in [*assigned_menus, *missing_parents]}
-    children_by_parent: dict[str, list[Menu]] = {}
-    roots: list[Menu] = []
-
-    for menu in menus.values():
-        if menu.parent_slug:
-            children_by_parent.setdefault(menu.parent_slug, []).append(menu)
-        else:
-            roots.append(menu)
-
-    def sort_key(menu: Menu):
-        return (menu.sort_order or 0, menu.name)
-
-    def as_node(menu: Menu) -> dict:
-        children = sorted(children_by_parent.get(menu.slug, []), key=sort_key)
-        return {
-            "label": menu.name,
-            "slug": menu.slug,
-            "path": menu.path,
-            "icon": menu.icon,
-            "children": [as_node(child) for child in children],
-        }
-
-    return [as_node(menu) for menu in sorted(roots, key=sort_key)]
 
 
 def _issue_tokens(user: User, db: Session, remember_me: bool = False) -> TokenResponse:
@@ -169,7 +120,6 @@ def logout(payload: LogoutRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserResponse)
 def get_me(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     return {
         "id": current_user.id,
@@ -184,5 +134,4 @@ def get_me(
         "reporting_officer_id": current_user.reporting_officer_id,
         "is_active": current_user.is_active,
         "created_at": current_user.created_at,
-        "menus": _build_menu_tree(current_user, db),
     }

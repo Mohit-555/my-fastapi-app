@@ -576,13 +576,6 @@ class LogoutRequest(BaseModel):
 class LogoutResponse(BaseModel):
     message: str
 
-class UserMenuResponse(BaseModel):
-    label: str
-    slug: str
-    path: str
-    icon: Optional[str] = None
-    children: List["UserMenuResponse"] = Field(default_factory=list)
-
 class UserResponse(BaseModel):
     id: int
     full_name: str
@@ -596,7 +589,6 @@ class UserResponse(BaseModel):
     reporting_officer_id: Optional[int] = None
     is_active: bool
     created_at: datetime
-    menus: List[UserMenuResponse] = Field(default_factory=list)
     class Config:
         from_attributes = True
 # ─── RBAC ─────────────────────────────────────────────────────────────────────
