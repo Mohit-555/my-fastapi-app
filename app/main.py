@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine
 from app.auth_utils import get_current_user
 from app.models.models import Base
-from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts
+from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin
 from app.routers import auth
 Base.metadata.create_all(bind=engine)
 
@@ -35,6 +35,8 @@ app.include_router(assets.router, dependencies=protected_route)
 # ── Alerts summary, filters, and event records ────────────────────────────────
 app.include_router(alerts.router, dependencies=protected_route)
 
+# Add after the alerts router line:
+app.include_router(admin.router, dependencies=protected_route)
 # ── Gateway ingestion ─────────────────────────────────────────────────────────
 app.include_router(gateway.router, dependencies=protected_route)
 

@@ -172,6 +172,7 @@ class User(Base):
     full_name = Column(String, nullable=False)
     employee_id = Column(String(50), unique=True, nullable=False, index=True)
     designation = Column(String(50), nullable=False)
+    role_id = Column(Integer, ForeignKey("roles.id"), nullable=True, index=True)  # ← NEW
     zone_id = Column(Integer, ForeignKey("zones.id"), nullable=True)
     division_id = Column(Integer, ForeignKey("divisions.id"), nullable=True)
     mobile_number = Column(String(15), nullable=False)
@@ -181,9 +182,9 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.now(UTC))
 
+    role = relationship("Role", back_populates="users")                           # ← NEW
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
-
-
+    
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
 
@@ -196,3 +197,61 @@ class RefreshToken(Base):
     created_at = Column(DateTime, default=datetime.now(UTC))
 
     user = relationship("User", back_populates="refresh_tokens")
+
+# ── RBAC ──────────────────────────────────────────────────────────────────────
+
+class Menu(Base):
+    """
+    Represents a sidebar menu item / page in the application.
+    e.g. Dashboard, Alerts > Alert Live, Telemetry > Live, etc.
+    """
+    __tablename__ = "menus"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)          # e.g. "Alert Live"
+    slug = Column(String(100), unique=True, nullable=False)  # e.g. "alerts.live"
+    parent_slug = Column(String(100), nullable=True)    # e.g. "alerts" for sub-items
+    icon = Column(String(50), nullable=True)            # optional icon name
+    sort_order = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+
+    role_menus = relationship("RoleMenu", back_populates="menu", cascade="all, delete-orphan")
+
+
+class Role(Base):
+    """
+    User role — maps to the RDPMS hierarchy:
+    Technician → JE → SE → ADRM → DRM → Admin
+    """
+    __tablename__ = "roles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(50), unique=True, nullable=False)   # e.g. "JE"
+    display_name = Column(String(100), nullable=False)       # e.g. "Junior Engineer"
+    level = Column(Integer, nullable=False, default=0)       # higher = more access
+    description = Column(String(200), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now(UTC))
+
+    role_menus = relationship("RoleMenu", back_populates="role", cascade="all, delete-orphan")
+    users = relationship("User", back_populates="role")
+
+
+class RoleMenu(Base):
+    """
+    Many-to-many: which menus a role can access.
+    Also stores permission level: view / edit / full.
+    """
+    __tablename__ = "role_menus"
+
+    id = Column(Integer, primary_key=True, index=True)
+    role_id = Column(Integer, ForeignKey("roles.id"), nullable=False, index=True)
+    menu_id = Column(Integer, ForeignKey("menus.id"), nullable=False, index=True)
+    permission = Column(String(20), nullable=False, default="view")  # view / edit / full
+
+    role = relationship("Role", back_populates="role_menus")
+    menu = relationship("Menu", back_populates="role_menus")
+
+    __table_args__ = (
+        UniqueConstraint("role_id", "menu_id", name="uq_role_menu"),
+    )

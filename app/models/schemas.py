@@ -601,3 +601,124 @@ class UserResponse(BaseModel):
     created_at: datetime
     class Config:
         from_attributes = True
+# ─── RBAC ─────────────────────────────────────────────────────────────────────
+
+class MenuBase(BaseModel):
+    name: str
+    slug: str
+    parent_slug: Optional[str] = None
+    icon: Optional[str] = None
+    sort_order: int = 0
+    is_active: bool = True
+
+class MenuCreate(MenuBase):
+    pass
+
+class MenuUpdate(BaseModel):
+    name: Optional[str] = None
+    parent_slug: Optional[str] = None
+    icon: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+class MenuResponse(MenuBase):
+    id: int
+    class Config:
+        from_attributes = True
+
+
+class RoleMenuAssign(BaseModel):
+    menu_id: int
+    permission: str = "view"   # view / edit / full
+
+class RoleMenuResponse(BaseModel):
+    menu_id: int
+    menu_name: str
+    menu_slug: str
+    parent_slug: Optional[str]
+    permission: str
+    class Config:
+        from_attributes = True
+
+
+class RoleBase(BaseModel):
+    name: str
+    display_name: str
+    level: int = 0
+    description: Optional[str] = None
+    is_active: bool = True
+
+class RoleCreate(RoleBase):
+    menus: Optional[List[RoleMenuAssign]] = []   # assign menus at creation time
+
+class RoleUpdate(BaseModel):
+    display_name: Optional[str] = None
+    level: Optional[int] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class RoleResponse(RoleBase):
+    id: int
+    created_at: datetime
+    menus: List[RoleMenuResponse] = []
+    class Config:
+        from_attributes = True
+
+
+# ─── User Management ──────────────────────────────────────────────────────────
+
+class UserUpdateRequest(BaseModel):
+    full_name: Optional[str] = None
+    designation: Optional[str] = None
+    role_id: Optional[int] = None
+    zone_id: Optional[int] = None
+    division_id: Optional[int] = None
+    mobile_number: Optional[str] = None
+    email: Optional[str] = None
+    reporting_officer_id: Optional[int] = None
+    is_active: Optional[bool] = None
+
+class UserDetailResponse(BaseModel):
+    id: int
+    full_name: str
+    employee_id: str
+    designation: str
+    role_id: Optional[int]
+    role_name: Optional[str]
+    role_display_name: Optional[str]
+    zone_id: Optional[int]
+    division_id: Optional[int]
+    mobile_number: str
+    email: str
+    reporting_officer_id: Optional[int]
+    is_active: bool
+    created_at: datetime
+    menus: List[RoleMenuResponse] = []   # menus this user can access via their role
+    class Config:
+        from_attributes = True
+
+class UserListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    rows: List[UserDetailResponse]
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_new_password: str
+
+# Update UserRegisterRequest to include role_id
+class UserRegisterRequest(BaseModel):
+    full_name: str
+    employee_id: str
+    designation: str
+    role_id: Optional[int] = None        # ← NEW
+    zone_id: Optional[int] = None
+    division_id: Optional[int] = None
+    mobile_number: str
+    email: str
+    password: str
+    confirm_password: str
+    reporting_officer_id: Optional[int] = None

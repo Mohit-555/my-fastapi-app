@@ -54,15 +54,16 @@ def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = User(
-        full_name=payload.full_name,
-        employee_id=payload.employee_id,
-        designation=payload.designation,
-        zone_id=payload.zone_id,
-        division_id=payload.division_id,
-        mobile_number=payload.mobile_number,
-        email=payload.email,
-        hashed_password=hash_password(payload.password),
-        reporting_officer_id=payload.reporting_officer_id,
+    full_name=payload.full_name,
+    employee_id=payload.employee_id,
+    designation=payload.designation,
+    role_id=payload.role_id,        # ← ADD THIS LINE
+    zone_id=payload.zone_id,
+    division_id=payload.division_id,
+    mobile_number=payload.mobile_number,
+    email=payload.email,
+    hashed_password=hash_password(payload.password),
+    reporting_officer_id=payload.reporting_officer_id,
     )
     db.add(user)
     db.commit()
