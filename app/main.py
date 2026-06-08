@@ -1,3 +1,8 @@
+import os
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -6,6 +11,19 @@ from app.auth_utils import get_current_user
 from app.models.models import Base
 from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin
 from app.routers import auth
+
+
+def run_database_migrations() -> None:
+    if os.getenv("SKIP_AUTO_MIGRATIONS") == "1":
+        return
+
+    project_root = Path(__file__).resolve().parent.parent
+    alembic_cfg = Config(str(project_root / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(project_root / "alembic"))
+    command.upgrade(alembic_cfg, "head")
+
+
+run_database_migrations()
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
