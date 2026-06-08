@@ -6,11 +6,12 @@ from alembic.config import Config
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import engine
+from app.database import SessionLocal, engine
 from app.auth_utils import get_current_user
 from app.models.models import Base
 from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin
 from app.routers import auth
+from app.rbac_defaults import ensure_default_menus
 
 
 def run_database_migrations() -> None:
@@ -25,6 +26,8 @@ def run_database_migrations() -> None:
 
 run_database_migrations()
 Base.metadata.create_all(bind=engine)
+with SessionLocal() as db:
+    ensure_default_menus(db)
 
 app = FastAPI(
     title="RDPMS API",

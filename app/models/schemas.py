@@ -622,6 +622,11 @@ class MenuResponse(MenuBase):
         from_attributes = True
 
 
+class MenuTreeResponse(MenuResponse):
+    label: str
+    children: List["MenuTreeResponse"] = Field(default_factory=list)
+
+
 class RoleMenuAssign(BaseModel):
     menu_id: int
     permission: str = "view"   # view / edit / full

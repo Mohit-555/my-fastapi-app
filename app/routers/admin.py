@@ -20,12 +20,13 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.models import Menu, Role, RoleMenu, User
 from app.models.schemas import (
-    MenuCreate, MenuUpdate, MenuResponse,
+    MenuCreate, MenuUpdate, MenuResponse, MenuTreeResponse,
     RoleCreate, RoleUpdate, RoleResponse, RoleMenuAssign, RoleMenuResponse,
     UserDetailResponse, UserListResponse, UserUpdateRequest,
     ChangePasswordRequest,
 )
 from app.auth_utils import hash_password, verify_password
+from app.rbac_defaults import ensure_default_menus
 
 router = APIRouter(prefix="/admin", tags=["Admin — User Management & RBAC"])
 
@@ -65,6 +66,36 @@ def _build_user_detail(user: User) -> UserDetailResponse:
     )
 
 
+def _build_menu_tree(menus: List[Menu]) -> List[MenuTreeResponse]:
+    children_by_parent: dict[str, list[Menu]] = {}
+    roots: list[Menu] = []
+
+    for menu in menus:
+        if menu.parent_slug:
+            children_by_parent.setdefault(menu.parent_slug, []).append(menu)
+        else:
+            roots.append(menu)
+
+    def sort_key(menu: Menu):
+        return (menu.sort_order or 0, menu.name)
+
+    def as_node(menu: Menu) -> MenuTreeResponse:
+        children = sorted(children_by_parent.get(menu.slug, []), key=sort_key)
+        return MenuTreeResponse(
+            id=menu.id,
+            name=menu.name,
+            label=menu.name,
+            slug=menu.slug,
+            parent_slug=menu.parent_slug,
+            icon=menu.icon,
+            sort_order=menu.sort_order or 0,
+            is_active=menu.is_active,
+            children=[as_node(child) for child in children],
+        )
+
+    return [as_node(menu) for menu in sorted(roots, key=sort_key)]
+
+
 # ── Menus ─────────────────────────────────────────────────────────────────────
 
 @router.get("/menus", response_model=List[MenuResponse])
@@ -77,6 +108,26 @@ def list_menus(
     if not include_inactive:
         q = q.filter(Menu.is_active == True)
     return q.order_by(Menu.sort_order, Menu.name).all()
+
+
+@router.get("/menus/tree", response_model=List[MenuTreeResponse])
+def list_menu_tree(
+    include_inactive: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    """List menu items in the nested shape used by the frontend sidebar and role UI."""
+    q = db.query(Menu)
+    if not include_inactive:
+        q = q.filter(Menu.is_active == True)
+    menus = q.order_by(Menu.sort_order, Menu.name).all()
+    return _build_menu_tree(menus)
+
+
+@router.post("/menus/seed", response_model=List[MenuResponse])
+def seed_default_menus(db: Session = Depends(get_db)):
+    """Create or update the default RDPMS menu master records."""
+    ensure_default_menus(db)
+    return db.query(Menu).filter(Menu.is_active == True).order_by(Menu.sort_order, Menu.name).all()
 
 
 @router.post("/menus", response_model=MenuResponse, status_code=status.HTTP_201_CREATED)
