@@ -21,6 +21,10 @@ DEFAULT_MENUS = [
     {"name": "Maintenance", "slug": "maintenance", "parent_slug": None, "icon": "wrench", "sort_order": 60},
     {"name": "Asset", "slug": "asset", "parent_slug": None, "icon": "boxes", "sort_order": 70},
     {"name": "Asset Detail", "slug": "asset.detail", "parent_slug": "asset", "icon": "box", "sort_order": 71},
+    {"name": "Asset Utilization", "slug": "asset.utilization", "parent_slug": "asset", "icon": "chart-no-axes-combined", "sort_order": 72},
+    {"name": "Performance", "slug": "performance", "parent_slug": None, "icon": "chart-line", "sort_order": 80},
+    {"name": "Admin", "slug": "admin", "parent_slug": None, "icon": "shield", "sort_order": 90},
+    {"name": "Profile", "slug": "profile", "parent_slug": None, "icon": "user", "sort_order": 100},
 ]
 
 

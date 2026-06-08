@@ -578,6 +578,9 @@ class LogoutResponse(BaseModel):
 
 class UserMenuResponse(BaseModel):
     label: str
+    slug: str
+    path: str
+    icon: Optional[str] = None
     children: List["UserMenuResponse"] = Field(default_factory=list)
 
 class UserResponse(BaseModel):
@@ -618,6 +621,7 @@ class MenuUpdate(BaseModel):
 
 class MenuResponse(MenuBase):
     id: int
+    path: str
     class Config:
         from_attributes = True
 

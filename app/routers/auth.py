@@ -57,10 +57,13 @@ def _build_menu_tree(user: User, db: Session) -> list[dict]:
 
     def as_node(menu: Menu) -> dict:
         children = sorted(children_by_parent.get(menu.slug, []), key=sort_key)
-        node = {"label": menu.name}
-        if children:
-            node["children"] = [as_node(child) for child in children]
-        return node
+        return {
+            "label": menu.name,
+            "slug": menu.slug,
+            "path": menu.path,
+            "icon": menu.icon,
+            "children": [as_node(child) for child in children],
+        }
 
     return [as_node(menu) for menu in sorted(roots, key=sort_key)]
 

@@ -217,6 +217,10 @@ class Menu(Base):
 
     role_menus = relationship("RoleMenu", back_populates="menu", cascade="all, delete-orphan")
 
+    @property
+    def path(self) -> str:
+        return f"/{self.slug.replace('.', '/')}"
+
 
 class Role(Base):
     """
