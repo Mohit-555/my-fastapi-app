@@ -4,6 +4,14 @@ from datetime import datetime,UTC
 from app.database import Base
 
 
+MENU_PATH_OVERRIDES = {
+    "admin.users": "/admin/user-role-management/users",
+    "admin.roles": "/admin/user-role-management/roles",
+    "admin.alert-thresholds": "/admin/alert-thresholds",
+    "admin.settings": "/admin/settings",
+}
+
+
 class Zone(Base):
     __tablename__ = "zones"
 
@@ -219,6 +227,8 @@ class Menu(Base):
 
     @property
     def path(self) -> str:
+        if self.slug in MENU_PATH_OVERRIDES:
+            return MENU_PATH_OVERRIDES[self.slug]
         return f"/{self.slug.replace('.', '/')}"
 
 
