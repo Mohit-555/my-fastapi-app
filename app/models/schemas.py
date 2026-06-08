@@ -556,18 +556,6 @@ DivisionWithStations.model_rebuild()
 AlertFiltersResponse.model_rebuild()
 # ─── Auth ─────────────────────────────────────────────────────────────────────
 
-class UserRegisterRequest(BaseModel):
-    full_name: str
-    employee_id: str
-    designation: str
-    zone_id: Optional[int] = None
-    division_id: Optional[int] = None
-    mobile_number: str
-    email: str
-    password: str
-    confirm_password: str
-    reporting_officer_id: Optional[int] = None
-
 class UserLoginRequest(BaseModel):
     employee_id: str
     password: str
@@ -593,10 +581,12 @@ class UserResponse(BaseModel):
     full_name: str
     employee_id: str
     designation: str
+    role_id: Optional[int] = None
     zone_id: Optional[int] = None
     division_id: Optional[int] = None
     email: str
     mobile_number: str
+    reporting_officer_id: Optional[int] = None
     is_active: bool
     created_at: datetime
     class Config:
