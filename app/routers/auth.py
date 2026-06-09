@@ -7,7 +7,7 @@ from app.models.models import RefreshToken, User
 from app.models.schemas import (
     UserRegisterRequest, UserLoginRequest,
     LogoutRequest, LogoutResponse, RefreshTokenRequest,
-    LoginResponse, TokenResponse, UserResponse
+    LoginResponse, TokenResponse, UserResponse, ChangePasswordRequest
 )
 from app.auth_utils import (
     hash_password, verify_password, create_access_token, create_refresh_token,
@@ -154,3 +154,21 @@ def get_me(
         "is_active": current_user.is_active,
         "created_at": current_user.created_at,
     }
+
+
+@router.post("/change-password")
+def change_my_password(
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Change the logged in user's password."""
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if payload.new_password != payload.confirm_new_password:
+        raise HTTPException(status_code=400, detail="New passwords do not match")
+    current_user.hashed_password = hash_password(payload.new_password)
+    db.commit()
+    db.refresh(current_user)
+    return {"status": True, "message": "Password updated successfully"}
+
