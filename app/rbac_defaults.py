@@ -227,6 +227,38 @@ DEFAULT_USERS = [
 ]
 
 
+def ensure_default_zones(db: Session) -> None:
+    zone_details = {
+        "CR": {"hq": "Mumbai", "desc": "Central Railway Zone"},
+        "ECR": {"hq": "Hajipur", "desc": "East Central Railway Zone"},
+        "ECoR": {"hq": "Bhubaneswar", "desc": "East Coast Railway Zone"},
+        "ER": {"hq": "Kolkata", "desc": "Eastern Railway Zone"},
+        "NCR": {"hq": "Prayagraj", "desc": "North Central Railway Zone"},
+        "NER": {"hq": "Gorakhpur", "desc": "North Eastern Railway Zone"},
+        "NFR": {"hq": "Guwahati", "desc": "North Frontier Railway Zone"},
+        "NR": {"hq": "New Delhi", "desc": "Northern Railway Zone"},
+        "NWR": {"hq": "Jaipur", "desc": "North Western Railway Zone"},
+        "SCR": {"hq": "Secunderabad", "desc": "South Central Railway Zone"},
+        "SECR": {"hq": "Bilaspur", "desc": "South East Central Railway Zone"},
+        "SER": {"hq": "Kolkata", "desc": "South Eastern Railway Zone"},
+        "SR": {"hq": "Chennai", "desc": "Southern Railway Zone"},
+        "SWR": {"hq": "Hubballi", "desc": "South Western Railway Zone"},
+        "WCR": {"hq": "Jabalpur", "desc": "West Central Railway Zone"},
+        "WR": {"hq": "Mumbai", "desc": "Western Railway Zone"},
+    }
+    zones = db.query(Zone).all()
+    for z in zones:
+        details = zone_details.get(z.zone_code)
+        if details:
+            if not z.headquarters:
+                z.headquarters = details["hq"]
+            if not z.description:
+                z.description = details["desc"]
+            if not z.status:
+                z.status = "Active"
+    db.commit()
+
+
 def ensure_default_menus(db: Session) -> None:
     # Clean up obsolete menus using ORM to trigger cascades
     active_slugs = {item["slug"] for item in DEFAULT_MENUS}

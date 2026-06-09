@@ -19,6 +19,9 @@ class Zone(Base):
     zone_name = Column(String, nullable=False)
     zone_code = Column(String(10), unique=True, nullable=False)
     zone_id_hex = Column(String(2), unique=True, nullable=False)
+    headquarters = Column(String, nullable=True)
+    description = Column(String, nullable=True)
+    status = Column(String, default="Active", nullable=True)
 
     divisions = relationship("Division", back_populates="zone", cascade="all, delete-orphan")
 

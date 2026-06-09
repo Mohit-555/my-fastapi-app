@@ -41,7 +41,19 @@ def create_zone(payload: ZoneCreate, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=400, detail=f"Zone with code '{payload.zone_code}' already exists")
 
-    zone = Zone(**payload.model_dump())
+    zone_data = payload.model_dump()
+    if not zone_data.get("zone_id_hex"):
+        all_zones = db.query(Zone).all()
+        existing_hex_vals = []
+        for z in all_zones:
+            try:
+                existing_hex_vals.append(int(z.zone_id_hex, 16))
+            except ValueError:
+                pass
+        next_val = max(existing_hex_vals) + 1 if existing_hex_vals else 0
+        zone_data["zone_id_hex"] = f"{next_val:02X}"
+
+    zone = Zone(**zone_data)
     db.add(zone)
     db.commit()
     db.refresh(zone)

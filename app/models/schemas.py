@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices, model_validator
 from typing import List, Optional
 from datetime import datetime
 
@@ -8,20 +8,37 @@ from datetime import datetime
 # ─── Zone ─────────────────────────────────────────────────────────────────────
 
 class ZoneBase(BaseModel):
-    zone_name: str
-    zone_code: str
-    zone_id_hex: str
+    zone_name: str = Field(validation_alias=AliasChoices('zone_name', 'zoneName', 'name'))
+    zone_code: str = Field(validation_alias=AliasChoices('zone_code', 'zoneCode'))
+    zone_id_hex: Optional[str] = Field(default=None, validation_alias=AliasChoices('zone_id_hex', 'zoneIdHex'))
+    headquarters: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = "Active"
 
 class ZoneCreate(ZoneBase):
     pass
 
 class ZoneUpdate(BaseModel):
-    zone_name: Optional[str] = None
-    zone_code: Optional[str] = None
-    zone_id_hex: Optional[str] = None
+    zone_name: Optional[str] = Field(default=None, validation_alias=AliasChoices('zone_name', 'zoneName', 'name'))
+    zone_code: Optional[str] = Field(default=None, validation_alias=AliasChoices('zone_code', 'zoneCode'))
+    zone_id_hex: Optional[str] = Field(default=None, validation_alias=AliasChoices('zone_id_hex', 'zoneIdHex'))
+    headquarters: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
 
 class ZoneResponse(ZoneBase):
     id: int
+    zoneName: str = ""
+    name: str = ""
+    zoneCode: str = ""
+
+    @model_validator(mode="after")
+    def populate_aliases(self) -> "ZoneResponse":
+        self.zoneName = self.zone_name
+        self.name = self.zone_name
+        self.zoneCode = self.zone_code
+        return self
+
     class Config:
         from_attributes = True
 
