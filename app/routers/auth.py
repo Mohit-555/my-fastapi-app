@@ -92,6 +92,12 @@ def login(payload: UserLoginRequest, db: Session = Depends(get_db)):
                 "employee_id": user.employee_id,
                 "fullName": user.full_name,
                 "role": user.role_id,
+                "email": user.email,
+                "designation": user.designation,
+                "zone_id": user.zone_id,
+                "division_id": user.division_id,
+                "mobile_number": user.mobile_number,
+                "reporting_officer_id": user.reporting_officer_id,
             },
         },
     }

@@ -572,6 +572,12 @@ class LoginUserResponse(BaseModel):
     employee_id: str
     fullName: str
     role: Optional[int] = None
+    email: Optional[str] = None
+    designation: Optional[str] = None
+    zone_id: Optional[int] = None
+    division_id: Optional[int] = None
+    mobile_number: Optional[str] = None
+    reporting_officer_id: Optional[int] = None
 
 class LoginDataResponse(BaseModel):
     token: str
