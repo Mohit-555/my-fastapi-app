@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory
+from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent
 from app.auth_utils import hash_password
 
 
@@ -341,10 +341,18 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
         {"station_code": "NDLS", "station_name": "New Delhi", "station_id_hex": "02", "division_code": "DLI"},
         {"station_code": "MJA", "station_name": "Meja Road", "station_id_hex": "03", "division_code": "PYRJ"},
         {"station_code": "HWH", "station_name": "Howrah", "station_id_hex": "04", "division_code": "HWH"},
+        {"station_code": "PRYG", "station_name": "Prayagraj Ghat", "station_id_hex": "05", "division_code": "LKO"},
+        {"station_code": "AGC", "station_name": "Agra Cantt", "station_id_hex": "06", "division_code": "AGRA"},
+        {"station_code": "CNB", "station_name": "Kanpur Central", "station_id_hex": "07", "division_code": "LKO"},
+        {"station_code": "UMB", "station_name": "Ambala Cantt", "station_id_hex": "08", "division_code": "UMB"},
     ]
 
     for st_data in DEFAULT_STATIONS:
-        div = db.query(Division).filter(Division.division_code == st_data["division_code"]).first()
+        div = db.query(Division).filter(
+            (Division.division_code == st_data["division_code"]) |
+            (Division.division_code == "PYRJ" if st_data["division_code"] == "PRYJ" else False) |
+            (Division.division_code == "AGRA" if st_data["division_code"] == "AGC" else False)
+        ).first()
         if not div:
             continue
         
@@ -404,6 +412,134 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
                 asset_type_hex=inv_data["asset_type_hex"],
                 asset_make=inv_data["asset_make"],
                 count=inv_data["count"]
+            )
+            db.add(record)
+    db.commit()
+
+    # 6. Ensure Default Alert Events
+    from datetime import datetime, timezone
+    
+    DEFAULT_ALERTS = [
+        {
+            "station_code": "LKO",
+            "alert_type": "Failure",
+            "asset_type_hex": "00",
+            "asset_no": "PT-103",
+            "cause": "PT-OBS",
+            "alert_status": "Active",
+            "feedback": None,
+            "acknowledged": False,
+            "remark": None,
+            "alert_time": datetime(2026, 6, 9, 10, 49, 30, tzinfo=timezone.utc),
+        },
+        {
+            "station_code": "PRYG",
+            "alert_type": "Predictive",
+            "asset_type_hex": "20",
+            "asset_no": "TC-12",
+            "cause": "TC-SHUNT",
+            "alert_status": "Acknowledged",
+            "feedback": "T",
+            "acknowledged": True,
+            "remark": "Found stone chip",
+            "alert_time": datetime(2026, 6, 9, 9, 19, 30, tzinfo=timezone.utc),
+        },
+        {
+            "station_code": "AGC",
+            "alert_type": "Failure",
+            "asset_type_hex": "21",
+            "asset_no": "AC-05",
+            "cause": "COMM-FAIL",
+            "alert_status": "Cleared",
+            "feedback": None,
+            "acknowledged": False,
+            "remark": None,
+            "alert_time": datetime(2026, 6, 9, 7, 19, 30, tzinfo=timezone.utc),
+        },
+        {
+            "station_code": "NDLS",
+            "alert_type": "Predictive",
+            "asset_type_hex": "10",
+            "asset_no": "MS-21",
+            "cause": "TEMP-HIGH",
+            "alert_status": "Active",
+            "feedback": "PT",
+            "acknowledged": False,
+            "remark": "Partial dust issue",
+            "alert_time": datetime(2026, 6, 9, 10, 19, 30, tzinfo=timezone.utc),
+        },
+        {
+            "station_code": "MJA",
+            "alert_type": "Failure",
+            "asset_type_hex": "00",
+            "asset_no": "PM-101",
+            "cause": "MOTOR-OC",
+            "alert_status": "Cleared",
+            "feedback": None,
+            "acknowledged": False,
+            "remark": None,
+            "alert_time": datetime(2026, 6, 9, 6, 19, 30, tzinfo=timezone.utc),
+        },
+        {
+            "station_code": "HWH",
+            "alert_type": "Failure",
+            "asset_type_hex": "20",
+            "asset_no": "TC-08",
+            "cause": "TC-SHUNT",
+            "alert_status": "Cleared",
+            "feedback": None,
+            "acknowledged": False,
+            "remark": None,
+            "alert_time": datetime(2026, 6, 9, 5, 19, 30, tzinfo=timezone.utc),
+        },
+        {
+            "station_code": "CNB",
+            "alert_type": "Predictive",
+            "asset_type_hex": "41",
+            "asset_no": "LCG-03",
+            "cause": "BAT-LOW",
+            "alert_status": "Active",
+            "feedback": None,
+            "acknowledged": False,
+            "remark": None,
+            "alert_time": datetime(2026, 6, 9, 8, 19, 30, tzinfo=timezone.utc),
+        },
+        {
+            "station_code": "UMB",
+            "alert_type": "Predictive",
+            "asset_type_hex": "21",
+            "asset_no": "AC-11",
+            "cause": "COMM-FAIL",
+            "alert_status": "Cleared",
+            "feedback": None,
+            "acknowledged": False,
+            "remark": None,
+            "alert_time": datetime(2026, 6, 9, 4, 19, 30, tzinfo=timezone.utc),
+        },
+     ]
+
+    for alert_data in DEFAULT_ALERTS:
+        station = db.query(Station).filter(Station.station_code == alert_data["station_code"]).first()
+        if not station:
+            continue
+        
+        record = db.query(AlertEvent).filter(
+            AlertEvent.station_id == station.id,
+            AlertEvent.asset_no == alert_data["asset_no"],
+            AlertEvent.cause == alert_data["cause"]
+        ).first()
+        if not record:
+            record = AlertEvent(
+                station_id=station.id,
+                alert_type=alert_data["alert_type"],
+                asset_type_hex=alert_data["asset_type_hex"],
+                asset_no=alert_data["asset_no"],
+                cause=alert_data["cause"],
+                alert_status=alert_data["alert_status"],
+                feedback=alert_data["feedback"],
+                acknowledged=alert_data["acknowledged"],
+                remark=alert_data["remark"],
+                alert_time=alert_data["alert_time"]
             )
             db.add(record)
     db.commit()
