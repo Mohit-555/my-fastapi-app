@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import SessionLocal, engine
 from app.auth_utils import get_current_user
 from app.models.models import Base
-from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin, equipment_room
+from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin, equipment_room, maintenance
 from app.routers import auth
 from app.rbac_defaults import ensure_default_menus, ensure_default_roles_users_and_permissions
 try:
@@ -70,6 +70,7 @@ app.include_router(alerts.router, dependencies=protected_route)
 # Add after the alerts router line:
 app.include_router(admin.router, dependencies=protected_route)
 app.include_router(equipment_room.router, dependencies=protected_route)
+app.include_router(maintenance.router, dependencies=protected_route)
 # ── Gateway ingestion ─────────────────────────────────────────────────────────
 app.include_router(gateway.router, dependencies=protected_route)
 

@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent, Gateway, Telemetry
+from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent, Gateway, Telemetry, MaintenanceMode
 from app.auth_utils import hash_password
 
 
@@ -674,3 +674,22 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
                         received_at=dt_utc
                     ))
     db.commit()
+
+    # 8. Ensure Default Maintenance Mode Records
+    cnb_station = db.query(Station).filter(Station.station_code == "CNB").first()
+    if cnb_station:
+        exists = db.query(MaintenanceMode).filter(
+            MaintenanceMode.station_id == cnb_station.id,
+            MaintenanceMode.asset_type_hex == "20",
+            MaintenanceMode.asset_no == "TC-12"
+        ).first()
+        if not exists:
+            db.add(MaintenanceMode(
+                station_id=cnb_station.id,
+                asset_type_hex="20",
+                asset_no="TC-12",
+                from_time=datetime(2026, 6, 9, 9, 19, 30),
+                to_time=datetime(2026, 6, 9, 11, 19, 30),
+                created_at=datetime(2026, 6, 9, 9, 19, 30)
+            ))
+            db.commit()

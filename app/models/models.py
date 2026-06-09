@@ -294,3 +294,21 @@ class EquipmentRoom(Base):
     __table_args__ = (
         UniqueConstraint("station_id", "room_type", name="uq_station_room_type"),
     )
+
+
+class MaintenanceMode(Base):
+    """
+    Represents a Maintenance Mode record for an asset.
+    """
+    __tablename__ = "maintenance_modes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    station_id = Column(Integer, ForeignKey("stations.id"), nullable=False, index=True)
+    asset_type_hex = Column(String(2), nullable=False, index=True)
+    asset_no = Column(String(40), nullable=False, index=True)
+    from_time = Column(DateTime, nullable=False, index=True)
+    to_time = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.now(UTC), nullable=False, index=True)
+
+    station = relationship("Station")
+

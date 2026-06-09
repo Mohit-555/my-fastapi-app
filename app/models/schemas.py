@@ -782,3 +782,43 @@ class EquipmentRoomHistoryResponse(BaseModel):
     page: int
     page_size: int
     rows: List[EquipmentRoomHistoryRow]
+
+
+# ─── Maintenance Mode ─────────────────────────────────────────────────────────
+
+class MaintenanceModeRequest(BaseModel):
+    station_id: int
+    asset_type_hex: str
+    asset_no: str
+    from_time: datetime
+    to_time: datetime
+
+
+class MaintenanceModeResponse(BaseModel):
+    id: int
+    zone_id: int
+    zone_code: str
+    zone_name: str
+    division_id: int
+    division_code: str
+    division_name: str
+    station_id: int
+    station_code: str
+    station_name: str
+    asset_type_hex: str
+    asset_type_name: str
+    asset_no: str
+    from_time: datetime
+    to_time: datetime
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class MaintenanceModeListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    rows: List[MaintenanceModeResponse]
+
