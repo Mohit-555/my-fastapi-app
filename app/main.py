@@ -12,6 +12,10 @@ from app.models.models import Base
 from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin, equipment_room
 from app.routers import auth
 from app.rbac_defaults import ensure_default_menus, ensure_default_roles_users_and_permissions
+try:
+    from seed import seed as seed_zones_and_divisions
+except ImportError:
+    seed_zones_and_divisions = None
 
 
 def run_database_migrations() -> None:
@@ -26,6 +30,12 @@ def run_database_migrations() -> None:
 
 run_database_migrations()
 Base.metadata.create_all(bind=engine)
+if seed_zones_and_divisions:
+    try:
+        seed_zones_and_divisions()
+    except Exception as e:
+        print(f"Startup seeding warning: {e}")
+
 with SessionLocal() as db:
     ensure_default_menus(db)
     ensure_default_roles_users_and_permissions(db)
