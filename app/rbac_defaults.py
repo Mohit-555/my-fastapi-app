@@ -26,10 +26,6 @@ DEFAULT_MENUS = [
     {"name": "Asset Utilization", "slug": "asset.utilization", "parent_slug": "asset", "icon": "Gauge", "sort_order": 72},
     {"name": "Performance", "slug": "performance", "parent_slug": None, "icon": "Gauge", "sort_order": 80},
     {"name": "Admin", "slug": "admin", "parent_slug": None, "icon": "Settings", "sort_order": 90},
-    {"name": "User Management", "slug": "admin.users", "parent_slug": "admin", "icon": "User", "sort_order": 91},
-    {"name": "Role Management", "slug": "admin.roles", "parent_slug": "admin", "icon": "Shield", "sort_order": 92},
-    {"name": "Alert Thresholds", "slug": "admin.alert-thresholds", "parent_slug": "admin", "icon": "SlidersHorizontal", "sort_order": 93},
-    {"name": "Additional Settings", "slug": "admin.settings", "parent_slug": "admin", "icon": "Settings", "sort_order": 94},
     {"name": "Profile", "slug": "profile", "parent_slug": None, "icon": "User", "sort_order": 100},
 ]
 
@@ -114,10 +110,6 @@ ROLE_MAP = {
     "asset.utilization": [1, 2],
     "performance": [1, 2, 3, 4],
     "admin": [1, 2],
-    "admin.users": [1, 2],
-    "admin.roles": [1, 2],
-    "admin.alert-thresholds": [1, 2],
-    "admin.settings": [1, 2],
     "profile": [1, 2, 3, 4, 5, 6, 7, 8],
 }
 
@@ -236,6 +228,13 @@ DEFAULT_USERS = [
 
 
 def ensure_default_menus(db: Session) -> None:
+    # Clean up obsolete menus using ORM to trigger cascades
+    active_slugs = {item["slug"] for item in DEFAULT_MENUS}
+    obsolete_menus = db.query(Menu).filter(Menu.slug.not_in(list(active_slugs))).all()
+    for menu in obsolete_menus:
+        db.delete(menu)
+    db.commit()
+
     for item in DEFAULT_MENUS:
         menu = db.query(Menu).filter(Menu.slug == item["slug"]).first()
         if menu:
