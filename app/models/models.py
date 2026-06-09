@@ -273,3 +273,24 @@ class RoleMenu(Base):
     __table_args__ = (
         UniqueConstraint("role_id", "menu_id", name="uq_role_menu"),
     )
+
+
+class EquipmentRoom(Base):
+    """
+    Represents an Equipment Room at a station.
+    Stores live/latest temperature and humidity values.
+    """
+    __tablename__ = "equipment_rooms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    station_id = Column(Integer, ForeignKey("stations.id"), nullable=False, index=True)
+    room_type = Column(String(10), nullable=False)  # 'RR', 'IPS', 'BATT'
+    temperature = Column(Float, nullable=True)
+    humidity = Column(Float, nullable=True)
+    updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
+
+    station = relationship("Station")
+
+    __table_args__ = (
+        UniqueConstraint("station_id", "room_type", name="uq_station_room_type"),
+    )

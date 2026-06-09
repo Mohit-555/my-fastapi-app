@@ -740,3 +740,23 @@ class UserRegisterRequest(BaseModel):
     password: str
     confirm_password: str
     reporting_officer_id: Optional[int] = None
+
+
+class EquipmentRoomResponse(BaseModel):
+    id: int
+    station_id: int
+    zone_id: int
+    zone_code: str
+    zone_name: str
+    division_id: int
+    division_code: str
+    division_name: str
+    station_code: str
+    station_name: str
+    room_type: str
+    temperature: Optional[float] = None
+    humidity: Optional[float] = None
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True

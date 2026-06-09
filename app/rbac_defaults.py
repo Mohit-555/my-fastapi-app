@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.models.models import Menu, Role, User, RoleMenu, Zone, Division
+from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom
 from app.auth_utils import hash_password
 
 
@@ -333,4 +333,43 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
                 is_active=u_data["is_active"]
             )
             db.add(user)
+    db.commit()
+
+    # 4. Ensure Default Stations & Equipment Rooms
+    DEFAULT_STATIONS = [
+        {"station_code": "LKO", "station_name": "Lucknow", "station_id_hex": "01", "division_code": "LKO"},
+        {"station_code": "NDLS", "station_name": "New Delhi", "station_id_hex": "02", "division_code": "DLI"},
+        {"station_code": "MJA", "station_name": "Meja Road", "station_id_hex": "03", "division_code": "PYRJ"},
+        {"station_code": "HWH", "station_name": "Howrah", "station_id_hex": "04", "division_code": "HWH"},
+    ]
+
+    for st_data in DEFAULT_STATIONS:
+        div = db.query(Division).filter(Division.division_code == st_data["division_code"]).first()
+        if not div:
+            continue
+        
+        station = db.query(Station).filter(Station.station_code == st_data["station_code"]).first()
+        if not station:
+            station = Station(
+                station_code=st_data["station_code"],
+                station_name=st_data["station_name"],
+                station_id_hex=st_data["station_id_hex"],
+                division_id=div.id
+            )
+            db.add(station)
+            db.flush()
+        
+        for room_type in ["RR", "IPS", "BATT"]:
+            room = db.query(EquipmentRoom).filter(
+                EquipmentRoom.station_id == station.id,
+                EquipmentRoom.room_type == room_type
+            ).first()
+            if not room:
+                room = EquipmentRoom(
+                    station_id=station.id,
+                    room_type=room_type,
+                    temperature=None,
+                    humidity=None
+                )
+                db.add(room)
     db.commit()
