@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
-from app.models.models import Menu
+from app.models.models import Menu, Role, User, RoleMenu, Zone, Division
+from app.auth_utils import hash_password
 
 
 DEFAULT_MENUS = [
@@ -31,6 +33,207 @@ DEFAULT_MENUS = [
     {"name": "Profile", "slug": "profile", "parent_slug": None, "icon": "User", "sort_order": 100},
 ]
 
+DEFAULT_ROLES = [
+    {
+        "id": 1,
+        "name": "HQ_ADMIN",
+        "display_name": "Headquarters Administrator",
+        "level": 1,
+        "description": "Full system administration access across all zones, divisions, stations, and configuration modules."
+    },
+    {
+        "id": 2,
+        "name": "HQ_MONITOR",
+        "display_name": "HQ Monitoring Officer",
+        "level": 2,
+        "description": "Monitors nationwide asset health, alerts, telemetry, and performance dashboards."
+    },
+    {
+        "id": 3,
+        "name": "DIVISION_ADMIN",
+        "display_name": "Division Administrator",
+        "level": 3,
+        "description": "Administrative access limited to assigned division assets, users, and reports."
+    },
+    {
+        "id": 4,
+        "name": "DIVISION_ENGINEER",
+        "display_name": "Division Engineer",
+        "level": 4,
+        "description": "Responsible for monitoring, diagnostics, maintenance planning, and alert management."
+    },
+    {
+        "id": 5,
+        "name": "STATION_MASTER",
+        "display_name": "Station Master",
+        "level": 5,
+        "description": "Operational access for station-level monitoring and equipment status review."
+    },
+    {
+        "id": 6,
+        "name": "MAINTENANCE_ENGINEER",
+        "display_name": "Maintenance Engineer",
+        "level": 6,
+        "description": "Maintenance operations and diagnostic checks for station assets."
+    },
+    {
+        "id": 7,
+        "name": "GUEST",
+        "display_name": "Guest User",
+        "level": 7,
+        "description": "Read-only guest access for general system review."
+    },
+    {
+        "id": 8,
+        "name": "AUDITOR",
+        "display_name": "Audit Guest User",
+        "level": 8,
+        "description": "Auditing and report verification access."
+    },
+]
+
+# Map of menu slug to list of allowed role IDs
+ROLE_MAP = {
+    "dashboard": [1, 2, 3, 4, 5, 6, 7, 8],
+    "alerts": [1, 2, 3, 4, 5, 6],
+    "alerts.live": [1, 2, 3, 4, 5, 6],
+    "alerts.history": [1, 2, 3, 4, 5, 6],
+    "alerts.summary": [1, 2, 3, 4],
+    "telemetry": [1, 2, 3, 4, 5, 6],
+    "telemetry.live": [1, 2, 3, 4, 5, 6],
+    "telemetry.history": [1, 2, 3, 4],
+    "rdpms-health": [1, 2, 3, 4],
+    "rdpms-health.live": [1, 2, 3, 4],
+    "rdpms-health.summary": [1, 2],
+    "equipment-room": [1, 2, 3, 4, 5, 6],
+    "equipment-room.live": [1, 2, 3, 4, 5, 6],
+    "equipment-room.history": [1, 2, 3, 4],
+    "maintenance": [1, 2, 3, 4, 5, 6],
+    "asset": [1, 2, 3, 4],
+    "asset.detail": [1, 2, 3, 4],
+    "asset.utilization": [1, 2],
+    "performance": [1, 2, 3, 4],
+    "admin": [1, 2],
+    "admin.users": [1, 2],
+    "admin.roles": [1, 2],
+    "admin.alert-thresholds": [1, 2],
+    "admin.settings": [1, 2],
+    "profile": [1, 2, 3, 4, 5, 6, 7, 8],
+}
+
+DEFAULT_USERS = [
+    {
+        "employee_id": "hq_admin",
+        "full_name": "HQ Administrator",
+        "role_id": 1,
+        "email": "hq.admin@rdpms.gov.in",
+        "mobile_number": "9876543210",
+        "designation": "Director Signal",
+        "zone_code": None,
+        "division_code": None,
+        "is_active": True,
+    },
+    {
+        "employee_id": "hq_ops",
+        "full_name": "HQ Operations Manager",
+        "role_id": 2,
+        "email": "hq.ops@rdpms.gov.in",
+        "mobile_number": "9876543216",
+        "designation": "ED Signal",
+        "zone_code": None,
+        "division_code": None,
+        "is_active": False,
+    },
+    {
+        "employee_id": "div_north",
+        "full_name": "Division Engineer - North",
+        "role_id": 4,
+        "email": "div.north@rdpms.gov.in",
+        "mobile_number": "9876543211",
+        "designation": "Sr DSTE",
+        "zone_code": "NR",
+        "division_code": "DLI",
+        "is_active": True,
+    },
+    {
+        "employee_id": "div_lko",
+        "full_name": "Division Engineer - Lucknow",
+        "role_id": 3,
+        "email": "div.lko@rdpms.gov.in",
+        "mobile_number": "9876543213",
+        "designation": "DSTE",
+        "zone_code": "NER",
+        "division_code": "LJN",
+        "is_active": True,
+    },
+    {
+        "employee_id": "div_pryj",
+        "full_name": "Division Engineer - Prayagraj",
+        "role_id": 4,
+        "email": "div.pryj@rdpms.gov.in",
+        "mobile_number": "9876543217",
+        "designation": "Sr DSTE",
+        "zone_code": "NCR",
+        "division_code": "PYRJ",
+        "is_active": True,
+    },
+    {
+        "employee_id": "sm_ndls",
+        "full_name": "SM New Delhi",
+        "role_id": 5,
+        "email": "sm.ndls@rdpms.gov.in",
+        "mobile_number": "9876543212",
+        "designation": "Station Master",
+        "zone_code": "NR",
+        "division_code": "DLI",
+        "is_active": False,
+    },
+    {
+        "employee_id": "sm_lko",
+        "full_name": "SM Lucknow",
+        "role_id": 5,
+        "email": "sm.lko@rdpms.gov.in",
+        "mobile_number": "9876543214",
+        "designation": "Station Master",
+        "zone_code": "NER",
+        "division_code": "LJN",
+        "is_active": True,
+    },
+    {
+        "employee_id": "sm_agc",
+        "full_name": "SM Agra Cantt",
+        "role_id": 5,
+        "email": "sm.agc@rdpms.gov.in",
+        "mobile_number": "9876543218",
+        "designation": "Station Master",
+        "zone_code": "NCR",
+        "division_code": "AGRA",
+        "is_active": True,
+    },
+    {
+        "employee_id": "guest_user",
+        "full_name": "Guest User",
+        "role_id": 7,
+        "email": "guest@rdpms.gov.in",
+        "mobile_number": "9876543215",
+        "designation": "Visitor",
+        "zone_code": None,
+        "division_code": None,
+        "is_active": True,
+    },
+    {
+        "employee_id": "guest_audit",
+        "full_name": "Audit Guest User",
+        "role_id": 8,
+        "email": "guest.audit@rdpms.gov.in",
+        "mobile_number": "9876543219",
+        "designation": "Auditor",
+        "zone_code": None,
+        "division_code": None,
+        "is_active": False,
+    },
+]
+
 
 def ensure_default_menus(db: Session) -> None:
     for item in DEFAULT_MENUS:
@@ -41,4 +244,93 @@ def ensure_default_menus(db: Session) -> None:
             menu.is_active = True
         else:
             db.add(Menu(**item, is_active=True))
+    db.commit()
+
+
+def ensure_default_roles_users_and_permissions(db: Session) -> None:
+    # 1. Ensure Roles
+    for r_data in DEFAULT_ROLES:
+        role = db.query(Role).filter(Role.id == r_data["id"]).first()
+        if role:
+            role.name = r_data["name"]
+            role.display_name = r_data["display_name"]
+            role.level = r_data["level"]
+            role.description = r_data["description"]
+            role.is_active = True
+        else:
+            role = Role(
+                id=r_data["id"],
+                name=r_data["name"],
+                display_name=r_data["display_name"],
+                level=r_data["level"],
+                description=r_data["description"],
+                is_active=True
+            )
+            db.add(role)
+    db.commit()
+
+    # Reset roles sequence (only on PostgreSQL)
+    try:
+        db.execute(text("SELECT setval('roles_id_seq', COALESCE((SELECT MAX(id) FROM roles), 1), false);"))
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    # 2. Ensure Menu Access Permissions (RoleMenu)
+    # Clear existing permissions to avoid conflicts and match Imran's map exactly
+    db.query(RoleMenu).delete()
+    db.commit()
+
+    for slug, role_ids in ROLE_MAP.items():
+        menu = db.query(Menu).filter(Menu.slug == slug).first()
+        if not menu:
+            continue
+        for role_id in role_ids:
+            role = db.query(Role).filter(Role.id == role_id).first()
+            if not role:
+                continue
+            db.add(RoleMenu(role_id=role_id, menu_id=menu.id, permission="full" if role_id == 1 else "view"))
+    db.commit()
+
+    # 3. Ensure Users
+    default_password_hash = hash_password("Password@123")
+
+    for u_data in DEFAULT_USERS:
+        # Resolve zone and division
+        zone_id = None
+        if u_data["zone_code"]:
+            zone = db.query(Zone).filter(Zone.zone_code == u_data["zone_code"]).first()
+            if zone:
+                zone_id = zone.id
+
+        division_id = None
+        if u_data["division_code"]:
+            div = db.query(Division).filter(Division.division_code == u_data["division_code"]).first()
+            if div:
+                division_id = div.id
+
+        user = db.query(User).filter(User.employee_id == u_data["employee_id"]).first()
+        if user:
+            user.full_name = u_data["full_name"]
+            user.role_id = u_data["role_id"]
+            user.email = u_data["email"]
+            user.mobile_number = u_data["mobile_number"]
+            user.designation = u_data["designation"]
+            user.zone_id = zone_id
+            user.division_id = division_id
+            user.is_active = u_data["is_active"]
+        else:
+            user = User(
+                employee_id=u_data["employee_id"],
+                full_name=u_data["full_name"],
+                role_id=u_data["role_id"],
+                email=u_data["email"],
+                mobile_number=u_data["mobile_number"],
+                designation=u_data["designation"],
+                zone_id=zone_id,
+                division_id=division_id,
+                hashed_password=default_password_hash,
+                is_active=u_data["is_active"]
+            )
+            db.add(user)
     db.commit()
