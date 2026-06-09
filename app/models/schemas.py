@@ -129,19 +129,31 @@ class DivisionWithStations(DivisionResponse):
 # ─── Station ──────────────────────────────────────────────────────────────────
 
 class StationBase(BaseModel):
-    station_name: str
-    station_code: str
-    station_id_hex: str
-    division_id: int
+    station_name: str = Field(validation_alias=AliasChoices('station_name', 'stationName', 'name'))
+    station_code: str = Field(validation_alias=AliasChoices('station_code', 'stationCode'))
+    station_id_hex: Optional[str] = Field(default=None, validation_alias=AliasChoices('station_id_hex', 'stationIdHex'))
+    division_id: Optional[int] = None
+    division: Optional[str] = None
+    zone: Optional[str] = None
+    category: Optional[str] = None
+    address: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = "Active"
 
 class StationCreate(StationBase):
     pass
 
 class StationUpdate(BaseModel):
-    station_name: Optional[str] = None
-    station_code: Optional[str] = None
-    station_id_hex: Optional[str] = None
+    station_name: Optional[str] = Field(default=None, validation_alias=AliasChoices('station_name', 'stationName', 'name'))
+    station_code: Optional[str] = Field(default=None, validation_alias=AliasChoices('station_code', 'stationCode'))
+    station_id_hex: Optional[str] = Field(default=None, validation_alias=AliasChoices('station_id_hex', 'stationIdHex'))
     division_id: Optional[int] = None
+    division: Optional[str] = None
+    zone: Optional[str] = None
+    category: Optional[str] = None
+    address: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
 
 class StationResponse(BaseModel):
     id: int
@@ -149,6 +161,51 @@ class StationResponse(BaseModel):
     station_code: str
     station_id_hex: str
     division_id: int
+    category: Optional[str] = None
+    address: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = "Active"
+
+    stationCode: str = ""
+    stationName: str = ""
+    name: str = ""
+    zone: str = ""
+    division: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def pre_validate(cls, data: any) -> any:
+        if not isinstance(data, dict):
+            div_code = getattr(data.division, "division_code", "") if getattr(data, "division", None) else ""
+            zone_code = getattr(data.division.zone, "zone_code", "") if (getattr(data, "division", None) and getattr(data.division, "zone", None)) else ""
+            return {
+                "id": data.id,
+                "station_name": data.station_name,
+                "station_code": data.station_code,
+                "station_id_hex": data.station_id_hex,
+                "division_id": data.division_id,
+                "category": data.category,
+                "address": data.address,
+                "description": data.description,
+                "status": data.status or "Active",
+                "stationCode": data.station_code,
+                "stationName": data.station_name,
+                "name": data.station_name,
+                "division": div_code,
+                "zone": zone_code,
+            }
+        else:
+            data["stationCode"] = data.get("station_code", data.get("stationCode", ""))
+            data["stationName"] = data.get("station_name", data.get("stationName", ""))
+            data["name"] = data.get("station_name", data.get("name", ""))
+            d_val = data.get("division", "")
+            if isinstance(d_val, str):
+                data["division"] = d_val
+            z_val = data.get("zone", "")
+            if isinstance(z_val, str):
+                data["zone"] = z_val
+            return data
+
     class Config:
         from_attributes = True
 

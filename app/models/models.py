@@ -50,6 +50,10 @@ class Station(Base):
     station_code = Column(String(10), nullable=False)
     station_id_hex = Column(String(2), nullable=False)
     division_id = Column(Integer, ForeignKey("divisions.id"), nullable=False)
+    category = Column(String, nullable=True)
+    address = Column(String, nullable=True)
+    description = Column(String, nullable=True)
+    status = Column(String, default="Active", nullable=True)
 
     division = relationship("Division", back_populates="stations")
     gateways = relationship("Gateway", back_populates="station", cascade="all, delete-orphan")

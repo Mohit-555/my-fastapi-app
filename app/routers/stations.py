@@ -51,11 +51,37 @@ def get_station(station_id: int, db: Session = Depends(get_db)):
 @router.post("/", response_model=StationResponse, status_code=status.HTTP_201_CREATED)
 def create_station(payload: StationCreate, db: Session = Depends(get_db)):
     """Create a new station"""
-    division = db.query(Division).filter(Division.id == payload.division_id).first()
-    if not division:
-        raise HTTPException(status_code=404, detail=f"Division with id {payload.division_id} not found")
+    division_id = payload.division_id
+    if not division_id and payload.division:
+        div_obj = db.query(Division).filter(Division.division_code == payload.division).first()
+        if div_obj:
+            division_id = div_obj.id
 
-    station = Station(**payload.model_dump())
+    if not division_id:
+        raise HTTPException(status_code=400, detail="Either division_id or division (code) must be provided")
+
+    division = db.query(Division).filter(Division.id == division_id).first()
+    if not division:
+        raise HTTPException(status_code=404, detail=f"Division with id {division_id} not found")
+
+    station_data = payload.model_dump()
+    station_data["division_id"] = division_id
+    for k in ("division", "zone"):
+        if k in station_data:
+            del station_data[k]
+
+    if not station_data.get("station_id_hex"):
+        all_stats = db.query(Station).filter(Station.division_id == division_id).all()
+        existing_hex_vals = []
+        for s in all_stats:
+            try:
+                existing_hex_vals.append(int(s.station_id_hex, 16))
+            except ValueError:
+                pass
+        next_val = max(existing_hex_vals) + 1 if existing_hex_vals else 0
+        station_data["station_id_hex"] = f"{next_val:02X}"
+
+    station = Station(**station_data)
     db.add(station)
     db.commit()
     db.refresh(station)
@@ -69,12 +95,21 @@ def update_station(station_id: int, payload: StationUpdate, db: Session = Depend
     if not station:
         raise HTTPException(status_code=404, detail=f"Station with id {station_id} not found")
 
-    if payload.division_id:
-        division = db.query(Division).filter(Division.id == payload.division_id).first()
+    division_id = payload.division_id
+    if not division_id and payload.division:
+        div_obj = db.query(Division).filter(Division.division_code == payload.division).first()
+        if div_obj:
+            division_id = div_obj.id
+
+    if division_id:
+        division = db.query(Division).filter(Division.id == division_id).first()
         if not division:
-            raise HTTPException(status_code=404, detail=f"Division with id {payload.division_id} not found")
+            raise HTTPException(status_code=404, detail=f"Division with id {division_id} not found")
+        station.division_id = division_id
 
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if field in ("division_id", "division", "zone"):
+            continue
         setattr(station, field, value)
 
     db.commit()
