@@ -49,19 +49,27 @@ class ZoneWithDivisions(ZoneResponse):
 # ─── Division ─────────────────────────────────────────────────────────────────
 
 class DivisionBase(BaseModel):
-    division_name: str
-    division_code: str
-    division_id_hex: str
-    zone_id: int
+    division_name: str = Field(validation_alias=AliasChoices('division_name', 'divisionName', 'name'))
+    division_code: str = Field(validation_alias=AliasChoices('division_code', 'divisionCode'))
+    division_id_hex: Optional[str] = Field(default=None, validation_alias=AliasChoices('division_id_hex', 'divisionIdHex'))
+    zone_id: Optional[int] = None
+    zone: Optional[str] = None
+    headquarters: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = "Active"
 
 class DivisionCreate(DivisionBase):
     pass
 
 class DivisionUpdate(BaseModel):
-    division_name: Optional[str] = None
-    division_code: Optional[str] = None
-    division_id_hex: Optional[str] = None
+    division_name: Optional[str] = Field(default=None, validation_alias=AliasChoices('division_name', 'divisionName', 'name'))
+    division_code: Optional[str] = Field(default=None, validation_alias=AliasChoices('division_code', 'divisionCode'))
+    division_id_hex: Optional[str] = Field(default=None, validation_alias=AliasChoices('division_id_hex', 'divisionIdHex'))
     zone_id: Optional[int] = None
+    zone: Optional[str] = None
+    headquarters: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
 
 class DivisionResponse(BaseModel):
     id: int
@@ -69,6 +77,48 @@ class DivisionResponse(BaseModel):
     division_code: str
     division_id_hex: str
     zone_id: int
+    headquarters: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = "Active"
+
+    divisionName: str = ""
+    name: str = ""
+    divisionCode: str = ""
+    zoneCode: str = ""
+    zone: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def pre_validate(cls, data: any) -> any:
+        if not isinstance(data, dict):
+            zone_code = getattr(data.zone, "zone_code", "") if getattr(data, "zone", None) else ""
+            res = {
+                "id": data.id,
+                "division_name": data.division_name,
+                "division_code": data.division_code,
+                "division_id_hex": data.division_id_hex,
+                "zone_id": data.zone_id,
+                "headquarters": data.headquarters,
+                "description": data.description,
+                "status": data.status or "Active",
+                "divisionName": data.division_name,
+                "name": data.division_name,
+                "divisionCode": data.division_code,
+                "zoneCode": zone_code,
+                "zone": zone_code,
+            }
+            if hasattr(data, "stations"):
+                res["stations"] = data.stations
+            return res
+        else:
+            data["divisionName"] = data.get("division_name", data.get("divisionName", ""))
+            data["name"] = data.get("division_name", data.get("name", ""))
+            data["divisionCode"] = data.get("division_code", data.get("divisionCode", ""))
+            z_val = data.get("zone", "")
+            if isinstance(z_val, str):
+                data["zoneCode"] = data.get("zoneCode", z_val)
+            return data
+
     class Config:
         from_attributes = True
 

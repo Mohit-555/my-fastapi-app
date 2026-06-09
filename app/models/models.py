@@ -34,6 +34,9 @@ class Division(Base):
     division_code = Column(String(10), nullable=False)
     division_id_hex = Column(String(2), nullable=False)
     zone_id = Column(Integer, ForeignKey("zones.id"), nullable=False)
+    headquarters = Column(String, nullable=True)
+    description = Column(String, nullable=True)
+    status = Column(String, default="Active", nullable=True)
 
     zone = relationship("Zone", back_populates="divisions")
     stations = relationship("Station", back_populates="division", cascade="all, delete-orphan")

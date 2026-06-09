@@ -259,6 +259,19 @@ def ensure_default_zones(db: Session) -> None:
     db.commit()
 
 
+def ensure_default_divisions(db: Session) -> None:
+    divisions = db.query(Division).all()
+    for d in divisions:
+        hq_name = d.division_name.title()
+        if not d.headquarters:
+            d.headquarters = hq_name
+        if not d.description:
+            d.description = f"{hq_name} Railway Division"
+        if not d.status:
+            d.status = "Active"
+    db.commit()
+
+
 def ensure_default_menus(db: Session) -> None:
     # Clean up obsolete menus using ORM to trigger cascades
     active_slugs = {item["slug"] for item in DEFAULT_MENUS}
