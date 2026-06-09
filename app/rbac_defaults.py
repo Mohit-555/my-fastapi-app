@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent
+from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent, Gateway, Telemetry
 from app.auth_utils import hash_password
 
 
@@ -542,4 +542,135 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
                 alert_time=alert_data["alert_time"]
             )
             db.add(record)
+    db.commit()
+
+    # 7. Ensure Default Gateways & Telemetry
+    gateways_by_station = {}
+    for st_code, stngw_id in [
+        ("LKO", "01011200"),
+        ("NDLS", "02011200"),
+        ("MJA", "03011200"),
+        ("HWH", "04011200"),
+        ("PRYG", "05011200"),
+        ("AGC", "06011200"),
+        ("CNB", "07011200"),
+        ("UMB", "08011200"),
+    ]:
+        station = db.query(Station).filter(Station.station_code == st_code).first()
+        if not station:
+            continue
+        gw = db.query(Gateway).filter(Gateway.stngw_id == stngw_id).first()
+        if not gw:
+            gw = Gateway(
+                stngw_id=stngw_id,
+                station_id=station.id,
+                imei=f"imei_{stngw_id}"
+            )
+            db.add(gw)
+            db.flush()
+        gateways_by_station[station.id] = gw.id
+
+    # Seed Telemetry for PT-101 and TC-12
+    from datetime import datetime, timedelta
+
+    # Define base values (reusable lists)
+    pt_base = [
+        (1, [4.28, 5.91, 2474.0, 11.93, 34.7]),  # offset minute, values
+        (1, [3.98, 7.22, 2595.0, 12.28, 35.1]),  # note: multiple samples at same 12:05
+        (1, [3.65, 7.81, 2566.0, 12.18, 36.4]),
+        (1, [3.15, 7.59, 2384.0, 12.23, 38.7]),
+        (1, [2.73, 6.68, 2282.0, 12.38, 43.1]),
+        (2, [4.28, 5.65, 2126.0, 11.81, 36.0]),
+        (3, [4.38, 6.01, 2076.0, 12.28, 35.5]),
+        (4, [4.16, 6.25, 2093.0, 11.97, 34.3]),
+        (5, [4.04, 6.44, 2091.0, 11.84, 35.3]),
+        (6, [4.21, 6.68, 2001.0, 11.87, 34.6]),
+    ]
+
+    tc_base = [
+        (2, [4.37, 5.71, 2154.0, 12.28, 36.1]),
+        (3, [4.18, 5.87, 2073.0, 12.29, 35.7]),
+        (4, [4.34, 6.42, 2076.0, 11.95, 35.0]),
+        (5, [4.32, 6.73, 2087.0, 12.21, 34.4]),
+        (6, [4.01, 6.95, 2083.0, 12.13, 35.2]),
+        (7, [3.96, 6.82, 2063.0, 12.24, 36.1]),
+        (8, [3.79, 7.30, 2022.0, 11.81, 35.4]),
+        (9, [3.70, 7.39, 1942.0, 11.87, 35.0]),
+        (10, [3.84, 7.53, 1988.0, 11.96, 36.8]),
+    ]
+
+    # Generate dates to seed
+    now_utc = datetime.utcnow()
+    # dynamic local time for the display string (prt) in Indian Standard Time (+5:30)
+    now_local = now_utc + timedelta(hours=5, minutes=30)
+
+    # We will build a list of tuples: (received_at, prt, vals)
+    pt_final_points = []
+    tc_final_points = []
+
+    # 1. Add Dynamic relative points (re-calculates every startup so last hour query is always populated!)
+    for min_offset, vals in pt_base:
+        dt_utc = now_utc - timedelta(minutes=min_offset)
+        dt_local = now_local - timedelta(minutes=min_offset)
+        pt_final_points.append((dt_utc, dt_local.strftime("%H:%M"), vals))
+
+    for min_offset, vals in tc_base:
+        dt_utc = now_utc - timedelta(minutes=min_offset)
+        dt_local = now_local - timedelta(minutes=min_offset)
+        tc_final_points.append((dt_utc, dt_local.strftime("%H:%M"), vals))
+
+    # 2. Add Static June 9, 2026 points (both naive UTC=local, and UTC-adjusted 06:35/12:05)
+    # This guarantees that explicit date/time filters for 2026-06-09 will return exactly the screenshots
+    for min_offset, vals in pt_base:
+        # Static local time
+        st_dt_local = datetime(2026, 6, 9, 12, 6, 0) - timedelta(minutes=min_offset)
+        # 2a. Naive UTC = Local value (12:05 etc.)
+        pt_final_points.append((st_dt_local, st_dt_local.strftime("%H:%M"), vals))
+        # 2b. Naive UTC = UTC value (06:35 etc.)
+        st_dt_utc = st_dt_local - timedelta(hours=5, minutes=30)
+        pt_final_points.append((st_dt_utc, st_dt_local.strftime("%H:%M"), vals))
+
+    for min_offset, vals in tc_base:
+        st_dt_local = datetime(2026, 6, 9, 12, 6, 0) - timedelta(minutes=min_offset)
+        tc_final_points.append((st_dt_local, st_dt_local.strftime("%H:%M"), vals))
+        st_dt_utc = st_dt_local - timedelta(hours=5, minutes=30)
+        tc_final_points.append((st_dt_utc, st_dt_local.strftime("%H:%M"), vals))
+
+    # Seed
+    for gw_id in gateways_by_station.values():
+        # Seed PT-101
+        for dt_utc, prt, vals in pt_final_points:
+            for idx, p_hex in enumerate(["01", "02", "03", "04", "05"]):
+                para_id = f"0001{p_hex}00"
+                exists = db.query(Telemetry).filter(
+                    Telemetry.gateway_id == gw_id,
+                    Telemetry.para_id == para_id,
+                    Telemetry.received_at == dt_utc
+                ).first()
+                if not exists:
+                    db.add(Telemetry(
+                        gateway_id=gw_id,
+                        para_id=para_id,
+                        prv=vals[idx],
+                        prt=prt,
+                        received_at=dt_utc
+                    ))
+
+        # Seed TC-12
+        for dt_utc, prt, vals in tc_final_points:
+            for idx, p_hex in enumerate(["01", "02", "03", "04", "05"]):
+                para_id = f"200C{p_hex}00"
+                exists = db.query(Telemetry).filter(
+                    Telemetry.gateway_id == gw_id,
+                    Telemetry.para_id == para_id,
+                    Telemetry.received_at == dt_utc
+                ).first()
+                if not exists:
+                    db.add(Telemetry(
+                        gateway_id=gw_id,
+                        para_id=para_id,
+                        prv=vals[idx],
+                        prt=prt,
+                        received_at=dt_utc
+                    ))
     db.commit()
