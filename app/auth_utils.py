@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import hashlib
 import secrets
 from fastapi import HTTPException, Depends
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.database import get_db
 
@@ -15,7 +15,7 @@ REFRESH_TOKEN_EXPIRE_DAYS = 1
 REMEMBER_ME_EXPIRE_DAYS = 7
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+security_scheme = HTTPBearer()
 
 
 def hash_password(plain: str) -> str:
@@ -41,7 +41,8 @@ def hash_refresh_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security_scheme), db: Session = Depends(get_db)):
+    token = credentials.credentials
     from app.models.models import User
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
