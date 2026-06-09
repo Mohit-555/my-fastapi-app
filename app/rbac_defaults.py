@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom
+from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory
 from app.auth_utils import hash_password
 
 
@@ -372,4 +372,38 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
                     humidity=None
                 )
                 db.add(room)
+    db.commit()
+
+    # 5. Ensure Default Asset Inventories
+    DEFAULT_INVENTORIES = [
+        {"station_code": "LKO", "asset_type_hex": "00", "asset_make": "Alstom", "count": 18},
+        {"station_code": "LKO", "asset_type_hex": "10", "asset_make": "Siemens", "count": 24},
+        {"station_code": "LKO", "asset_type_hex": "20", "asset_make": "Ansaldo", "count": 12},
+        {"station_code": "NDLS", "asset_type_hex": "00", "asset_make": "Siemens", "count": 32},
+        {"station_code": "NDLS", "asset_type_hex": "10", "asset_make": "Alstom", "count": 40},
+        {"station_code": "NDLS", "asset_type_hex": "20", "asset_make": "Siemens", "count": 15},
+        {"station_code": "MJA", "asset_type_hex": "00", "asset_make": "CEL", "count": 8},
+        {"station_code": "MJA", "asset_type_hex": "10", "asset_make": "Siemens", "count": 12},
+        {"station_code": "HWH", "asset_type_hex": "00", "asset_make": "Alstom", "count": 45},
+        {"station_code": "HWH", "asset_type_hex": "10", "asset_make": "Siemens", "count": 50},
+    ]
+
+    for inv_data in DEFAULT_INVENTORIES:
+        station = db.query(Station).filter(Station.station_code == inv_data["station_code"]).first()
+        if not station:
+            continue
+        
+        record = db.query(AssetInventory).filter(
+            AssetInventory.station_id == station.id,
+            AssetInventory.asset_type_hex == inv_data["asset_type_hex"],
+            AssetInventory.asset_make == inv_data["asset_make"]
+        ).first()
+        if not record:
+            record = AssetInventory(
+                station_id=station.id,
+                asset_type_hex=inv_data["asset_type_hex"],
+                asset_make=inv_data["asset_make"],
+                count=inv_data["count"]
+            )
+            db.add(record)
     db.commit()
