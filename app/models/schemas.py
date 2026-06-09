@@ -635,6 +635,7 @@ class MenuUpdate(BaseModel):
 class MenuResponse(MenuBase):
     id: int
     path: str
+    roles: List[int] = []
     class Config:
         from_attributes = True
 

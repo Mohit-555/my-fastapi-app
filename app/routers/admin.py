@@ -91,6 +91,7 @@ def _build_menu_tree(menus: List[Menu]) -> List[MenuTreeResponse]:
             icon=menu.icon,
             sort_order=menu.sort_order or 0,
             is_active=menu.is_active,
+            roles=menu.roles,
             children=[as_node(child) for child in children],
         )
 

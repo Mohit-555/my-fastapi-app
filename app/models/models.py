@@ -231,6 +231,10 @@ class Menu(Base):
             return MENU_PATH_OVERRIDES[self.slug]
         return f"/{self.slug.replace('.', '/')}"
 
+    @property
+    def roles(self) -> list[int]:
+        return [rm.role_id for rm in self.role_menus]
+
 
 class Role(Base):
     """
