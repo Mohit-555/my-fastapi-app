@@ -760,3 +760,25 @@ class EquipmentRoomResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class EquipmentRoomHistoryRow(BaseModel):
+    id: str
+    zone_code: str
+    division_code: str
+    station_code: str
+    station_name: str
+    timestamp: datetime
+    room_type: str
+    temperature: float
+    humidity: float
+
+    class Config:
+        from_attributes = True
+
+
+class EquipmentRoomHistoryResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    rows: List[EquipmentRoomHistoryRow]
