@@ -340,12 +340,15 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
     db.query(RoleMenu).delete()
     db.commit()
 
+    menus_by_slug = {m.slug: m for m in db.query(Menu).all()}
+    roles_by_id = {r.id: r for r in db.query(Role).all()}
+
     for slug, role_ids in ROLE_MAP.items():
-        menu = db.query(Menu).filter(Menu.slug == slug).first()
+        menu = menus_by_slug.get(slug)
         if not menu:
             continue
         for role_id in role_ids:
-            role = db.query(Role).filter(Role.id == role_id).first()
+            role = roles_by_id.get(role_id)
             if not role:
                 continue
             db.add(RoleMenu(role_id=role_id, menu_id=menu.id, permission="full" if role_id == 1 else "view"))
@@ -696,17 +699,19 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
         tc_final_points.append((st_dt_utc, st_dt_local.strftime("%H:%M"), vals))
 
     # Seed
-    for gw_id in gateways_by_station.values():
+    target_gws = list(gateways_by_station.values())
+    existing_set = set(
+        db.query(Telemetry.gateway_id, Telemetry.para_id, Telemetry.received_at)
+        .filter(Telemetry.gateway_id.in_(target_gws))
+        .all()
+    )
+
+    for gw_id in target_gws:
         # Seed PT-101
         for dt_utc, prt, vals in pt_final_points:
             for idx, p_hex in enumerate(["01", "02", "03", "04", "05"]):
                 para_id = f"0001{p_hex}00"
-                exists = db.query(Telemetry).filter(
-                    Telemetry.gateway_id == gw_id,
-                    Telemetry.para_id == para_id,
-                    Telemetry.received_at == dt_utc
-                ).first()
-                if not exists:
+                if (gw_id, para_id, dt_utc) not in existing_set:
                     db.add(Telemetry(
                         gateway_id=gw_id,
                         para_id=para_id,
@@ -719,12 +724,7 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
         for dt_utc, prt, vals in tc_final_points:
             for idx, p_hex in enumerate(["01", "02", "03", "04", "05"]):
                 para_id = f"200C{p_hex}00"
-                exists = db.query(Telemetry).filter(
-                    Telemetry.gateway_id == gw_id,
-                    Telemetry.para_id == para_id,
-                    Telemetry.received_at == dt_utc
-                ).first()
-                if not exists:
+                if (gw_id, para_id, dt_utc) not in existing_set:
                     db.add(Telemetry(
                         gateway_id=gw_id,
                         para_id=para_id,
