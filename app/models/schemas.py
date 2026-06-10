@@ -770,7 +770,7 @@ class MenuTreeResponse(MenuResponse):
 
 
 class RoleMenuAssign(BaseModel):
-    menu_id: int
+    menu_id: int = Field(validation_alias=AliasChoices('menu_id', 'id'))
     permission: str = "view"   # view / edit / full
 
 class RoleMenuResponse(BaseModel):

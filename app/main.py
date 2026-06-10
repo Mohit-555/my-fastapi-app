@@ -5,6 +5,9 @@ from alembic import command
 from alembic.config import Config
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.database import SessionLocal, engine
 from app.auth_utils import get_current_user
@@ -48,6 +51,33 @@ app = FastAPI(
     description="Remote Diagnostic and Predictive Maintenance System — RDSO/SPN/257/2025",
     version="1.1.0",
 )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"status": False, "message": exc.detail},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    errors = exc.errors()
+    err_msgs = []
+    for error in errors:
+        loc = ".".join(str(x) for x in error.get("loc", []) if x != "body")
+        msg = error.get("msg", "")
+        err_msgs.append(f"{loc}: {msg}" if loc else msg)
+    message = "Validation Error: " + ", ".join(err_msgs)
+    return JSONResponse(
+        status_code=422,
+        content={
+            "status": False,
+            "message": message,
+            "detail": errors
+        },
+    )
 
 app.add_middleware(
     CORSMiddleware,
