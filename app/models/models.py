@@ -1,6 +1,7 @@
 from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime,UTC
+from typing import Optional
 from app.database import Base
 
 
@@ -264,6 +265,10 @@ class Role(Base):
     role_menus = relationship("RoleMenu", back_populates="role", cascade="all, delete-orphan")
     users = relationship("User", back_populates="role")
 
+    @property
+    def menus(self):
+        return self.role_menus
+
 
 class RoleMenu(Base):
     """
@@ -279,6 +284,18 @@ class RoleMenu(Base):
 
     role = relationship("Role", back_populates="role_menus")
     menu = relationship("Menu", back_populates="role_menus")
+
+    @property
+    def menu_name(self) -> str:
+        return self.menu.name if self.menu else ""
+
+    @property
+    def menu_slug(self) -> str:
+        return self.menu.slug if self.menu else ""
+
+    @property
+    def parent_slug(self) -> Optional[str]:
+        return self.menu.parent_slug if self.menu else None
 
     __table_args__ = (
         UniqueConstraint("role_id", "menu_id", name="uq_role_menu"),
