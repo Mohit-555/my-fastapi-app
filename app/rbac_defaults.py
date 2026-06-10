@@ -330,7 +330,7 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
 
     # Reset roles sequence (only on PostgreSQL)
     try:
-        db.execute(text("SELECT setval('roles_id_seq', COALESCE((SELECT MAX(id) FROM roles), 1), false);"))
+        db.execute(text("SELECT setval('roles_id_seq', COALESCE((SELECT MAX(id) FROM roles), 1), true);"))
         db.commit()
     except Exception:
         db.rollback()
