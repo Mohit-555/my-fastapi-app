@@ -788,8 +788,26 @@ function setTokens(accessToken, refreshToken = getRefreshToken()) {
 }
 
 function maybeSaveToken(data) {
-  if (!data || typeof data !== 'object' || !data.access_token) return;
-  setTokens(data.access_token, data.refresh_token || getRefreshToken());
+  if (!data || typeof data !== 'object') return;
+  
+  let accessToken = null;
+  let refreshToken = null;
+
+  if (data.data && typeof data.data === 'object') {
+    accessToken = data.data.token || data.data.access_token;
+    refreshToken = data.data.refresh_token;
+  }
+
+  if (!accessToken) {
+    accessToken = data.token || data.access_token;
+  }
+  if (!refreshToken) {
+    refreshToken = data.refresh_token;
+  }
+
+  if (accessToken) {
+    setTokens(accessToken, refreshToken || getRefreshToken());
+  }
 }
 
 function updateAuthStatus() {

@@ -705,6 +705,7 @@ class LoginUserResponse(BaseModel):
 
 class LoginDataResponse(BaseModel):
     token: str
+    refresh_token: Optional[str] = None
     user: LoginUserResponse
 
 class LoginResponse(BaseModel):

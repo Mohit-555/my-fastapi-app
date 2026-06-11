@@ -87,6 +87,7 @@ def login(payload: UserLoginRequest, db: Session = Depends(get_db)):
         "message": "Login successful",
         "data": {
             "token": tokens.access_token,
+            "refresh_token": tokens.refresh_token,
             "user": {
                 "id": user.id,
                 "employee_id": user.employee_id,
