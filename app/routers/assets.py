@@ -30,6 +30,9 @@ from app.models.schemas import (
     ThresholdCreate,
     ThresholdUpdate,
     ThresholdResponse,
+    ZoneMinimalResponse,
+    DivisionMinimalResponse,
+    StationMinimalResponse,
 )
 from app.constants import (
     ASSET_TYPE_MAP,
@@ -149,12 +152,9 @@ def _asset_detail_query(
     q = (
         db.query(
             AssetInventory.id.label("id"),
-            Zone.id.label("zone_id"),
-            Zone.zone_code.label("zone"),
-            Division.id.label("division_id"),
-            Division.division_code.label("division"),
-            Station.id.label("station_id"),
-            Station.station_code.label("station"),
+            Zone,
+            Division,
+            Station,
             AssetInventory.asset_type_hex.label("asset_type_hex"),
             AssetInventory.asset_make.label("asset_make"),
             func.sum(AssetInventory.count).label("count"),
@@ -179,11 +179,8 @@ def _asset_detail_query(
         q.group_by(
             AssetInventory.id,
             Zone.id,
-            Zone.zone_code,
             Division.id,
-            Division.division_code,
             Station.id,
-            Station.station_code,
             AssetInventory.asset_type_hex,
             AssetInventory.asset_make,
         )
@@ -204,12 +201,12 @@ def _asset_detail_rows(raw_rows) -> List[AssetDetailRow]:
         rows.append(AssetDetailRow(
             id=row.id,
             sr=idx,
-            zone_id=row.zone_id,
-            zone=row.zone,
-            division_id=row.division_id,
-            division=row.division,
-            station_id=row.station_id,
-            station=row.station,
+            zone_id=row.Zone.id,
+            zone=ZoneMinimalResponse.model_validate(row.Zone),
+            division_id=row.Division.id,
+            division=DivisionMinimalResponse.model_validate(row.Division),
+            station_id=row.Station.id,
+            station=StationMinimalResponse.model_validate(row.Station),
             asset_type_hex=row.asset_type_hex,
             asset_type=asset_info[1] if asset_info else row.asset_type_hex,
             asset_make=row.asset_make,
@@ -276,9 +273,9 @@ def download_asset_detail(
     for row in rows:
         writer.writerow([
             row.sr,
-            row.zone,
-            row.division,
-            row.station,
+            row.zone.zone_code if row.zone else "",
+            row.division.division_code if row.division else "",
+            row.station.station_code if row.station else "",
             row.asset_type,
             row.asset_make,
             row.count,

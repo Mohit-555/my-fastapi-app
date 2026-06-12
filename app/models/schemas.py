@@ -122,6 +122,56 @@ class DivisionResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class ZoneMinimalResponse(BaseModel):
+    id: int
+    zone_name: str
+    zone_code: str
+    zoneName: str = ""
+    zoneCode: str = ""
+
+    @model_validator(mode="after")
+    def populate_aliases(self) -> "ZoneMinimalResponse":
+        self.zoneName = self.zone_name
+        self.zoneCode = self.zone_code
+        return self
+
+    class Config:
+        from_attributes = True
+
+class DivisionMinimalResponse(BaseModel):
+    id: int
+    division_name: str
+    division_code: str
+    zone_id: int
+    divisionName: str = ""
+    divisionCode: str = ""
+
+    @model_validator(mode="after")
+    def populate_aliases(self) -> "DivisionMinimalResponse":
+        self.divisionName = self.division_name
+        self.divisionCode = self.division_code
+        return self
+
+    class Config:
+        from_attributes = True
+
+class StationMinimalResponse(BaseModel):
+    id: int
+    station_name: str
+    station_code: str
+    division_id: int
+    stationName: str = ""
+    stationCode: str = ""
+
+    @model_validator(mode="after")
+    def populate_aliases(self) -> "StationMinimalResponse":
+        self.stationName = self.station_name
+        self.stationCode = self.station_code
+        return self
+
+    class Config:
+        from_attributes = True
+
 class DivisionWithStations(DivisionResponse):
     stations: List["StationResponse"] = []
 
@@ -386,11 +436,11 @@ class AssetDetailRow(BaseModel):
     id: int
     sr: int
     zone_id: int
-    zone: str
+    zone: Optional[ZoneMinimalResponse] = None
     division_id: int
-    division: str
+    division: Optional[DivisionMinimalResponse] = None
     station_id: int
-    station: str
+    station: Optional[StationMinimalResponse] = None
     asset_type_hex: str
     asset_type: str
     asset_make: str
@@ -829,38 +879,7 @@ class RoleMinimalResponse(BaseModel):
     class Config:
         from_attributes = True
 
-class ZoneMinimalResponse(BaseModel):
-    id: int
-    zone_name: str
-    zone_code: str
-    zoneName: str = ""
-    zoneCode: str = ""
 
-    @model_validator(mode="after")
-    def populate_aliases(self) -> "ZoneMinimalResponse":
-        self.zoneName = self.zone_name
-        self.zoneCode = self.zone_code
-        return self
-
-    class Config:
-        from_attributes = True
-
-class DivisionMinimalResponse(BaseModel):
-    id: int
-    division_name: str
-    division_code: str
-    zone_id: int
-    divisionName: str = ""
-    divisionCode: str = ""
-
-    @model_validator(mode="after")
-    def populate_aliases(self) -> "DivisionMinimalResponse":
-        self.divisionName = self.division_name
-        self.divisionCode = self.division_code
-        return self
-
-    class Config:
-        from_attributes = True
 
 class UserUpdateRequest(BaseModel):
     full_name: Optional[str] = None
