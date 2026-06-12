@@ -107,6 +107,12 @@ class AssetInventory(Base):
 
     station = relationship("Station", back_populates="asset_inventory")
 
+    @property
+    def asset_type(self) -> str:
+        from app.constants import ASSET_TYPE_MAP
+        info = ASSET_TYPE_MAP.get(self.asset_type_hex)
+        return info[1] if info else self.asset_type_hex
+
     __table_args__ = (
         UniqueConstraint(
             "station_id", "asset_type_hex", "asset_make",

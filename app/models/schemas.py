@@ -431,6 +431,7 @@ class AssetInventoryResponse(AssetInventoryBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    asset_type: str = ""
     class Config:
         from_attributes = True
 
