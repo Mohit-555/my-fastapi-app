@@ -128,11 +128,13 @@ class ZoneMinimalResponse(BaseModel):
     zone_code: str
     zoneName: str = ""
     zoneCode: str = ""
+    name: str = ""
 
     @model_validator(mode="after")
     def populate_aliases(self) -> "ZoneMinimalResponse":
         self.zoneName = self.zone_name
         self.zoneCode = self.zone_code
+        self.name = self.zone_name
         return self
 
     class Config:
@@ -145,11 +147,13 @@ class DivisionMinimalResponse(BaseModel):
     zone_id: int
     divisionName: str = ""
     divisionCode: str = ""
+    name: str = ""
 
     @model_validator(mode="after")
     def populate_aliases(self) -> "DivisionMinimalResponse":
         self.divisionName = self.division_name
         self.divisionCode = self.division_code
+        self.name = self.division_name
         return self
 
     class Config:
@@ -162,11 +166,13 @@ class StationMinimalResponse(BaseModel):
     division_id: int
     stationName: str = ""
     stationCode: str = ""
+    name: str = ""
 
     @model_validator(mode="after")
     def populate_aliases(self) -> "StationMinimalResponse":
         self.stationName = self.station_name
         self.stationCode = self.station_code
+        self.name = self.station_name
         return self
 
     class Config:
