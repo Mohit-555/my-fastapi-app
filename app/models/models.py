@@ -202,6 +202,8 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.now(UTC))
 
     role = relationship("Role", back_populates="users")                           # ← NEW
+    zone = relationship("Zone")
+    division = relationship("Division")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
     
 class RefreshToken(Base):

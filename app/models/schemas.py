@@ -819,6 +819,48 @@ class RoleResponse(RoleBase):
 
 # ─── User Management ──────────────────────────────────────────────────────────
 
+class RoleMinimalResponse(BaseModel):
+    id: int
+    name: str
+    display_name: str
+    level: int
+
+    class Config:
+        from_attributes = True
+
+class ZoneMinimalResponse(BaseModel):
+    id: int
+    zone_name: str
+    zone_code: str
+    zoneName: str = ""
+    zoneCode: str = ""
+
+    @model_validator(mode="after")
+    def populate_aliases(self) -> "ZoneMinimalResponse":
+        self.zoneName = self.zone_name
+        self.zoneCode = self.zone_code
+        return self
+
+    class Config:
+        from_attributes = True
+
+class DivisionMinimalResponse(BaseModel):
+    id: int
+    division_name: str
+    division_code: str
+    zone_id: int
+    divisionName: str = ""
+    divisionCode: str = ""
+
+    @model_validator(mode="after")
+    def populate_aliases(self) -> "DivisionMinimalResponse":
+        self.divisionName = self.division_name
+        self.divisionCode = self.division_code
+        return self
+
+    class Config:
+        from_attributes = True
+
 class UserUpdateRequest(BaseModel):
     full_name: Optional[str] = None
     designation: Optional[str] = None
@@ -846,6 +888,10 @@ class UserDetailResponse(BaseModel):
     is_active: bool
     created_at: datetime
     menus: List[RoleMenuResponse] = []   # menus this user can access via their role
+    role: Optional[RoleMinimalResponse] = None
+    zone: Optional[ZoneMinimalResponse] = None
+    division: Optional[DivisionMinimalResponse] = None
+
     class Config:
         from_attributes = True
 

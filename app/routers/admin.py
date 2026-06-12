@@ -23,7 +23,8 @@ from app.models.schemas import (
     MenuCreate, MenuUpdate, MenuResponse, MenuTreeResponse,
     RoleCreate, RoleUpdate, RoleResponse, RoleMenuAssign, RoleMenuResponse,
     UserDetailResponse, UserListResponse, UserUpdateRequest,
-    ChangePasswordRequest,
+    ChangePasswordRequest, RoleMinimalResponse, ZoneMinimalResponse,
+    DivisionMinimalResponse,
 )
 from app.auth_utils import hash_password, verify_password
 from app.rbac_defaults import ensure_default_menus
@@ -63,6 +64,9 @@ def _build_user_detail(user: User) -> UserDetailResponse:
         is_active=user.is_active,
         created_at=user.created_at,
         menus=role_menus,
+        role=RoleMinimalResponse.model_validate(user.role) if user.role else None,
+        zone=ZoneMinimalResponse.model_validate(user.zone) if user.zone else None,
+        division=DivisionMinimalResponse.model_validate(user.division) if user.division else None,
     )
 
 
