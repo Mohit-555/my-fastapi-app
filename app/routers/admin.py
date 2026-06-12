@@ -83,15 +83,11 @@ def _build_menu_tree(menus: List[Menu]) -> List[MenuTreeResponse]:
         children = sorted(children_by_parent.get(menu.slug, []), key=sort_key)
         return MenuTreeResponse(
             id=menu.id,
-            name=menu.name,
             label=menu.name,
-            slug=menu.slug,
-            href=None if children else menu.href,
-            parent_slug=menu.parent_slug,
             icon=menu.icon,
             sort_order=menu.sort_order or 0,
-            is_active=menu.is_active,
             roles=menu.roles,
+            href=None if children else menu.href,
             children=[as_node(child) for child in children],
         )
 

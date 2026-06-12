@@ -768,14 +768,10 @@ class MenuResponse(MenuBase):
 
 class MenuTreeResponse(BaseModel):
     id: int
-    name: str
-    slug: str
-    parent_slug: Optional[str] = None
+    label: str
     icon: Optional[str] = None
     sort_order: int = 0
-    is_active: bool = True
     roles: List[int] = []
-    label: str
     href: Optional[str] = None
     children: List["MenuTreeResponse"] = Field(default_factory=list)
 

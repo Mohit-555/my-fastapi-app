@@ -298,15 +298,11 @@ class Role(Base):
             children = sorted(children_by_parent.get(menu.slug, []), key=sort_key)
             return {
                 "id": menu.id,
-                "name": menu.name,
                 "label": menu.name,
-                "slug": menu.slug,
-                "parent_slug": menu.parent_slug,
                 "icon": menu.icon,
                 "sort_order": menu.sort_order or 0,
-                "is_active": menu.is_active,
-                "href": None if children else menu.href,
                 "roles": menu.roles,
+                "href": None if children else menu.href,
                 "children": [build_node(child) for child in children]
             }
 
