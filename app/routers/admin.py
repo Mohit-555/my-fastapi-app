@@ -86,8 +86,7 @@ def _build_menu_tree(menus: List[Menu]) -> List[MenuTreeResponse]:
             name=menu.name,
             label=menu.name,
             slug=menu.slug,
-            path=menu.path,
-            href=menu.href,
+            href=None if children else menu.href,
             parent_slug=menu.parent_slug,
             icon=menu.icon,
             sort_order=menu.sort_order or 0,
@@ -113,7 +112,7 @@ def list_menus(
     return q.order_by(Menu.sort_order, Menu.name).all()
 
 
-@router.get("/menus/tree", response_model=List[MenuTreeResponse])
+@router.get("/menus/tree", response_model=List[MenuTreeResponse], response_model_exclude_none=True)
 def list_menu_tree(
     include_inactive: bool = Query(False),
     db: Session = Depends(get_db),
@@ -170,13 +169,13 @@ def delete_menu(menu_id: int, db: Session = Depends(get_db)):
 
 # ── Roles ─────────────────────────────────────────────────────────────────────
 
-@router.get("/roles", response_model=List[RoleResponse])
+@router.get("/roles", response_model=List[RoleResponse], response_model_exclude_none=True)
 def list_roles(db: Session = Depends(get_db)):
     """List all roles with their assigned menus."""
     return db.query(Role).order_by(Role.level).all()
 
 
-@router.get("/roles/{role_id}", response_model=RoleResponse)
+@router.get("/roles/{role_id}", response_model=RoleResponse, response_model_exclude_none=True)
 def get_role(role_id: int, db: Session = Depends(get_db)):
     role = db.query(Role).filter(Role.id == role_id).first()
     if not role:
@@ -184,7 +183,7 @@ def get_role(role_id: int, db: Session = Depends(get_db)):
     return role
 
 
-@router.post("/roles", response_model=RoleResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/roles", response_model=RoleResponse, status_code=status.HTTP_201_CREATED, response_model_exclude_none=True)
 def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
     """
     Create a role and optionally assign menus in one call.
@@ -223,7 +222,7 @@ def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
     return role
 
 
-@router.put("/roles/{role_id}", response_model=RoleResponse)
+@router.put("/roles/{role_id}", response_model=RoleResponse, response_model_exclude_none=True)
 def update_role(role_id: int, payload: RoleUpdate, db: Session = Depends(get_db)):
     """Update role details (not menus — use the menu assignment endpoints for that)."""
     role = db.query(Role).filter(Role.id == role_id).first()
@@ -248,7 +247,7 @@ def delete_role(role_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
-@router.post("/roles/{role_id}/menus", response_model=RoleResponse)
+@router.post("/roles/{role_id}/menus", response_model=RoleResponse, response_model_exclude_none=True)
 def assign_menus_to_role(
     role_id: int,
     payload: List[RoleMenuAssign],

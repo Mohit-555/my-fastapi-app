@@ -305,8 +305,7 @@ class Role(Base):
                 "icon": menu.icon,
                 "sort_order": menu.sort_order or 0,
                 "is_active": menu.is_active,
-                "path": menu.path,
-                "href": menu.href,
+                "href": None if children else menu.href,
                 "roles": menu.roles,
                 "children": [build_node(child) for child in children]
             }
