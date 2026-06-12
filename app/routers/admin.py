@@ -211,13 +211,13 @@ def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
         menu = db.query(Menu).filter(Menu.id == menu_assign.menu_id).first()
         if not menu:
             raise HTTPException(status_code=404, detail=f"Menu {menu_assign.menu_id} not found")
-        db.add(RoleMenu(
-            role_id=role.id,
+        role.role_menus.append(RoleMenu(
             menu_id=menu_assign.menu_id,
             permission=menu_assign.permission,
         ))
 
     db.commit()
+    db.expire(role, ["role_menus"])
     db.refresh(role)
     return role
 
@@ -231,6 +231,7 @@ def update_role(role_id: int, payload: RoleUpdate, db: Session = Depends(get_db)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(role, field, value)
     db.commit()
+    db.expire(role, ["role_menus"])
     db.refresh(role)
     return role
 
@@ -268,16 +269,16 @@ def assign_menus_to_role(
         if not db.query(Menu).filter(Menu.id == item.menu_id).first():
             raise HTTPException(status_code=404, detail=f"Menu {item.menu_id} not found")
 
-    # Replace all assignments
-    db.query(RoleMenu).filter(RoleMenu.role_id == role_id).delete()
+    # Replace all assignments using collection directly
+    role.role_menus.clear()
     for item in payload:
-        db.add(RoleMenu(
-            role_id=role_id,
+        role.role_menus.append(RoleMenu(
             menu_id=item.menu_id,
             permission=item.permission,
         ))
 
     db.commit()
+    db.expire(role, ["role_menus"])
     db.refresh(role)
     return role
 
