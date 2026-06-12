@@ -148,6 +148,7 @@ def _asset_detail_query(
 ):
     q = (
         db.query(
+            AssetInventory.id.label("id"),
             Zone.id.label("zone_id"),
             Zone.zone_code.label("zone"),
             Division.id.label("division_id"),
@@ -176,6 +177,7 @@ def _asset_detail_query(
 
     return (
         q.group_by(
+            AssetInventory.id,
             Zone.id,
             Zone.zone_code,
             Division.id,
@@ -200,6 +202,7 @@ def _asset_detail_rows(raw_rows) -> List[AssetDetailRow]:
     for idx, row in enumerate(raw_rows, start=1):
         asset_info = ASSET_TYPE_MAP.get(row.asset_type_hex)
         rows.append(AssetDetailRow(
+            id=row.id,
             sr=idx,
             zone_id=row.zone_id,
             zone=row.zone,

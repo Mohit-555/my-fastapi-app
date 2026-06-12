@@ -383,6 +383,7 @@ class AssetMakeOption(BaseModel):
     value: str
 
 class AssetDetailRow(BaseModel):
+    id: int
     sr: int
     zone_id: int
     zone: str
