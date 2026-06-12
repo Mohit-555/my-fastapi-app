@@ -760,6 +760,7 @@ class MenuUpdate(BaseModel):
 class MenuResponse(MenuBase):
     id: int
     path: str
+    href: str
     roles: List[int] = []
     class Config:
         from_attributes = True
@@ -803,7 +804,7 @@ class RoleUpdate(BaseModel):
 class RoleResponse(RoleBase):
     id: int
     created_at: datetime
-    menus: List[RoleMenuResponse] = []
+    menus: List[MenuTreeResponse] = []
     class Config:
         from_attributes = True
 

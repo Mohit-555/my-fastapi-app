@@ -243,6 +243,10 @@ class Menu(Base):
         return f"/{self.slug.replace('.', '/')}"
 
     @property
+    def href(self) -> str:
+        return self.path
+
+    @property
     def roles(self) -> list[int]:
         return [rm.role_id for rm in self.role_menus]
 
@@ -267,7 +271,69 @@ class Role(Base):
 
     @property
     def menus(self):
-        return self.role_menus
+        from sqlalchemy.orm import object_session
+        session = object_session(self)
+        
+        # 1. Fetch all active menus
+        if session:
+            all_menus = session.query(Menu).filter(Menu.is_active == True).all()
+        else:
+            all_menus = [rm.menu for rm in self.role_menus if rm.menu and rm.menu.is_active]
+
+        assigned_ids = {rm.menu_id for rm in self.role_menus}
+
+        # 2. Build the full tree
+        children_by_parent = {}
+        roots = []
+        for menu in all_menus:
+            if menu.parent_slug:
+                children_by_parent.setdefault(menu.parent_slug, []).append(menu)
+            else:
+                roots.append(menu)
+
+        def sort_key(m):
+            return (m.sort_order or 0, m.name)
+
+        def build_node(menu):
+            children = sorted(children_by_parent.get(menu.slug, []), key=sort_key)
+            return {
+                "id": menu.id,
+                "name": menu.name,
+                "label": menu.name,
+                "slug": menu.slug,
+                "parent_slug": menu.parent_slug,
+                "icon": menu.icon,
+                "sort_order": menu.sort_order or 0,
+                "is_active": menu.is_active,
+                "path": menu.path,
+                "href": menu.href,
+                "roles": menu.roles,
+                "children": [build_node(child) for child in children]
+            }
+
+        full_tree = [build_node(m) for m in sorted(roots, key=sort_key)]
+
+        # 3. Filter tree branches based on role assignments
+        def filter_node(node):
+            filtered_children = []
+            for child in node["children"]:
+                f_child = filter_node(child)
+                if f_child:
+                    filtered_children.append(f_child)
+            
+            if node["id"] in assigned_ids or filtered_children:
+                node_copy = dict(node)
+                node_copy["children"] = filtered_children
+                return node_copy
+            return None
+
+        filtered_tree = []
+        for root in full_tree:
+            f_root = filter_node(root)
+            if f_root:
+                filtered_tree.append(f_root)
+
+        return filtered_tree
 
 
 class RoleMenu(Base):

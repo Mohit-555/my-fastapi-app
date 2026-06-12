@@ -87,6 +87,7 @@ def _build_menu_tree(menus: List[Menu]) -> List[MenuTreeResponse]:
             label=menu.name,
             slug=menu.slug,
             path=menu.path,
+            href=menu.href,
             parent_slug=menu.parent_slug,
             icon=menu.icon,
             sort_order=menu.sort_order or 0,
