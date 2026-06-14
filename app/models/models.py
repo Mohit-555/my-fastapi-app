@@ -190,6 +190,21 @@ class AlertEvent(Base):
 
     station = relationship("Station", back_populates="alert_events")
 
+    # Logical relationships (no DB migrations needed)
+    asset_type = relationship(
+        "AssetTypeMaster",
+        primaryjoin="foreign(AlertEvent.asset_type_hex) == AssetTypeMaster.asset_type_id",
+        uselist=False,
+        viewonly=True
+    )
+
+    cause_master = relationship(
+        "AlertCauseMaster",
+        primaryjoin="foreign(AlertEvent.cause) == AlertCauseMaster.cause_code",
+        uselist=False,
+        viewonly=True
+    )
+
 class User(Base):
     __tablename__ = "users"
 
