@@ -59,14 +59,17 @@ def list_asset_types():
             hex_to_group[h] = group_label
 
     result = []
-    for hex_id, (code, name) in ASSET_TYPE_MAP.items():
+    sorted_hex_keys = sorted(ASSET_TYPE_MAP.keys())
+    for idx, hex_id in enumerate(sorted_hex_keys, start=1):
+        code, name = ASSET_TYPE_MAP[hex_id]
         result.append(AssetTypeOption(
+            id=idx,
             hex_id=hex_id,
             code=code,
             label=name,
             group_label=hex_to_group.get(hex_id, name),
         ))
-    return sorted(result, key=lambda x: x.hex_id)
+    return result
 
 
 @router.get("/types/grouped", response_model=List[AssetTypeGroupOption])
@@ -74,26 +77,32 @@ def list_asset_types_grouped():
     """
     Return asset types grouped by dashboard display group.
     This directly mirrors the Asset Type dropdown in the Telemetry Live screen:
-      ALL / Point Machine / DC Track Circuit / AC Track Circuit /
-      Main Signal / Axle Counter / LC Gate / BPAC / IPS / Battery
+    All / Point Machine / DC Track Circuit / AC Track Circuit /
+    Main Signal / Axle Counter / LC Gate / BPAC / IPS / Battery
     """
     groups = []
+    group_id = 1
+    member_id = 1
     for group_label, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
         members = []
         for h in hexes:
             info = ASSET_TYPE_MAP.get(h)
             if info:
                 members.append(AssetTypeOption(
+                    id=member_id,
                     hex_id=h,
                     code=info[0],
                     label=info[1],
                     group_label=group_label,
                 ))
+                member_id += 1
         groups.append(AssetTypeGroupOption(
+            id=group_id,
             group_label=group_label,
             asset_type_hexes=hexes,
             members=members,
         ))
+        group_id += 1
     return groups
 
 

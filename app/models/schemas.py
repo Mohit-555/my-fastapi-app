@@ -379,6 +379,7 @@ class TelemetryHistoryResponse(BaseModel):
 
 class AssetTypeOption(BaseModel):
     """One entry in the Asset Type dropdown."""
+    id: int
     hex_id: str          # e.g. "00"
     code: str            # e.g. "EOP"
     label: str           # e.g. "Point Machine"
@@ -390,6 +391,7 @@ class AssetTypeGroupOption(BaseModel):
     Grouped option for the dashboard Asset Type dropdown.
     Each group maps to one of the friendly labels in ASSET_TYPE_DISPLAY_GROUPS.
     """
+    id: int
     group_label: str
     asset_type_hexes: List[str]
     members: List[AssetTypeOption]

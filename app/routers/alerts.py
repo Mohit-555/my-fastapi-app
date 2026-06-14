@@ -784,22 +784,28 @@ def get_alert_filters(db: Session = Depends(get_db)):
     ]
 
     asset_groups = []
+    group_id = 1
+    member_id = 1
     for group_label, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
         members = []
         for h in hexes:
             info = ASSET_TYPE_MAP.get(h)
             if info:
                 members.append(AssetTypeOption(
+                    id=member_id,
                     hex_id=h,
                     code=info[0],
                     label=info[1],
                     group_label=group_label,
                 ))
+                member_id += 1
         asset_groups.append(AssetTypeGroupOption(
+            id=group_id,
             group_label=group_label,
             asset_type_hexes=hexes,
             members=members,
         ))
+        group_id += 1
 
     alert_types_list = [
         AlertFilterOption(id=1, label="All", value="ALL"),
