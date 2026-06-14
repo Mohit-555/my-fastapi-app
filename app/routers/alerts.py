@@ -470,6 +470,17 @@ def _live_cards(raw_rows) -> List[AlertLiveCard]:
     return cards
 
 
+@router.get("/types", response_model=List[AlertFilterOption])
+def list_alert_types():
+    """
+    Return a list of alert types for dropdown filters.
+    """
+    return [
+        AlertFilterOption(label="Predictive", value="Predictive"),
+        AlertFilterOption(label="Failure", value="Failure"),
+    ]
+
+
 @router.get("/live", response_model=AlertLiveResponse)
 def get_alert_live(
     zone_id: Optional[int] = Query(None),
