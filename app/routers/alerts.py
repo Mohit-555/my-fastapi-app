@@ -476,8 +476,9 @@ def list_alert_types():
     Return a list of alert types for dropdown filters.
     """
     return [
-        AlertFilterOption(label="Predictive", value="Predictive"),
-        AlertFilterOption(label="Failure", value="Failure"),
+        AlertFilterOption(id=1, label="All", value="ALL"),
+        AlertFilterOption(id=2, label="Predictive", value="Predictive"),
+        AlertFilterOption(id=3, label="Failure", value="Failure"),
     ]
 
 
@@ -509,7 +510,13 @@ def list_alert_asset_numbers(
             q = q.filter(AlertEvent.asset_type_hex.in_(hex_list))
 
     results = q.order_by(AlertEvent.asset_no).all()
-    return [AlertFilterOption(label=row.asset_no, value=row.asset_no) for row in results if row.asset_no]
+    res_list = []
+    idx = 1
+    for row in results:
+        if row.asset_no:
+            res_list.append(AlertFilterOption(id=idx, label=row.asset_no, value=row.asset_no))
+            idx += 1
+    return res_list
 
 
 @router.get("/live", response_model=AlertLiveResponse)
@@ -770,6 +777,11 @@ def get_alert_filters(db: Session = Depends(get_db)):
         db.query(AlertEvent.alert_status).distinct().order_by(AlertEvent.alert_status).all()
         if row.alert_status
     ]
+    asset_numbers = [
+        row.asset_no for row in
+        db.query(AlertEvent.asset_no).distinct().order_by(AlertEvent.asset_no).all()
+        if row.asset_no
+    ]
 
     asset_groups = []
     for group_label, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
@@ -789,15 +801,42 @@ def get_alert_filters(db: Session = Depends(get_db)):
             members=members,
         ))
 
+    alert_types_list = [
+        AlertFilterOption(id=1, label="All", value="ALL"),
+        AlertFilterOption(id=2, label="Predictive", value="Predictive"),
+        AlertFilterOption(id=3, label="Failure", value="Failure"),
+    ]
+
+    asset_numbers_list = [
+        AlertFilterOption(id=idx, label=val, value=val)
+        for idx, val in enumerate(asset_numbers, start=1)
+    ]
+
+    causes_list = [
+        AlertFilterOption(id=idx, label=val, value=val)
+        for idx, val in enumerate(cause_options, start=1)
+    ]
+
+    feedbacks_list = [
+        AlertFilterOption(id=idx, label=val, value=val)
+        for idx, val in enumerate(FEEDBACK_OPTIONS, start=1)
+    ]
+
+    alert_statuses_list = [
+        AlertFilterOption(id=idx, label=val, value=val)
+        for idx, val in enumerate(alert_statuses, start=1)
+    ]
+
     return AlertFiltersResponse(
         zones=[DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex) for z in zones],
         divisions=[DropdownOption(id=d.id, label=d.division_name, code=d.division_code, hex_id=d.division_id_hex) for d in divisions],
         stations=[DropdownOption(id=s.id, label=s.station_name, code=s.station_code, hex_id=s.station_id_hex) for s in stations],
-        alert_types=[AlertFilterOption(label=v, value=v) for v in ALERT_TYPE_OPTIONS],
+        alert_types=alert_types_list,
         asset_types=asset_groups,
-        causes=[AlertFilterOption(label=v, value=v) for v in cause_options],
-        feedbacks=[AlertFilterOption(label=v, value=v) for v in FEEDBACK_OPTIONS],
-        alert_statuses=[AlertFilterOption(label=v, value=v) for v in alert_statuses],
+        asset_numbers=asset_numbers_list,
+        causes=causes_list,
+        feedbacks=feedbacks_list,
+        alert_statuses=alert_statuses_list,
     )
 
 

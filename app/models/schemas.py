@@ -653,6 +653,7 @@ class AlertEventsResponse(BaseModel):
 
 
 class AlertFilterOption(BaseModel):
+    id: int
     label: str
     value: str
 
@@ -663,6 +664,7 @@ class AlertFiltersResponse(BaseModel):
     stations: List[DropdownOption]
     alert_types: List[AlertFilterOption]
     asset_types: List[AssetTypeGroupOption]
+    asset_numbers: List[AlertFilterOption]
     causes: List[AlertFilterOption]
     feedbacks: List[AlertFilterOption]
     alert_statuses: List[AlertFilterOption]
