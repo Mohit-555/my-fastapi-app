@@ -15,7 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.models import AssetInventory, Division, Threshold, Station, Zone
+from app.models.models import AssetInventory, Division, Threshold, Station, Zone, AssetTypeMaster
 from app.models.schemas import (
     AssetDetailResponse,
     AssetDetailRow,
@@ -49,7 +49,7 @@ router = APIRouter(prefix="/assets", tags=["Assets & Thresholds"])
 # ── Asset Type Endpoints ──────────────────────────────────────────────────────
 
 @router.get("/types", response_model=List[AssetTypeOption])
-def list_asset_types():
+def list_asset_types(db: Session = Depends(get_db)):
     """
     Return a flat list of all asset types.
     Each entry includes the display group label so the frontend can group them.
@@ -60,41 +60,42 @@ def list_asset_types():
         for h in hexes:
             hex_to_group[h] = group_label
 
+    db_types = db.query(AssetTypeMaster).order_by(AssetTypeMaster.asset_type_id).all()
     result = []
-    sorted_hex_keys = sorted(ASSET_TYPE_MAP.keys())
-    for idx, hex_id in enumerate(sorted_hex_keys, start=1):
-        code, name = ASSET_TYPE_MAP[hex_id]
+    for idx, t in enumerate(db_types, start=1):
         result.append(AssetTypeOption(
             id=idx,
-            hex_id=hex_id,
-            code=code,
-            label=name,
-            group_label=hex_to_group.get(hex_id, name),
+            hex_id=t.asset_type_id,
+            code=t.asset_type_code,
+            label=t.asset_type_name,
+            group_label=hex_to_group.get(t.asset_type_id, t.asset_type_name),
         ))
     return result
 
 
 @router.get("/types/grouped", response_model=List[AssetTypeGroupOption])
-def list_asset_types_grouped():
+def list_asset_types_grouped(db: Session = Depends(get_db)):
     """
     Return asset types grouped by dashboard display group.
     This directly mirrors the Asset Type dropdown in the Telemetry Live screen:
     All / Point Machine / DC Track Circuit / AC Track Circuit /
     Main Signal / Axle Counter / LC Gate / BPAC / IPS / Battery
     """
+    db_types_map = {t.asset_type_id: t for t in db.query(AssetTypeMaster).all()}
+
     groups = []
     group_id = 1
     member_id = 1
     for group_label, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
         members = []
         for h in hexes:
-            info = ASSET_TYPE_MAP.get(h)
-            if info:
+            t = db_types_map.get(h)
+            if t:
                 members.append(AssetTypeOption(
                     id=member_id,
                     hex_id=h,
-                    code=info[0],
-                    label=info[1],
+                    code=t.asset_type_code,
+                    label=t.asset_type_name,
                     group_label=group_label,
                 ))
                 member_id += 1
@@ -336,6 +337,8 @@ def get_asset_filters(db: Session = Depends(get_db)):
         for idx, make in enumerate(makes, start=1)
     ]
 
+    db_types_map = {t.asset_type_id: t for t in db.query(AssetTypeMaster).all()}
+
     # Grouped asset types
     asset_groups = []
     group_id = 1
@@ -343,13 +346,13 @@ def get_asset_filters(db: Session = Depends(get_db)):
     for group_label, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
         members = []
         for h in hexes:
-            info = ASSET_TYPE_MAP.get(h)
-            if info:
+            t = db_types_map.get(h)
+            if t:
                 members.append(AssetTypeOption(
                     id=member_id,
                     hex_id=h,
-                    code=info[0],
-                    label=info[1],
+                    code=t.asset_type_code,
+                    label=t.asset_type_name,
                     group_label=group_label,
                 ))
                 member_id += 1

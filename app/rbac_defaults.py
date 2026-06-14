@@ -1,8 +1,9 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent, Gateway, Telemetry, MaintenanceMode
+from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent, Gateway, Telemetry, MaintenanceMode, AssetTypeMaster
 from app.auth_utils import hash_password
+from app.constants import ASSET_TYPE_MAP
 
 
 DEFAULT_MENUS = [
@@ -752,3 +753,20 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
                 created_at=datetime(2026, 6, 9, 9, 19, 30)
             ))
             db.commit()
+
+
+def ensure_default_asset_types(db: Session) -> None:
+    """
+    Ensure the asset_type_master table contains all types from ASSET_TYPE_MAP.
+    """
+    equipment_room_hexes = {"50", "51", "60"}
+    for hex_id, (code, name) in ASSET_TYPE_MAP.items():
+        exists = db.query(AssetTypeMaster).filter(AssetTypeMaster.asset_type_id == hex_id).first()
+        if not exists:
+            db.add(AssetTypeMaster(
+                asset_type_id=hex_id,
+                asset_type_code=code,
+                asset_type_name=name,
+                is_equipment_room=(hex_id in equipment_room_hexes),
+            ))
+    db.commit()

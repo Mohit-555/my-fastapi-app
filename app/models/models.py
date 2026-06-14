@@ -408,3 +408,16 @@ class MaintenanceMode(Base):
 
     station = relationship("Station")
 
+
+class AssetTypeMaster(Base):
+    """
+    Represents the Asset Type Master table.
+    """
+    __tablename__ = "asset_type_master"
+
+    asset_type_id = Column(String(2), primary_key=True)
+    asset_type_code = Column(String(20), unique=True, nullable=False)
+    asset_type_name = Column(String(100), nullable=False)
+    is_equipment_room = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+

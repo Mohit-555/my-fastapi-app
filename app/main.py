@@ -14,7 +14,7 @@ from app.auth_utils import get_current_user
 from app.models.models import Base
 from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin, equipment_room, maintenance
 from app.routers import auth
-from app.rbac_defaults import ensure_default_menus, ensure_default_roles_users_and_permissions, ensure_default_zones, ensure_default_divisions, ensure_default_stations
+from app.rbac_defaults import ensure_default_menus, ensure_default_roles_users_and_permissions, ensure_default_zones, ensure_default_divisions, ensure_default_stations, ensure_default_asset_types
 try:
     from seed import seed as seed_zones_and_divisions
 except ImportError:
@@ -45,6 +45,7 @@ with SessionLocal() as db:
     ensure_default_stations(db)
     ensure_default_menus(db)
     ensure_default_roles_users_and_permissions(db)
+    ensure_default_asset_types(db)
 
 app = FastAPI(
     title="RDPMS API",

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP
 from app.database import get_db
-from app.models.models import AlertEvent, Division, Station, Zone
+from app.models.models import AlertEvent, Division, Station, Zone, AssetTypeMaster
 from app.models.schemas import (
     AlertEventCreate,
     AlertEventResponse,
@@ -829,19 +829,21 @@ def get_alert_filters(db: Session = Depends(get_db)):
         if row.asset_no
     ]
 
+    db_types_map = {t.asset_type_id: t for t in db.query(AssetTypeMaster).all()}
+
     asset_groups = []
     group_id = 1
     member_id = 1
     for group_label, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
         members = []
         for h in hexes:
-            info = ASSET_TYPE_MAP.get(h)
-            if info:
+            t = db_types_map.get(h)
+            if t:
                 members.append(AssetTypeOption(
                     id=member_id,
                     hex_id=h,
-                    code=info[0],
-                    label=info[1],
+                    code=t.asset_type_code,
+                    label=t.asset_type_name,
                     group_label=group_label,
                 ))
                 member_id += 1
