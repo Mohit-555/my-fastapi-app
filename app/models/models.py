@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, ForeignKey, Text, UniqueConstraint, Enum
 from sqlalchemy.orm import relationship
 from datetime import datetime,UTC
 from typing import Optional
@@ -420,4 +420,19 @@ class AssetTypeMaster(Base):
     asset_type_name = Column(String(100), nullable=False)
     is_equipment_room = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AlertCauseMaster(Base):
+    """
+    Represents the Alert Cause Master table.
+    """
+    __tablename__ = "alert_cause_master"
+
+    cause_code = Column(String(50), primary_key=True)
+    cause_detail = Column(Text, nullable=False)
+    asset_type_id = Column(String(2), ForeignKey("asset_type_master.asset_type_id"), nullable=True)
+    alert_category = Column(Enum("FAILURE", "PREDICTIVE", name="alert_category_enum"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    asset_type = relationship("AssetTypeMaster")
 

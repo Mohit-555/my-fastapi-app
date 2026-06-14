@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP
 from app.database import get_db
-from app.models.models import AlertEvent, Division, Station, Zone, AssetTypeMaster
+from app.models.models import AlertEvent, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster
 from app.models.schemas import (
     AlertEventCreate,
     AlertEventResponse,
@@ -531,37 +531,46 @@ def list_alert_causes(
     """
     Return a list of unique causes filtered by zone, division, station, asset type, and asset number.
     """
-    q = db.query(AlertEvent.cause).distinct()
-
-    if station_id is not None:
-        q = q.filter(AlertEvent.station_id == station_id)
-    elif division_id is not None:
-        q = q.join(Station, Station.id == AlertEvent.station_id).filter(Station.division_id == division_id)
-    elif zone_id is not None:
-        q = q.join(Station, Station.id == AlertEvent.station_id)\
-             .join(Division, Division.id == Station.division_id)\
-             .filter(Division.zone_id == zone_id)
-
+    q_master = db.query(AlertCauseMaster)
+    hex_list = []
     if asset_type_hex:
         hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
         if hex_list:
-            q = q.filter(AlertEvent.asset_type_hex.in_(hex_list))
+            q_master = q_master.filter(AlertCauseMaster.asset_type_id.in_(hex_list))
+
+    master_causes = q_master.order_by(AlertCauseMaster.cause_code).all()
+    master_codes = {c.cause_code.upper() for c in master_causes}
+
+    q_events = db.query(AlertEvent.cause).distinct()
+    if station_id is not None:
+        q_events = q_events.filter(AlertEvent.station_id == station_id)
+    elif division_id is not None:
+        q_events = q_events.join(Station, Station.id == AlertEvent.station_id).filter(Station.division_id == division_id)
+    elif zone_id is not None:
+        q_events = q_events.join(Station, Station.id == AlertEvent.station_id)\
+             .join(Division, Division.id == Station.division_id)\
+             .filter(Division.zone_id == zone_id)
+
+    if asset_type_hex and hex_list:
+        q_events = q_events.filter(AlertEvent.asset_type_hex.in_(hex_list))
 
     if asset_no:
-        q = q.filter(AlertEvent.asset_no == asset_no)
+        q_events = q_events.filter(AlertEvent.asset_no == asset_no)
 
-    results = q.order_by(AlertEvent.cause).all()
-    causes = [row.cause for row in results if row.cause]
+    event_causes = [row.cause for row in q_events.order_by(AlertEvent.cause).all() if row.cause]
 
-    # Combine with default CAUSE_OPTIONS
-    cause_options = CAUSE_OPTIONS + [
-        c for c in causes
-        if c.upper() not in {option.upper() for option in CAUSE_OPTIONS}
-    ]
+    result_causes = []
+    for c in master_causes:
+        result_causes.append((c.cause_code, c.cause_detail))
+
+    for code in event_causes:
+        if code.upper() not in master_codes:
+            result_causes.append((code, code))
+            master_codes.add(code.upper())
 
     return [
-        AlertFilterOption(id=idx, label=val, value=val)
-        for idx, val in enumerate(cause_options, start=1)
+        AlertFilterOption(id=idx, label=detail, value=code)
+        for idx, (code, detail) in enumerate(result_causes, start=1)
     ]
 
 
@@ -809,14 +818,27 @@ def get_alert_filters(db: Session = Depends(get_db)):
     zones = db.query(Zone).order_by(Zone.zone_name).all()
     divisions = db.query(Division).order_by(Division.division_name).all()
     stations = db.query(Station).order_by(Station.station_name).all()
-    causes = [
+    master_causes = db.query(AlertCauseMaster).order_by(AlertCauseMaster.cause_code).all()
+    master_codes = {c.cause_code.upper() for c in master_causes}
+
+    event_causes = [
         row.cause for row in
         db.query(AlertEvent.cause).distinct().order_by(AlertEvent.cause).all()
         if row.cause
     ]
-    cause_options = CAUSE_OPTIONS + [
-        cause for cause in causes
-        if cause.upper() not in {option.upper() for option in CAUSE_OPTIONS}
+
+    result_causes = []
+    for c in master_causes:
+        result_causes.append((c.cause_code, c.cause_detail))
+
+    for code in event_causes:
+        if code.upper() not in master_codes:
+            result_causes.append((code, code))
+            master_codes.add(code.upper())
+
+    cause_options_list = [
+        AlertFilterOption(id=idx, label=detail, value=code)
+        for idx, (code, detail) in enumerate(result_causes, start=1)
     ]
     alert_statuses = [
         row.alert_status for row in
@@ -866,11 +888,6 @@ def get_alert_filters(db: Session = Depends(get_db)):
         for idx, val in enumerate(asset_numbers, start=1)
     ]
 
-    causes_list = [
-        AlertFilterOption(id=idx, label=val, value=val)
-        for idx, val in enumerate(cause_options, start=1)
-    ]
-
     feedbacks_list = [
         AlertFilterOption(id=idx, label=val, value=val)
         for idx, val in enumerate(FEEDBACK_OPTIONS, start=1)
@@ -888,7 +905,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
         alert_types=alert_types_list,
         asset_types=asset_groups,
         asset_numbers=asset_numbers_list,
-        causes=causes_list,
+        causes=cause_options_list,
         feedbacks=feedbacks_list,
         alert_statuses=alert_statuses_list,
     )

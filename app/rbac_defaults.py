@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent, Gateway, Telemetry, MaintenanceMode, AssetTypeMaster
+from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent, Gateway, Telemetry, MaintenanceMode, AssetTypeMaster, AlertCauseMaster
 from app.auth_utils import hash_password
 from app.constants import ASSET_TYPE_MAP
 
@@ -768,5 +768,29 @@ def ensure_default_asset_types(db: Session) -> None:
                 asset_type_code=code,
                 asset_type_name=name,
                 is_equipment_room=(hex_id in equipment_room_hexes),
+            ))
+    db.commit()
+
+
+def ensure_default_alert_causes(db: Session) -> None:
+    """
+    Ensure the alert_cause_master table is seeded.
+    """
+    default_causes = [
+        {"cause_code": "PT-OBS", "cause_detail": "Point machine obstruction", "asset_type_id": "00", "alert_category": "FAILURE"},
+        {"cause_code": "TC-SHUNT", "cause_detail": "Track circuit shunt failure", "asset_type_id": "20", "alert_category": "FAILURE"},
+        {"cause_code": "COMM-FAIL", "cause_detail": "Communication failure", "asset_type_id": "21", "alert_category": "FAILURE"},
+        {"cause_code": "TEMP-HIGH", "cause_detail": "Temperature high", "asset_type_id": "10", "alert_category": "PREDICTIVE"},
+        {"cause_code": "MOTOR-OC", "cause_detail": "Motor overcurrent", "asset_type_id": "00", "alert_category": "FAILURE"},
+        {"cause_code": "BAT-LOW", "cause_detail": "Battery voltage low", "asset_type_id": "41", "alert_category": "PREDICTIVE"},
+    ]
+    for c in default_causes:
+        exists = db.query(AlertCauseMaster).filter(AlertCauseMaster.cause_code == c["cause_code"]).first()
+        if not exists:
+            db.add(AlertCauseMaster(
+                cause_code=c["cause_code"],
+                cause_detail=c["cause_detail"],
+                asset_type_id=c["asset_type_id"],
+                alert_category=c["alert_category"],
             ))
     db.commit()
