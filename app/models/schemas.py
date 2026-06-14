@@ -438,8 +438,17 @@ class AssetInventoryResponse(AssetInventoryBase):
         from_attributes = True
 
 class AssetMakeOption(BaseModel):
+    id: int
     label: str
     value: str
+
+
+class AssetFiltersResponse(BaseModel):
+    zones: List[DropdownOption]
+    divisions: List[DropdownOption]
+    stations: List[DropdownOption]
+    asset_types: List[AssetTypeGroupOption]
+    asset_makes: List[AssetMakeOption]
 
 class AssetDetailRow(BaseModel):
     id: int

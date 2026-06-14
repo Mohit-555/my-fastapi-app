@@ -33,6 +33,8 @@ from app.models.schemas import (
     ZoneMinimalResponse,
     DivisionMinimalResponse,
     StationMinimalResponse,
+    AssetFiltersResponse,
+    DropdownOption,
 )
 from app.constants import (
     ASSET_TYPE_MAP,
@@ -314,7 +316,58 @@ def list_asset_makes(
         q = q.filter(AssetInventory.station_id == station_id)
 
     makes = [row.asset_make for row in q.order_by(AssetInventory.asset_make).all()]
-    return [AssetMakeOption(label=make, value=make) for make in makes]
+    return [
+        AssetMakeOption(id=idx, label=make, value=make)
+        for idx, make in enumerate(makes, start=1)
+    ]
+
+
+@router.get("/filters", response_model=AssetFiltersResponse)
+def get_asset_filters(db: Session = Depends(get_db)):
+    """Return dropdown data for the Asset Detail / Inventory filter bar."""
+    zones = db.query(Zone).order_by(Zone.zone_name).all()
+    divisions = db.query(Division).order_by(Division.division_name).all()
+    stations = db.query(Station).order_by(Station.station_name).all()
+
+    makes_rows = db.query(AssetInventory.asset_make).distinct().order_by(AssetInventory.asset_make).all()
+    makes = [row.asset_make for row in makes_rows if row.asset_make]
+    asset_makes_list = [
+        AssetMakeOption(id=idx, label=make, value=make)
+        for idx, make in enumerate(makes, start=1)
+    ]
+
+    # Grouped asset types
+    asset_groups = []
+    group_id = 1
+    member_id = 1
+    for group_label, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
+        members = []
+        for h in hexes:
+            info = ASSET_TYPE_MAP.get(h)
+            if info:
+                members.append(AssetTypeOption(
+                    id=member_id,
+                    hex_id=h,
+                    code=info[0],
+                    label=info[1],
+                    group_label=group_label,
+                ))
+                member_id += 1
+        asset_groups.append(AssetTypeGroupOption(
+            id=group_id,
+            group_label=group_label,
+            asset_type_hexes=hexes,
+            members=members,
+        ))
+        group_id += 1
+
+    return AssetFiltersResponse(
+        zones=[DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex) for z in zones],
+        divisions=[DropdownOption(id=d.id, label=d.division_name, code=d.division_code, hex_id=d.division_id_hex) for d in divisions],
+        stations=[DropdownOption(id=s.id, label=s.station_name, code=s.station_code, hex_id=s.station_id_hex) for s in stations],
+        asset_types=asset_groups,
+        asset_makes=asset_makes_list,
+    )
 
 
 @router.get("/inventory", response_model=List[AssetInventoryResponse])
