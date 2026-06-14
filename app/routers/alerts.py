@@ -519,6 +519,52 @@ def list_alert_asset_numbers(
     return res_list
 
 
+@router.get("/causes", response_model=List[AlertFilterOption])
+def list_alert_causes(
+    zone_id: Optional[int] = Query(None),
+    division_id: Optional[int] = Query(None),
+    station_id: Optional[int] = Query(None),
+    asset_type_hex: Optional[str] = Query(None),
+    asset_no: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Return a list of unique causes filtered by zone, division, station, asset type, and asset number.
+    """
+    q = db.query(AlertEvent.cause).distinct()
+
+    if station_id is not None:
+        q = q.filter(AlertEvent.station_id == station_id)
+    elif division_id is not None:
+        q = q.join(Station, Station.id == AlertEvent.station_id).filter(Station.division_id == division_id)
+    elif zone_id is not None:
+        q = q.join(Station, Station.id == AlertEvent.station_id)\
+             .join(Division, Division.id == Station.division_id)\
+             .filter(Division.zone_id == zone_id)
+
+    if asset_type_hex:
+        hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
+        if hex_list:
+            q = q.filter(AlertEvent.asset_type_hex.in_(hex_list))
+
+    if asset_no:
+        q = q.filter(AlertEvent.asset_no == asset_no)
+
+    results = q.order_by(AlertEvent.cause).all()
+    causes = [row.cause for row in results if row.cause]
+
+    # Combine with default CAUSE_OPTIONS
+    cause_options = CAUSE_OPTIONS + [
+        c for c in causes
+        if c.upper() not in {option.upper() for option in CAUSE_OPTIONS}
+    ]
+
+    return [
+        AlertFilterOption(id=idx, label=val, value=val)
+        for idx, val in enumerate(cause_options, start=1)
+    ]
+
+
 @router.get("/live", response_model=AlertLiveResponse)
 def get_alert_live(
     zone_id: Optional[int] = Query(None),
