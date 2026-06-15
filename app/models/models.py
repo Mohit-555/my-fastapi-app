@@ -193,6 +193,8 @@ class AlertEvent(Base):
     updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
 
     station = relationship("Station", back_populates="alert_events")
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True, index=True)
+    asset = relationship("Asset")
 
     # Logical relationships (no DB migrations needed)
     asset_type = relationship(
@@ -426,6 +428,8 @@ class MaintenanceMode(Base):
     created_at = Column(DateTime, default=datetime.now(UTC), nullable=False, index=True)
 
     station = relationship("Station")
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True, index=True)
+    asset = relationship("Asset")
 
 
 class AssetTypeMaster(Base):
@@ -480,4 +484,11 @@ class Asset(Base):
     asset_type = relationship("AssetTypeMaster")
     gateway = relationship("Gateway", back_populates="assets")
     station = relationship("Station", back_populates="assets")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "station_gateway_id", "asset_type_hex", "asset_number_id",
+            name="uq_asset_gw_type_number"
+        ),
+    )
 
