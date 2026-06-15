@@ -516,50 +516,27 @@ class AlertCauseMaster(Base):
 
 
 class Asset(Base):
-    """
-    Each row = one physical asset instance at a station.
-    Spec: RDSO/SPN/257/2025, Annexure A, Page 40 (points f, g, h, i).
-
-    smms_asset_code  (g): unique system code from SMMS  e.g. EOPMIU00013
-    smms_asset_name  (i): asset name from SMMS          e.g. PT-101
-    asset_number_id  (f): 1-byte hex 00-FF, used in para_id
-    asset_number_code(h): actual label at station        e.g. PT-101
-    """
     __tablename__ = "assets"
 
-    id = Column(Integer, primary_key=True, index=True)
-
-    # ── Four mandatory SMMS/RDPMS mapping fields (Annexure A, Page 40) ─────────
-    smms_asset_code  = Column(String(50), unique=True, nullable=False, index=True)
-    smms_asset_name  = Column(String(100), nullable=False)
-    asset_number_code = Column(String(50), nullable=False, index=True)   # e.g. PT-101
-    asset_number_id  = Column(String(2), nullable=False, index=True)     # hex 00-FF
-
-    # ── Asset type (point e) ────────────────────────────────────────────────────
-    asset_type_hex = Column(
-        String(2),
-        ForeignKey("asset_type_master.asset_type_id"),
-        nullable=False,
-        index=True,
-    )
-
-    # ── Location references ─────────────────────────────────────────────────────
-    station_gateway_id = Column(String(8), ForeignKey("gateways.stngw_id"), nullable=False, index=True)
-    station_id = Column(Integer, ForeignKey("stations.id"), nullable=False, index=True)
-
-    # ── Make / Model / Custom attributes (Annexure A, Page 34) ─────────────────
-    make     = Column(String(80), nullable=True)
-    model    = Column(String(50), nullable=True)
-    attr1    = Column(String(100), nullable=True)   # sub-asset type / custom attribute 1
-    attr2    = Column(String(100), nullable=True)   # custom attribute 2
-    location = Column(String(200), nullable=True)
-
-    # ── Lifecycle ───────────────────────────────────────────────────────────────
-    is_active  = Column(Boolean, default=True, nullable=False)
+    id = Column(Integer, primary_key=True)
+    smms_asset_code = Column(String(50), unique=True, nullable=False)
+    smms_asset_name = Column(String(100), nullable=False)
+    asset_number_code = Column(String(50), nullable=False)   # e.g., "PT-101"
+    asset_number_id = Column(String(2), nullable=False)      # hex 00-FF (part of para_id)
+    asset_type_hex = Column(String(2), ForeignKey("asset_type_master.asset_type_id"), nullable=False)
+    station_gateway_id = Column(String(8), ForeignKey("gateways.stngw_id"), nullable=False)
+    station_id = Column(Integer, ForeignKey("stations.id"), nullable=False)
+    make = Column(String(80))
+    model = Column(String(50))
+    attr1 = Column(String(100))   # sub-asset type
+    attr2 = Column(String(100))
+    location = Column(String(200))
+    is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.now(UTC))
     updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
 
-    # ── Relationships ───────────────────────────────────────────────────────────
+    # Relationships
     asset_type = relationship("AssetTypeMaster")
-    gateway    = relationship("Gateway", foreign_keys=[station_gateway_id])
-    station    = relationship("Station")
+    gateway = relationship("Gateway")
+    station = relationship("Station")
+
