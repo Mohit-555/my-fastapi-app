@@ -805,6 +805,76 @@ class AssetMasterListResponse(BaseModel):
     rows:      List[AssetMasterResponse]
 
 
+# ─── Asset (assets table) ─────────────────────────────────────────────────────
+
+class AssetCreate(BaseModel):
+    """Register a new physical asset instance (RDSO/SPN/257/2025 Annexure A, Page 40)."""
+    smms_asset_code:    str                         # unique SMMS code (g)
+    smms_asset_name:    str                         # SMMS name (i)
+    asset_number_code:  str                         # label at station e.g. PT-101 (h)
+    asset_number_id:    str                         # 1-byte hex 00-FF (f)
+    asset_type_hex:     str                         # e.g. "00"
+    station_gateway_id: str                         # 8-char stngw_id FK
+    station_id:         int
+    make:               Optional[str] = None
+    model:              Optional[str] = None
+    attr1:              Optional[str] = None        # sub-asset type / custom attr
+    attr2:              Optional[str] = None
+    location:           Optional[str] = None
+    is_active:          bool = True
+
+
+class AssetUpdate(BaseModel):
+    """Partial update — all fields optional."""
+    smms_asset_code:    Optional[str] = None
+    smms_asset_name:    Optional[str] = None
+    asset_number_code:  Optional[str] = None
+    asset_number_id:    Optional[str] = None
+    asset_type_hex:     Optional[str] = None
+    station_gateway_id: Optional[str] = None
+    station_id:         Optional[int] = None
+    make:               Optional[str] = None
+    model:              Optional[str] = None
+    attr1:              Optional[str] = None
+    attr2:              Optional[str] = None
+    location:           Optional[str] = None
+    is_active:          Optional[bool] = None
+
+
+class AssetResponse(BaseModel):
+    id:                 int
+    smms_asset_code:    str
+    smms_asset_name:    str
+    asset_number_code:  str
+    asset_number_id:    str
+    asset_type_hex:     str
+    asset_type_name:    Optional[str] = None        # resolved
+    asset_type_code:    Optional[str] = None        # resolved
+    station_gateway_id: str
+    station_id:         int
+    station_code:       Optional[str] = None        # resolved
+    station_name:       Optional[str] = None        # resolved
+    make:               Optional[str] = None
+    model:              Optional[str] = None
+    attr1:              Optional[str] = None
+    attr2:              Optional[str] = None
+    location:           Optional[str] = None
+    is_active:          bool
+    created_at:         datetime
+    updated_at:         datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AssetListResponse(BaseModel):
+    total:       int
+    page:        int
+    page_size:   int
+    total_pages: int
+    rows:        List[AssetResponse]
+
+
 # Forward refs
 ZoneWithDivisions.model_rebuild()
 DivisionWithStations.model_rebuild()
