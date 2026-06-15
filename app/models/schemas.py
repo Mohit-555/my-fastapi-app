@@ -744,67 +744,6 @@ class ParaDecodeResponse(BaseModel):
 # ─── Dropdown ─────────────────────────────────────────────────────────────────
 
 
-# ─── Asset Master ─────────────────────────────────────────────────────────────
-
-class AssetMasterCreate(BaseModel):
-    """Create one physical asset instance (RDSO/SPN/257/2025 Annexure A, Page 40)."""
-    smms_asset_code:   Optional[str] = None        # from SMMS (g)
-    smms_asset_name:   Optional[str] = None        # from SMMS (i)
-    asset_number_id:   str                         # 1-byte hex 00-FF (f)
-    asset_number_code: str                         # actual label e.g. PT-101 (h)
-    asset_type_hex:    str                         # e.g. "00"
-    gateway_id:        int
-    station_id:        int
-    make:              Optional[str] = None
-    model:             Optional[str] = None
-    is_active:         bool = True
-
-
-class AssetMasterUpdate(BaseModel):
-    """Partial update — all fields optional."""
-    smms_asset_code:   Optional[str] = None
-    smms_asset_name:   Optional[str] = None
-    asset_number_id:   Optional[str] = None
-    asset_number_code: Optional[str] = None
-    asset_type_hex:    Optional[str] = None
-    gateway_id:        Optional[int] = None
-    station_id:        Optional[int] = None
-    make:              Optional[str] = None
-    model:             Optional[str] = None
-    is_active:         Optional[bool] = None
-
-
-class AssetMasterResponse(BaseModel):
-    id:                int
-    smms_asset_code:   Optional[str]
-    smms_asset_name:   Optional[str]
-    asset_number_id:   str
-    asset_number_code: str
-    asset_type_hex:    str
-    asset_type_name:   Optional[str] = None        # resolved from AssetTypeMaster
-    asset_type_code:   Optional[str] = None        # resolved from AssetTypeMaster
-    gateway_id:        int
-    station_id:        int
-    station_code:      Optional[str] = None        # denormalised for convenience
-    station_name:      Optional[str] = None
-    make:              Optional[str] = None
-    model:             Optional[str] = None
-    is_active:         bool
-    created_at:        datetime
-    updated_at:        datetime
-
-    class Config:
-        from_attributes = True
-
-
-class AssetMasterListResponse(BaseModel):
-    total:     int
-    page:      int
-    page_size: int
-    total_pages: int
-    rows:      List[AssetMasterResponse]
-
-
 # ─── Asset (assets table) ─────────────────────────────────────────────────────
 
 class AssetCreate(BaseModel):

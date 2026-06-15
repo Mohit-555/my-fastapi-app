@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP
 from app.database import get_db
-from app.models.models import AlertEvent, AssetMaster, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster
+from app.models.models import AlertEvent, Asset, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster
 from app.models.schemas import (
     AlertEventCreate,
     AlertEventResponse,
@@ -493,7 +493,7 @@ def list_alert_asset_numbers(
     """
     Return a list of unique asset numbers for dropdown filters.
 
-    Primary source: AssetMaster (all registered physical assets).
+    Primary source: Asset (all registered physical assets).
     Fallback: AlertEvent.asset_no for any unregistered asset numbers
     that appear in historical alerts.
     """
@@ -501,21 +501,21 @@ def list_alert_asset_numbers(
     if asset_type_hex:
         hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
 
-    # ── 1. Query AssetMaster (registered assets) ───────────────────────────────
-    master_q = db.query(AssetMaster.asset_number_code).filter(AssetMaster.is_active == True)
+    # ── 1. Query Asset (registered assets) ───────────────────────────────
+    master_q = db.query(Asset.asset_number_code).filter(Asset.is_active == True)
 
     if station_id is not None:
-        master_q = master_q.filter(AssetMaster.station_id == station_id)
+        master_q = master_q.filter(Asset.station_id == station_id)
     elif division_id is not None:
-        master_q = master_q.join(Station, Station.id == AssetMaster.station_id)\
+        master_q = master_q.join(Station, Station.id == Asset.station_id)\
                            .filter(Station.division_id == division_id)
     elif zone_id is not None:
-        master_q = master_q.join(Station, Station.id == AssetMaster.station_id)\
+        master_q = master_q.join(Station, Station.id == Asset.station_id)\
                            .join(Division, Division.id == Station.division_id)\
                            .filter(Division.zone_id == zone_id)
 
     if hex_list:
-        master_q = master_q.filter(AssetMaster.asset_type_hex.in_(hex_list))
+        master_q = master_q.filter(Asset.asset_type_hex.in_(hex_list))
 
     registered = {
         row.asset_number_code
