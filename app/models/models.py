@@ -59,6 +59,7 @@ class Station(Base):
     division = relationship("Division", back_populates="stations")
     gateways = relationship("Gateway", back_populates="station", cascade="all, delete-orphan")
     asset_inventory = relationship("AssetInventory", back_populates="station", cascade="all, delete-orphan")
+    asset_master = relationship("AssetMaster", back_populates="station", cascade="all, delete-orphan")
     alert_events = relationship("AlertEvent", back_populates="station", cascade="all, delete-orphan")
 
 
@@ -73,6 +74,7 @@ class Gateway(Base):
 
     station = relationship("Station", back_populates="gateways")
     telemetry = relationship("Telemetry", back_populates="gateway", cascade="all, delete-orphan")
+    asset_master = relationship("AssetMaster", back_populates="gateway", cascade="all, delete-orphan")
 
 
 class Telemetry(Base):
@@ -117,6 +119,67 @@ class AssetInventory(Base):
         UniqueConstraint(
             "station_id", "asset_type_hex", "asset_make",
             name="uq_asset_inventory_station_type_make"
+        ),
+    )
+
+
+class AssetMaster(Base):
+    """
+    Stores individual physical asset instances as mandated by RDSO/SPN/257/2025
+    Annexure A, Page 40 (points f, g, h, i).
+
+    The spec explicitly requires a table mapping:
+      - smms_asset_code  (g): unique system code from SMMS  e.g. EOPMIU00013
+      - smms_asset_name  (i): asset name from SMMS          e.g. PT-101
+      - asset_number_id  (f): 1-byte hex, part of para_id   e.g. 00, 01, 10
+      - asset_number_code(h): actual label at station        e.g. PT-101, TC-100
+
+    asset_number_id is unique per (gateway, asset_type_hex).
+    """
+    __tablename__ = "asset_master"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # ── Four mandatory fields from spec (Annexure A, Page 40) ─────────────────
+    smms_asset_code  = Column(String(50), unique=True, nullable=True, index=True)  # from SMMS (g)
+    smms_asset_name  = Column(String(100), nullable=True)                          # from SMMS (i)
+    asset_number_id  = Column(String(2), nullable=False, index=True)               # hex 00-FF, part of para_id (f)
+    asset_number_code = Column(String(50), nullable=False, index=True)             # actual label at station (h)
+
+    # ── Asset type (Annexure A, Page 38-39, point e) ──────────────────────────
+    asset_type_hex = Column(
+        String(2),
+        ForeignKey("asset_type_master.asset_type_id"),
+        nullable=False,
+        index=True,
+    )
+
+    # ── Location references ───────────────────────────────────────────────────
+    # gateway_id: asset_number_id is unique per asset type per gateway (spec point f)
+    gateway_id = Column(Integer, ForeignKey("gateways.id"), nullable=False, index=True)
+    # station_id: denormalised for fast filtering without gateway join
+    station_id = Column(Integer, ForeignKey("stations.id"), nullable=False, index=True)
+
+    # ── Make / Model (Annexure A, Page 34) ───────────────────────────────────
+    make  = Column(String(80), nullable=True)
+    model = Column(String(50), nullable=True)
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+    is_active  = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.now(UTC))
+    updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
+
+    # ── Relationships ─────────────────────────────────────────────────────────
+    gateway    = relationship("Gateway", back_populates="asset_master")
+    station    = relationship("Station", back_populates="asset_master")
+    asset_type = relationship("AssetTypeMaster")
+
+    # ── Constraints ───────────────────────────────────────────────────────────
+    # asset_number_id is unique per asset type within one gateway (spec point f)
+    __table_args__ = (
+        UniqueConstraint(
+            "gateway_id", "asset_type_hex", "asset_number_id",
+            name="uq_asset_master_gateway_type_num",
         ),
     )
 

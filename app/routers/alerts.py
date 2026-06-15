@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP
 from app.database import get_db
-from app.models.models import AlertEvent, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster
+from app.models.models import AlertEvent, AssetMaster, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster
 from app.models.schemas import (
     AlertEventCreate,
     AlertEventResponse,
@@ -491,32 +491,63 @@ def list_alert_asset_numbers(
     db: Session = Depends(get_db),
 ):
     """
-    Return a list of unique asset numbers filtered by zone, division, station, and asset type.
+    Return a list of unique asset numbers for dropdown filters.
+
+    Primary source: AssetMaster (all registered physical assets).
+    Fallback: AlertEvent.asset_no for any unregistered asset numbers
+    that appear in historical alerts.
     """
-    q = db.query(AlertEvent.asset_no).distinct()
-
-    if station_id is not None:
-        q = q.filter(AlertEvent.station_id == station_id)
-    elif division_id is not None:
-        q = q.join(Station, Station.id == AlertEvent.station_id).filter(Station.division_id == division_id)
-    elif zone_id is not None:
-        q = q.join(Station, Station.id == AlertEvent.station_id)\
-             .join(Division, Division.id == Station.division_id)\
-             .filter(Division.zone_id == zone_id)
-
+    hex_list: Optional[List[str]] = None
     if asset_type_hex:
         hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
-        if hex_list:
-            q = q.filter(AlertEvent.asset_type_hex.in_(hex_list))
 
-    results = q.order_by(AlertEvent.asset_no).all()
-    res_list = []
-    idx = 1
-    for row in results:
+    # ── 1. Query AssetMaster (registered assets) ───────────────────────────────
+    master_q = db.query(AssetMaster.asset_number_code).filter(AssetMaster.is_active == True)
+
+    if station_id is not None:
+        master_q = master_q.filter(AssetMaster.station_id == station_id)
+    elif division_id is not None:
+        master_q = master_q.join(Station, Station.id == AssetMaster.station_id)\
+                           .filter(Station.division_id == division_id)
+    elif zone_id is not None:
+        master_q = master_q.join(Station, Station.id == AssetMaster.station_id)\
+                           .join(Division, Division.id == Station.division_id)\
+                           .filter(Division.zone_id == zone_id)
+
+    if hex_list:
+        master_q = master_q.filter(AssetMaster.asset_type_hex.in_(hex_list))
+
+    registered = {
+        row.asset_number_code
+        for row in master_q.distinct().all()
+        if row.asset_number_code
+    }
+
+    # ── 2. Fallback: AlertEvent for any unregistered numbers ──────────────────
+    event_q = db.query(AlertEvent.asset_no).distinct()
+
+    if station_id is not None:
+        event_q = event_q.filter(AlertEvent.station_id == station_id)
+    elif division_id is not None:
+        event_q = event_q.join(Station, Station.id == AlertEvent.station_id)\
+                         .filter(Station.division_id == division_id)
+    elif zone_id is not None:
+        event_q = event_q.join(Station, Station.id == AlertEvent.station_id)\
+                         .join(Division, Division.id == Station.division_id)\
+                         .filter(Division.zone_id == zone_id)
+
+    if hex_list:
+        event_q = event_q.filter(AlertEvent.asset_type_hex.in_(hex_list))
+
+    for row in event_q.all():
         if row.asset_no:
-            res_list.append(AlertFilterOption(id=idx, label=row.asset_no, value=row.asset_no))
-            idx += 1
-    return res_list
+            registered.add(row.asset_no)
+
+    # ── 3. Build sorted response ─────────────────────────────────────────
+    return [
+        AlertFilterOption(id=idx, label=code, value=code)
+        for idx, code in enumerate(sorted(registered), start=1)
+    ]
 
 
 @router.get("/causes", response_model=List[AlertFilterOption])
