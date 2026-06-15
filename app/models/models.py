@@ -438,7 +438,8 @@ class AssetTypeMaster(Base):
     """
     __tablename__ = "asset_type_master"
 
-    asset_type_id = Column(String(2), primary_key=True)
+    id = Column(Integer, primary_key=True, index=True)
+    asset_type_id = Column(String(2), unique=True, nullable=False)
     asset_type_code = Column(String(20), unique=True, nullable=False)
     asset_type_name = Column(String(100), nullable=False)
     is_equipment_room = Column(Boolean, default=False, nullable=False)
