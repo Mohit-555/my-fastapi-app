@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent, Gateway, Telemetry, MaintenanceMode, AssetTypeMaster, AlertCauseMaster
+from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent, Gateway, Telemetry, MaintenanceMode, AssetTypeMaster, AlertCauseMaster, Asset
 from app.auth_utils import hash_password
 from app.constants import ASSET_TYPE_MAP
 
@@ -792,5 +792,74 @@ def ensure_default_alert_causes(db: Session) -> None:
                 cause_detail=c["cause_detail"],
                 asset_type_id=c["asset_type_id"],
                 alert_category=c["alert_category"],
+            ))
+    db.commit()
+
+
+def ensure_default_assets(db: Session) -> None:
+    """
+    Ensure some default Asset instances are seeded.
+    """
+    default_assets = [
+        {
+            "smms_asset_code": "SMMS-PT-101",
+            "smms_asset_name": "Point Machine 101",
+            "asset_number_code": "PT-101",
+            "asset_number_id": "01",
+            "asset_type_hex": "00",
+            "station_code": "AGC",
+            "station_gateway_id": "06011200",
+            "make": "Siemens",
+            "model": "S700",
+            "attr1": "Standard",
+            "location": "Agra Yard west",
+        },
+        {
+            "smms_asset_code": "SMMS-TC-12",
+            "smms_asset_name": "Track Circuit 12",
+            "asset_number_code": "TC-12",
+            "asset_number_id": "0C",
+            "asset_type_hex": "20",
+            "station_code": "CNB",
+            "station_gateway_id": "07011200",
+            "make": "Ansaldo",
+            "model": "DC-TC",
+            "attr1": "Standard",
+            "location": "Kanpur Yard east",
+        },
+        {
+            "smms_asset_code": "SMMS-SIG-01",
+            "smms_asset_name": "Home Signal 01",
+            "asset_number_code": "SIG-01",
+            "asset_number_id": "01",
+            "asset_type_hex": "10",
+            "station_code": "AGC",
+            "station_gateway_id": "06011200",
+            "make": "BHEL",
+            "model": "LED-SIG",
+            "attr1": "Standard",
+            "location": "Agra Cantt Home",
+        }
+    ]
+
+    for item in default_assets:
+        exists = db.query(Asset).filter(Asset.smms_asset_code == item["smms_asset_code"]).first()
+        if not exists:
+            station = db.query(Station).filter(Station.station_code == item["station_code"]).first()
+            if not station:
+                continue
+            db.add(Asset(
+                smms_asset_code=item["smms_asset_code"],
+                smms_asset_name=item["smms_asset_name"],
+                asset_number_code=item["asset_number_code"],
+                asset_number_id=item["asset_number_id"],
+                asset_type_hex=item["asset_type_hex"],
+                station_gateway_id=item["station_gateway_id"],
+                station_id=station.id,
+                make=item["make"],
+                model=item["model"],
+                attr1=item["attr1"],
+                location=item["location"],
+                is_active=True
             ))
     db.commit()
