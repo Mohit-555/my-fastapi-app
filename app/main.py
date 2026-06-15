@@ -12,7 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.database import SessionLocal, engine
 from app.auth_utils import get_current_user
 from app.models.models import Base
-from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin, equipment_room, maintenance, asset_instances
+from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin, equipment_room, maintenance
 from app.routers import auth
 from app.rbac_defaults import ensure_default_menus, ensure_default_roles_users_and_permissions, ensure_default_zones, ensure_default_divisions, ensure_default_stations, ensure_default_asset_types, ensure_default_alert_causes
 try:
@@ -111,7 +111,6 @@ app.include_router(stations.router, dependencies=protected_route)
 
 # ── Asset metadata & thresholds ───────────────────────────────────────────────
 app.include_router(assets.router, dependencies=protected_route)
-app.include_router(asset_instances.router, dependencies=protected_route)
 
 # ── Alerts summary, filters, and event records ────────────────────────────────
 app.include_router(alerts.router, dependencies=protected_route)
