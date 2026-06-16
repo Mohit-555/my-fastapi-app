@@ -1111,3 +1111,55 @@ class MaintenanceModeListResponse(BaseModel):
     page_size: int
     rows: List[MaintenanceModeResponse]
 
+
+# ─── Alert Causes ─────────────────────────────────────────────────────────────
+
+from enum import Enum as PyEnum
+
+class AlertCategoryEnum(str, PyEnum):
+    FAILURE = "FAILURE"
+    PREDICTIVE = "PREDICTIVE"
+
+class AlertCauseCreate(BaseModel):
+    cause_code: str = Field(..., max_length=50, validation_alias=AliasChoices('cause_code', 'causeCode'))
+    cause_detail: str = Field(..., validation_alias=AliasChoices('cause_detail', 'causeDetail'))
+    asset_type_id: Optional[str] = Field(None, max_length=2, validation_alias=AliasChoices('asset_type_id', 'assetTypeId'))
+    alert_category: AlertCategoryEnum = Field(..., validation_alias=AliasChoices('alert_category', 'alertCategory'))
+
+class AlertCauseUpdate(BaseModel):
+    cause_detail: Optional[str] = Field(None, validation_alias=AliasChoices('cause_detail', 'causeDetail'))
+    asset_type_id: Optional[str] = Field(None, max_length=2, validation_alias=AliasChoices('asset_type_id', 'assetTypeId'))
+    alert_category: Optional[AlertCategoryEnum] = Field(None, validation_alias=AliasChoices('alert_category', 'alertCategory'))
+
+class AlertCauseResponse(BaseModel):
+    cause_code: str
+    cause_detail: str
+    asset_type_id: Optional[str] = None
+    alert_category: AlertCategoryEnum
+    created_at: datetime
+
+    # CamelCase aliases for frontend compatibility
+    causeCode: str = ""
+    causeDetail: str = ""
+    assetTypeId: Optional[str] = None
+    alertCategory: str = ""
+
+    @model_validator(mode="after")
+    def populate_aliases(self) -> "AlertCauseResponse":
+        self.causeCode = self.cause_code
+        self.causeDetail = self.cause_detail
+        self.assetTypeId = self.asset_type_id
+        self.alertCategory = self.alert_category.value
+        return self
+
+    class Config:
+        from_attributes = True
+
+class AlertCauseListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    rows: List[AlertCauseResponse]
+
+

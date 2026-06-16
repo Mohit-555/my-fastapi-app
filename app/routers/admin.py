@@ -18,13 +18,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.models import Menu, Role, RoleMenu, User
+from app.models.models import Menu, Role, RoleMenu, User, AlertCauseMaster, AssetTypeMaster
 from app.models.schemas import (
     MenuCreate, MenuUpdate, MenuResponse, MenuTreeResponse,
     RoleCreate, RoleUpdate, RoleResponse, RoleMenuAssign, RoleMenuResponse,
     UserDetailResponse, UserListResponse, UserUpdateRequest,
     ChangePasswordRequest, RoleMinimalResponse, ZoneMinimalResponse,
     DivisionMinimalResponse,
+    AlertCauseCreate, AlertCauseUpdate, AlertCauseResponse, AlertCauseListResponse
 )
 from app.auth_utils import hash_password, verify_password
 from app.rbac_defaults import ensure_default_menus
@@ -418,3 +419,103 @@ def change_password(
     db.commit()
     db.refresh(user)
     return _build_user_detail(user)
+
+
+# ─── Alert Causes CRUD ────────────────────────────────────────────────────────
+
+@router.post("/causes", response_model=AlertCauseResponse, status_code=status.HTTP_201_CREATED)
+def create_cause(payload: AlertCauseCreate, db: Session = Depends(get_db)):
+    """Create a new Alert Cause."""
+    existing = db.query(AlertCauseMaster).filter(AlertCauseMaster.cause_code == payload.cause_code.upper()).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Alert cause with code '{payload.cause_code}' already exists"
+        )
+
+    if payload.asset_type_id:
+        asset_type = db.query(AssetTypeMaster).filter(AssetTypeMaster.asset_type_id == payload.asset_type_id).first()
+        if not asset_type:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Asset type with ID '{payload.asset_type_id}' not found"
+            )
+
+    cause = AlertCauseMaster(
+        cause_code=payload.cause_code.upper(),
+        cause_detail=payload.cause_detail,
+        asset_type_id=payload.asset_type_id,
+        alert_category=payload.alert_category
+    )
+    db.add(cause)
+    db.commit()
+    db.refresh(cause)
+    return cause
+
+
+@router.get("/causes", response_model=AlertCauseListResponse)
+def list_causes(
+    asset_type_id: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db)
+):
+    """List configured Alert Causes with optional filters."""
+    q = db.query(AlertCauseMaster)
+    if asset_type_id:
+        q = q.filter(AlertCauseMaster.asset_type_id == asset_type_id)
+
+    total = q.count()
+    total_pages = (total + page_size - 1) // page_size if total else 0
+    offset = (page - 1) * page_size
+    causes = q.order_by(AlertCauseMaster.cause_code).offset(offset).limit(page_size).all()
+
+    return AlertCauseListResponse(
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        rows=causes
+    )
+
+
+@router.put("/causes/{cause_code}", response_model=AlertCauseResponse)
+def update_cause(cause_code: str, payload: AlertCauseUpdate, db: Session = Depends(get_db)):
+    """Update an existing Alert Cause."""
+    cause = db.query(AlertCauseMaster).filter(AlertCauseMaster.cause_code == cause_code.upper()).first()
+    if not cause:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Alert cause with code '{cause_code}' not found"
+        )
+
+    data = payload.model_dump(exclude_unset=True)
+
+    if "asset_type_id" in data and data["asset_type_id"] is not None:
+        asset_type = db.query(AssetTypeMaster).filter(AssetTypeMaster.asset_type_id == data["asset_type_id"]).first()
+        if not asset_type:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Asset type with ID '{data['asset_type_id']}' not found"
+            )
+
+    for field, value in data.items():
+        setattr(cause, field, value)
+
+    db.commit()
+    db.refresh(cause)
+    return cause
+
+
+@router.delete("/causes/{cause_code}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_cause(cause_code: str, db: Session = Depends(get_db)):
+    """Delete an Alert Cause."""
+    cause = db.query(AlertCauseMaster).filter(AlertCauseMaster.cause_code == cause_code.upper()).first()
+    if not cause:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Alert cause with code '{cause_code}' not found"
+        )
+    db.delete(cause)
+    db.commit()
+
