@@ -361,6 +361,14 @@ def update_user(user_id: int, payload: UserUpdateRequest, db: Session = Depends(
 
     data = payload.model_dump(exclude_unset=True)
 
+    if "password" in data or "confirm_password" in data:
+        password = data.pop("password", None)
+        confirm_password = data.pop("confirm_password", None)
+        if password != confirm_password:
+            raise HTTPException(status_code=400, detail="Passwords do not match")
+        if password:
+            user.hashed_password = hash_password(password)
+
     if "role_id" in data and data["role_id"] is not None:
         if not db.query(Role).filter(Role.id == data["role_id"]).first():
             raise HTTPException(status_code=404, detail=f"Role {data['role_id']} not found")

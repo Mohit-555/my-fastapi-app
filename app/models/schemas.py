@@ -981,6 +981,8 @@ class UserUpdateRequest(BaseModel):
     email: Optional[str] = None
     reporting_officer_id: Optional[int] = None
     is_active: Optional[bool] = None
+    password: Optional[str] = None
+    confirm_password: Optional[str] = None
 
 class UserDetailResponse(BaseModel):
     id: int
