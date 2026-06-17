@@ -679,6 +679,7 @@ class AlertFiltersResponse(BaseModel):
     causes: List[AlertFilterOption]
     feedbacks: List[AlertFilterOption]
     alert_statuses: List[AlertFilterOption]
+    asset_makes: List[AlertFilterOption] = []
 
 
 # ─── Thresholds ───────────────────────────────────────────────────────────────

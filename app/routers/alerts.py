@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP
 from app.database import get_db
-from app.models.models import AlertEvent, Asset, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster
+from app.models.models import AlertEvent, Asset, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster, AssetInventory
 from app.models.schemas import (
     AlertEventCreate,
     AlertEventResponse,
@@ -929,6 +929,13 @@ def get_alert_filters(db: Session = Depends(get_db)):
         for idx, val in enumerate(alert_statuses, start=1)
     ]
 
+    makes_rows = db.query(AssetInventory.asset_make).distinct().order_by(AssetInventory.asset_make).all()
+    makes = [row.asset_make for row in makes_rows if row.asset_make]
+    asset_makes_list = [
+        AlertFilterOption(id=idx, label=make, value=make)
+        for idx, make in enumerate(makes, start=1)
+    ]
+
     return AlertFiltersResponse(
         zones=[DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex) for z in zones],
         divisions=[DropdownOption(id=d.id, label=d.division_name, code=d.division_code, hex_id=d.division_id_hex) for d in divisions],
@@ -939,6 +946,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
         causes=cause_options_list,
         feedbacks=feedbacks_list,
         alert_statuses=alert_statuses_list,
+        asset_makes=asset_makes_list,
     )
 
 

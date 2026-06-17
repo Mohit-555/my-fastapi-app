@@ -24,7 +24,7 @@ from app.models.schemas import (
     RoleCreate, RoleUpdate, RoleResponse, RoleMenuAssign, RoleMenuResponse,
     UserDetailResponse, UserListResponse, UserUpdateRequest,
     ChangePasswordRequest, RoleMinimalResponse, ZoneMinimalResponse,
-    DivisionMinimalResponse,
+    DivisionMinimalResponse, UserRegisterRequest,
     AlertCauseCreate, AlertCauseUpdate, AlertCauseResponse, AlertCauseListResponse
 )
 from app.auth_utils import hash_password, verify_password
@@ -419,6 +419,46 @@ def change_password(
     db.commit()
     db.refresh(user)
     return _build_user_detail(user)
+
+
+@router.post("/users", response_model=UserDetailResponse, status_code=status.HTTP_201_CREATED)
+def create_user(payload: UserRegisterRequest, db: Session = Depends(get_db)):
+    """Create a new user account."""
+    if payload.password != payload.confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+
+    if db.query(User).filter(User.employee_id == payload.employee_id).first():
+        raise HTTPException(status_code=400, detail="Employee ID already registered")
+
+    if db.query(User).filter(User.email == payload.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    user = User(
+        full_name=payload.full_name,
+        employee_id=payload.employee_id,
+        designation=payload.designation,
+        role_id=payload.role_id,
+        zone_id=payload.zone_id,
+        division_id=payload.division_id,
+        mobile_number=payload.mobile_number,
+        email=payload.email,
+        hashed_password=hash_password(payload.password),
+        reporting_officer_id=payload.reporting_officer_id,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return _build_user_detail(user)
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(user_id: int, db: Session = Depends(get_db)):
+    """Delete a user account."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+    db.delete(user)
+    db.commit()
 
 
 # ─── Alert Causes CRUD ────────────────────────────────────────────────────────

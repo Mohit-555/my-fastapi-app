@@ -61,6 +61,8 @@ class Station(Base):
     asset_inventory = relationship("AssetInventory", back_populates="station", cascade="all, delete-orphan")
     assets = relationship("Asset", back_populates="station", cascade="all, delete-orphan")
     alert_events = relationship("AlertEvent", back_populates="station", cascade="all, delete-orphan")
+    equipment_rooms = relationship("EquipmentRoom", back_populates="station", cascade="all, delete-orphan")
+    maintenance_modes = relationship("MaintenanceMode", back_populates="station", cascade="all, delete-orphan")
 
 
 class Gateway(Base):
@@ -406,7 +408,7 @@ class EquipmentRoom(Base):
     humidity = Column(Float, nullable=True)
     updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
 
-    station = relationship("Station")
+    station = relationship("Station", back_populates="equipment_rooms")
 
     __table_args__ = (
         UniqueConstraint("station_id", "room_type", name="uq_station_room_type"),
@@ -427,7 +429,7 @@ class MaintenanceMode(Base):
     to_time = Column(DateTime, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.now(UTC), nullable=False, index=True)
 
-    station = relationship("Station")
+    station = relationship("Station", back_populates="maintenance_modes")
     asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True, index=True)
     asset = relationship("Asset")
 
