@@ -487,6 +487,7 @@ class Asset(Base):
     asset_type = relationship("AssetTypeMaster")
     gateway = relationship("Gateway", back_populates="assets")
     station = relationship("Station", back_populates="assets")
+    parameters = relationship("AssetParameter", back_populates="asset", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint(
@@ -494,4 +495,36 @@ class Asset(Base):
             name="uq_asset_gw_type_number"
         ),
     )
+
+
+class AssetParameter(Base):
+    """
+    Maps a specific para_id to the asset it belongs to and the physical
+    location box (prloc) that parameter's sensor is wired into.
+
+    Per RDSO/SPN/257/2025 Annexure-A/B, prloc is defined PER PARAMETER, not
+    per asset — a single asset (e.g. one Point Machine) can have different
+    parameters/sensors terminated in different location boxes (e.g. current
+    sensor in LB-01, voltage sensor in LB-02), even though they share the
+    same asset_number_code. This table is what makes that representable;
+    Asset.location remains as a default/fallback location for the asset as
+    a whole when individual parameters don't need an override.
+
+    Rows are auto-created on first sight of a new para_id during telemetry
+    ingestion (see gateway.py), the same pattern used for Gateway. asset_id
+    and prloc start out NULL/unassigned and are filled in afterward via the
+    admin "Configure Slave" flow described in the vendor's setup sheet —
+    telemetry ingestion is never blocked waiting on that assignment.
+    """
+    __tablename__ = "asset_parameters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    para_id = Column(String(8), unique=True, nullable=False, index=True)
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True, index=True)
+    prloc = Column(String(50), nullable=True)  # e.g. "LB-01"
+    is_assigned = Column(Boolean, default=False, nullable=False)  # True once asset_id+prloc set via admin
+    created_at = Column(DateTime, default=datetime.now(UTC))
+    updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
+
+    asset = relationship("Asset", back_populates="parameters")
 

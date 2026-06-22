@@ -15,7 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.models import AssetInventory, Division, Threshold, Station, Zone, AssetTypeMaster, Asset, Gateway
+from app.models.models import AssetInventory, Division, Threshold, Station, Zone, AssetTypeMaster, Asset, Gateway, AssetParameter
 from app.models.schemas import (
     AssetDetailResponse,
     AssetDetailRow,
@@ -39,6 +39,9 @@ from app.models.schemas import (
     AssetListResponse,
     AssetResponse,
     AssetUpdate,
+    AssetParameterUpdate,
+    AssetParameterResponse,
+    AssetParameterListResponse,
 )
 from app.constants import (
     ASSET_TYPE_MAP,
@@ -845,6 +848,143 @@ def delete_asset(asset_id: int, db: Session = Depends(get_db)):
     if not record:
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} not found")
     db.delete(record)
+    db.commit()
+
+
+# ── Asset Parameters (para_id → asset + prloc assignment) ────────────────────
+#
+# Backs the vendor's "Configure Slave" admin flow: gateway.py auto-creates an
+# unassigned AssetParameter row the first time a para_id is seen in incoming
+# telemetry. This screen lets an engineer link that para_id to a real Asset
+# and record the prloc (location box) the sensor is physically wired into.
+#
+# prloc is intentionally stored per-para_id rather than on Asset.location,
+# since RDSO Annexure-A/B allows one asset's different sensors to be
+# terminated in different location boxes (e.g. current sensor in LB-01,
+# voltage sensor in LB-02) — confirmed against the vendor's setup sheet.
+
+def _build_asset_parameter_response(ap: AssetParameter) -> AssetParameterResponse:
+    asset_type_hex = ap.para_id[0:2] if ap.para_id and len(ap.para_id) == 8 else None
+    parameter_type_hex = ap.para_id[4:6] if ap.para_id and len(ap.para_id) == 8 else None
+    param_info = PARAMETER_TYPE_MAP.get(parameter_type_hex) if parameter_type_hex else None
+
+    asset = ap.asset
+    return AssetParameterResponse(
+        id=ap.id,
+        para_id=ap.para_id,
+        asset_id=ap.asset_id,
+        asset_number_code=asset.asset_number_code if asset else None,
+        asset_type_hex=asset_type_hex,
+        parameter_type_hex=parameter_type_hex,
+        parameter_name=param_info[1] if param_info else None,
+        prloc=ap.prloc,
+        is_assigned=ap.is_assigned,
+        station_id=asset.station_id if asset else None,
+        station_code=asset.station.station_code if asset and asset.station else None,
+        created_at=ap.created_at,
+        updated_at=ap.updated_at,
+    )
+
+
+@router.get("/parameters/configure", response_model=AssetParameterListResponse)
+def list_asset_parameters(
+    is_assigned: Optional[bool] = Query(None, description="Filter to only assigned or only unassigned rows"),
+    station_id: Optional[int] = Query(None, description="Filter to parameters whose assigned asset belongs to this station"),
+    search: Optional[str] = Query(None, description="Search by para_id or asset_number_code"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """
+    List discovered para_id → asset/prloc mappings for the 'Configure Slave'
+    admin screen. Rows are created automatically by gateway.py on first sight
+    of a new para_id; use PUT /assets/parameters/configure/{id} to assign
+    asset_id and prloc.
+    """
+    q = db.query(AssetParameter)
+    if is_assigned is not None:
+        q = q.filter(AssetParameter.is_assigned == is_assigned)
+    if station_id is not None:
+        q = q.join(Asset, Asset.id == AssetParameter.asset_id).filter(Asset.station_id == station_id)
+    if search:
+        term = f"%{search.strip()}%"
+        q = q.outerjoin(Asset, Asset.id == AssetParameter.asset_id).filter(
+            AssetParameter.para_id.ilike(term) | Asset.asset_number_code.ilike(term)
+        )
+
+    total = q.count()
+    total_pages = (total + page_size - 1) // page_size if total else 0
+    offset = (page - 1) * page_size
+    rows = q.order_by(AssetParameter.created_at.desc()).offset(offset).limit(page_size).all()
+
+    return AssetParameterListResponse(
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        rows=[_build_asset_parameter_response(r) for r in rows],
+    )
+
+
+@router.get("/parameters/configure/{asset_parameter_id}", response_model=AssetParameterResponse)
+def get_asset_parameter(asset_parameter_id: int, db: Session = Depends(get_db)):
+    """Retrieve a single discovered para_id mapping by its internal ID."""
+    ap = db.query(AssetParameter).filter(AssetParameter.id == asset_parameter_id).first()
+    if not ap:
+        raise HTTPException(status_code=404, detail=f"Asset parameter {asset_parameter_id} not found")
+    return _build_asset_parameter_response(ap)
+
+
+@router.put("/parameters/configure/{asset_parameter_id}", response_model=AssetParameterResponse)
+def assign_asset_parameter(
+    asset_parameter_id: int,
+    payload: AssetParameterUpdate,
+    db: Session = Depends(get_db),
+):
+    """
+    Assign a discovered para_id to an asset and/or set its prloc.
+
+    Matches the vendor's 'Configure Slave' flow: after wiring is confirmed,
+    an engineer links the channel's para_id to the asset_number_code and
+    records the location box (prloc) — e.g. {"asset_id": 5, "prloc": "LB-01"}.
+
+    A row is considered fully assigned (is_assigned=True) once both asset_id
+    and prloc are set. Either field can be set independently first if the
+    engineer only has one piece of information at the time.
+    """
+    ap = db.query(AssetParameter).filter(AssetParameter.id == asset_parameter_id).first()
+    if not ap:
+        raise HTTPException(status_code=404, detail=f"Asset parameter {asset_parameter_id} not found")
+
+    data = payload.model_dump(exclude_unset=True)
+
+    if "asset_id" in data and data["asset_id"] is not None:
+        asset = db.query(Asset).filter(Asset.id == data["asset_id"]).first()
+        if not asset:
+            raise HTTPException(status_code=404, detail=f"Asset {data['asset_id']} not found")
+
+    for field, value in data.items():
+        setattr(ap, field, value)
+
+    ap.is_assigned = ap.asset_id is not None and bool(ap.prloc)
+
+    db.commit()
+    db.refresh(ap)
+    return _build_asset_parameter_response(ap)
+
+
+@router.delete("/parameters/configure/{asset_parameter_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_asset_parameter(asset_parameter_id: int, db: Session = Depends(get_db)):
+    """
+    Delete a discovered para_id mapping — e.g. to clean up a stale/incorrect
+    auto-discovered row. Note: if telemetry for this para_id is still being
+    ingested, gateway.py will simply re-create an unassigned row for it on
+    the next packet.
+    """
+    ap = db.query(AssetParameter).filter(AssetParameter.id == asset_parameter_id).first()
+    if not ap:
+        raise HTTPException(status_code=404, detail=f"Asset parameter {asset_parameter_id} not found")
+    db.delete(ap)
     db.commit()
 
 

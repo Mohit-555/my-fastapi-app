@@ -701,18 +701,20 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
 
     # Seed
     target_gws = list(gateways_by_station.values())
-    existing_set = set(
-        db.query(Telemetry.gateway_id, Telemetry.para_id, Telemetry.received_at)
+    existing_set = {
+        (r.gateway_id, r.para_id, r.prt, r.prv)
+        for r in db.query(Telemetry.gateway_id, Telemetry.para_id, Telemetry.prt, Telemetry.prv)
         .filter(Telemetry.gateway_id.in_(target_gws))
         .all()
-    )
+    }
 
     for gw_id in target_gws:
         # Seed PT-101
         for dt_utc, prt, vals in pt_final_points:
             for idx, p_hex in enumerate(["01", "02", "03", "04", "05"]):
                 para_id = f"0001{p_hex}00"
-                if (gw_id, para_id, dt_utc) not in existing_set:
+                key = (gw_id, para_id, prt, vals[idx])
+                if key not in existing_set:
                     db.add(Telemetry(
                         gateway_id=gw_id,
                         para_id=para_id,
@@ -720,12 +722,14 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
                         prt=prt,
                         received_at=dt_utc
                     ))
+                    existing_set.add(key)
 
         # Seed TC-12
         for dt_utc, prt, vals in tc_final_points:
             for idx, p_hex in enumerate(["01", "02", "03", "04", "05"]):
                 para_id = f"200C{p_hex}00"
-                if (gw_id, para_id, dt_utc) not in existing_set:
+                key = (gw_id, para_id, prt, vals[idx])
+                if key not in existing_set:
                     db.add(Telemetry(
                         gateway_id=gw_id,
                         para_id=para_id,
@@ -733,6 +737,7 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
                         prt=prt,
                         received_at=dt_utc
                     ))
+                    existing_set.add(key)
     db.commit()
 
     # 8. Ensure Default Maintenance Mode Records

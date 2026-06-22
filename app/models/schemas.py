@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field, AliasChoices, model_validator
-from typing import List, Optional
+from typing import List, Optional, Union
 from datetime import datetime
 
 
@@ -281,9 +281,71 @@ class GatewayResponse(BaseModel):
 # ─── Telemetry (Gateway Ingestion) ────────────────────────────────────────────
 
 class ParameterPayload(BaseModel):
-    para_id: str
-    prv: List[float]
-    prt: List[str]
+    """
+    A single entry in the gateway `parameters[]` array.
+
+    Per RDSO/SPN/257/2025 Annexure-B, two packet types share this same
+    para_id/prv/prt structure — they differ only in what `prt` looks like:
+
+    Clause 5.9 — Parameter data packet on fixed intervals (Normal):
+        para_id is a single hex string.
+        prv is an array of every value change within the interval.
+        prt is an ARRAY of timestamps, one per value in prv (DD-MM-YYYY HH:mm:ss.SSS).
+
+    Clause 5.10 — Parameter data packet after completing an event (event-based,
+    e.g. Point Machine / ELB current/voltage during operation):
+        para_id is a single hex string (same field — always present per spec).
+        prv is an array of all samples taken during the event (e.g. every 20ms).
+        prt is a SINGLE timestamp string — the time of the FIRST sample only.
+        Every subsequent sample's time = prt + (sample_index * sampling_interval_ms),
+        where sampling_interval_ms defaults to 20ms but is configurable.
+
+    NOTE: the spec does not use a bare `raw` array with no para_id. If a
+    vendor payload sends `raw` without para_id, that is a deviation from
+    Annexure-B 5.10 and should be raised with the vendor/gateway team rather
+    than silently accepted — see `raw_unattributed` below.
+    """
+    para_id: Optional[str] = None
+    prv: Optional[List[float]] = None
+    prt: Optional[Union[str, List[str]]] = None  # str (5.10 event) or List[str] (5.9 fixed-interval)
+
+    # Non-spec fallback only — present if a payload sends a bare `raw` array
+    # with no para_id, which Annexure-B 5.10 does not define. Kept so such
+    # payloads don't 422 outright, but should be treated as a data-quality
+    # flag, not a supported format.
+    raw_unattributed: Optional[List[float]] = Field(default=None, alias="raw")
+
+    model_config = {"populate_by_name": True}
+
+    @model_validator(mode="after")
+    def check_shape(self) -> "ParameterPayload":
+        has_spec_shape = self.para_id is not None or self.prv is not None or self.prt is not None
+        has_raw_fallback = self.raw_unattributed is not None
+        if not has_spec_shape and not has_raw_fallback:
+            raise ValueError("parameters[] entry must contain either para_id/prv/prt (Annexure-B 5.9/5.10) or raw")
+        if has_spec_shape and (self.para_id is None or self.prv is None or self.prt is None):
+            raise ValueError("para_id, prv, and prt must all be present together (Annexure-B 5.9/5.10)")
+        return self
+
+    @property
+    def timestamps(self) -> List[Optional[str]]:
+        """
+        Normalize prt into a list aligned with prv, regardless of which
+        clause (5.9 fixed-interval array, or 5.10 event-based single string)
+        produced this entry.
+
+        For 5.10 (prt is a single string — first-sample time only), this
+        does NOT compute the +20ms offsets for later samples — it returns
+        the first timestamp for index 0 and None for the rest. Callers that
+        need the calculated per-sample time should add the configured
+        sampling interval (default 20ms) themselves; see gateway.py.
+        """
+        if self.prv is None:
+            return []
+        if isinstance(self.prt, list):
+            return self.prt
+        # single string (5.10) — only the first sample's time is known directly
+        return [self.prt] + [None] * (len(self.prv) - 1)
 
 class GatewayDataPayload(BaseModel):
     imei: str
@@ -813,6 +875,46 @@ class AssetListResponse(BaseModel):
     page_size:   int
     total_pages: int
     rows:        List[AssetResponse]
+
+
+# ─── Asset Parameter (para_id → asset + prloc mapping) ────────────────────────
+
+class AssetParameterUpdate(BaseModel):
+    """
+    Used by the admin 'Configure Slave' screen to assign a discovered
+    para_id to an asset and record its physical location box (prloc).
+    Matches the vendor flow: 'After initial save of channel config: Add
+    asset_number_code, Add prloc, Save'.
+    """
+    asset_id: Optional[int] = None
+    prloc: Optional[str] = Field(default=None, max_length=50, description="Location box, e.g. 'LB-01'")
+
+
+class AssetParameterResponse(BaseModel):
+    id: int
+    para_id: str
+    asset_id: Optional[int] = None
+    asset_number_code: Optional[str] = None   # resolved, e.g. "PT-101"
+    asset_type_hex: Optional[str] = None      # resolved, decoded from para_id bytes 0-1
+    parameter_type_hex: Optional[str] = None  # resolved, decoded from para_id bytes 4-5
+    parameter_name: Optional[str] = None      # resolved, e.g. "Peak Current"
+    prloc: Optional[str] = None
+    is_assigned: bool
+    station_id: Optional[int] = None          # resolved via asset, if assigned
+    station_code: Optional[str] = None        # resolved via asset, if assigned
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AssetParameterListResponse(BaseModel):
+    total:       int
+    page:        int
+    page_size:   int
+    total_pages: int
+    rows:        List[AssetParameterResponse]
 
 
 # Forward refs
