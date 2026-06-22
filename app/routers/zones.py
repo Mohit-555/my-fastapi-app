@@ -82,5 +82,11 @@ def delete_zone(zone_id: int, db: Session = Depends(get_db)):
     if not zone:
         raise HTTPException(status_code=404, detail=f"Zone with id {zone_id} not found")
 
+    from app.models.models import User, Division
+    div_ids = [d.id for d in db.query(Division).filter(Division.zone_id == zone_id).all()]
+    db.query(User).filter(User.zone_id == zone_id).update({"zone_id": None})
+    if div_ids:
+        db.query(User).filter(User.division_id.in_(div_ids)).update({"division_id": None})
+
     db.delete(zone)
     db.commit()

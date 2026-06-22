@@ -123,5 +123,8 @@ def delete_division(division_id: int, db: Session = Depends(get_db)):
     if not division:
         raise HTTPException(status_code=404, detail=f"Division with id {division_id} not found")
 
+    from app.models.models import User
+    db.query(User).filter(User.division_id == division_id).update({"division_id": None})
+
     db.delete(division)
     db.commit()

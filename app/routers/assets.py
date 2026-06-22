@@ -847,6 +847,11 @@ def delete_asset(asset_id: int, db: Session = Depends(get_db)):
     record = db.query(Asset).filter(Asset.id == asset_id).first()
     if not record:
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} not found")
+
+    from app.models.models import AlertEvent, MaintenanceMode
+    db.query(AlertEvent).filter(AlertEvent.asset_id == asset_id).update({"asset_id": None})
+    db.query(MaintenanceMode).filter(MaintenanceMode.asset_id == asset_id).update({"asset_id": None})
+
     db.delete(record)
     db.commit()
 

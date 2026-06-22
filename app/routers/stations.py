@@ -124,5 +124,10 @@ def delete_station(station_id: int, db: Session = Depends(get_db)):
     if not station:
         raise HTTPException(status_code=404, detail=f"Station with id {station_id} not found")
 
+    from app.models.models import Threshold, AlertEvent, MaintenanceMode
+    db.query(AlertEvent).filter(AlertEvent.station_id == station_id).update({"asset_id": None})
+    db.query(MaintenanceMode).filter(MaintenanceMode.station_id == station_id).update({"asset_id": None})
+    db.query(Threshold).filter(Threshold.station_id == station_id).delete()
+
     db.delete(station)
     db.commit()
