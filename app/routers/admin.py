@@ -287,6 +287,14 @@ def assign_menus_to_role(
 @router.delete("/roles/{role_id}/menus/{menu_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_menu_from_role(role_id: int, menu_id: int, db: Session = Depends(get_db)):
     """Remove a single menu from a role."""
+    role = db.query(Role).filter(Role.id == role_id).first()
+    if not role:
+        raise HTTPException(status_code=404, detail=f"Role {role_id} not found")
+
+    menu = db.query(Menu).filter(Menu.id == menu_id).first()
+    if not menu:
+        raise HTTPException(status_code=404, detail=f"Menu {menu_id} not found")
+
     rm = db.query(RoleMenu).filter(
         RoleMenu.role_id == role_id,
         RoleMenu.menu_id == menu_id,
