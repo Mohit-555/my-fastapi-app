@@ -786,6 +786,97 @@ def create_asset(payload: AssetCreate, db: Session = Depends(get_db)):
     return _build_response(record)
 
 
+@router.post("/bulk", response_model=List[AssetResponse], status_code=status.HTTP_201_CREATED)
+def create_assets_bulk(payload: List[AssetCreate], db: Session = Depends(get_db)):
+    """
+    Register multiple physical asset instances in a single request.
+
+    If any single asset validation fails or duplicate exists, the entire transaction is rolled back.
+    """
+    if not payload:
+        raise HTTPException(status_code=400, detail="Asset list cannot be empty")
+
+    # 1. Pre-validate internal list duplicate codes
+    smms_codes = [a.smms_asset_code.strip() for a in payload]
+    if len(smms_codes) != len(set(smms_codes)):
+        raise HTTPException(status_code=400, detail="Duplicate smms_asset_code present in the request list")
+
+    # 2. Bulk check database for existing smms_asset_codes
+    existing_codes = {
+        a[0] for a in db.query(Asset.smms_asset_code)
+        .filter(Asset.smms_asset_code.in_(smms_codes)).all()
+    }
+    if existing_codes:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Some smms_asset_codes already exist in the database: {list(existing_codes)}"
+        )
+
+    # 3. Bulk fetch referenced stations and gateways to validate existence
+    station_ids = {a.station_id for a in payload}
+    existing_stations = {
+        s[0] for s in db.query(Station.id)
+        .filter(Station.id.in_(station_ids)).all()
+    }
+    missing_stations = station_ids - existing_stations
+    if missing_stations:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Referenced stations not found: {list(missing_stations)}"
+        )
+
+    gateway_ids = {a.station_gateway_id for a in payload}
+    existing_gateways = {
+        g[0] for g in db.query(Gateway.stngw_id)
+        .filter(Gateway.stngw_id.in_(gateway_ids)).all()
+    }
+    missing_gateways = gateway_ids - existing_gateways
+    if missing_gateways:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Referenced gateways not found: {list(missing_gateways)}"
+        )
+
+    # 4. Insert assets
+    created_assets = []
+    for item in payload:
+        # Validate asset type
+        if item.asset_type_hex.upper() not in ASSET_TYPE_MAP:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown asset_type_hex '{item.asset_type_hex}' for asset '{item.smms_asset_code}'"
+            )
+
+        asset = Asset(
+            smms_asset_code=item.smms_asset_code.strip(),
+            smms_asset_name=item.smms_asset_name.strip(),
+            asset_number_code=item.asset_number_code.strip(),
+            asset_number_id=item.asset_number_id.upper(),
+            asset_type_hex=item.asset_type_hex.upper(),
+            station_gateway_id=item.station_gateway_id,
+            station_id=item.station_id,
+            make=item.make,
+            model=item.model,
+            attr1=item.attr1,
+            attr2=item.attr2,
+            location=item.location,
+            is_active=item.is_active,
+        )
+        db.add(asset)
+        created_assets.append(asset)
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error during bulk insert: {str(e)}")
+
+    for asset in created_assets:
+        db.refresh(asset)
+
+    return [_build_response(a) for a in created_assets]
+
+
 @router.put("/{asset_id}", response_model=AssetResponse)
 def update_asset(
     asset_id: int,
