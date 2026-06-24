@@ -1202,8 +1202,6 @@ class MaintenanceModeResponse(BaseModel):
     asset_type_hex: str
     asset_type_name: str
     asset_no: str
-    from_time: datetime
-    to_time: datetime
     from_date: datetime
     to_date: datetime
     created_at: datetime

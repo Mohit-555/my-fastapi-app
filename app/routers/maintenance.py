@@ -37,8 +37,6 @@ def _build_response_row(row: MaintenanceMode, index: int) -> MaintenanceModeResp
         asset_type_hex=row.asset_type_hex,
         asset_type_name=asset_name,
         asset_no=row.asset_no,
-        from_time=row.from_time,
-        to_time=row.to_time,
         from_date=row.from_time,
         to_date=row.to_time,
         created_at=row.created_at
