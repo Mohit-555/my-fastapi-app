@@ -285,3 +285,69 @@ def check_maintenance_reminders(db: Session = Depends(get_db)):
             db.refresh(alert)
 
     return generated_alerts
+
+
+@router.put("/{id}", response_model=MaintenanceModeResponse)
+def update_maintenance_mode(id: int, payload: MaintenanceModeRequest, db: Session = Depends(get_db)):
+    """Modify a scheduled maintenance mode before activation."""
+    record = db.query(MaintenanceMode).filter(MaintenanceMode.id == id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Maintenance mode record {id} not found")
+
+    # Check status
+    now = datetime.utcnow()
+    if record.is_cleared or now > record.to_time:
+        raise HTTPException(status_code=400, detail="Cannot modify a Completed maintenance mode")
+    if record.from_time <= now <= record.to_time:
+        raise HTTPException(status_code=400, detail="Cannot modify an Active maintenance mode")
+
+    # Resolve dates and times
+    from_dt = payload.from_date or payload.from_time
+    to_dt = payload.to_date or payload.to_time
+
+    if not from_dt or not to_dt:
+        raise HTTPException(
+            status_code=400,
+            detail="Must provide start time (from_date or from_time) and end time (to_date or to_time)"
+        )
+
+    # Dynamic asset lookup
+    asset = db.query(Asset).filter(
+        Asset.station_id == payload.station_id,
+        (Asset.asset_number_code == payload.asset_no) | (Asset.smms_asset_code == payload.asset_no)
+    ).first()
+    if not asset:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Asset '{payload.asset_no}' not found in station {payload.station_id}"
+        )
+
+    record.station_id = payload.station_id
+    record.asset_no = payload.asset_no
+    record.from_time = from_dt
+    record.to_time = to_dt
+    record.asset_type_hex = asset.asset_type_hex
+    record.asset_id = asset.id
+
+    db.commit()
+    db.refresh(record)
+    return _build_response_row(record, 1)
+
+
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_maintenance_mode(id: int, db: Session = Depends(get_db)):
+    """Cancel/delete a scheduled maintenance mode before activation."""
+    record = db.query(MaintenanceMode).filter(MaintenanceMode.id == id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Maintenance mode record {id} not found")
+
+    # Check status
+    now = datetime.utcnow()
+    if record.is_cleared or now > record.to_time:
+        raise HTTPException(status_code=400, detail="Cannot cancel/delete a Completed maintenance mode")
+    if record.from_time <= now <= record.to_time:
+        raise HTTPException(status_code=400, detail="Cannot cancel/delete an Active maintenance mode")
+
+    db.delete(record)
+    db.commit()
+    return None

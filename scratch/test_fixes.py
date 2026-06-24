@@ -252,11 +252,21 @@ class TestFixesAndFeatures(unittest.TestCase):
         # Let's import datetime and timedelta
         from datetime import datetime, timedelta
 
-        # Clean up any existing active maintenance modes for this asset to avoid conflicts
-        active_cleanup = self.client.get(f"/maintenance?station_id={station_id}&asset_no={asset_no}&status=Active", headers=self.headers)
-        if active_cleanup.status_code == 200:
-            for row in active_cleanup.json()["rows"]:
-                self.client.post(f"/maintenance/{row['id']}/clear", headers=self.headers)
+        # Clean up any existing active maintenance modes and alerts for this asset to avoid conflicts
+        db_sess = SessionLocal()
+        try:
+            db_sess.query(AlertEvent).filter(
+                AlertEvent.station_id == station_id,
+                AlertEvent.asset_no == asset_no,
+                AlertEvent.cause == "MAINT-EXCEED"
+            ).delete()
+            db_sess.query(MaintenanceMode).filter(
+                MaintenanceMode.station_id == station_id,
+                MaintenanceMode.asset_no == asset_no
+            ).delete()
+            db_sess.commit()
+        finally:
+            db_sess.close()
 
         now = datetime.utcnow()
         # 2. Create Active Maintenance Mode
@@ -386,7 +396,41 @@ class TestFixesAndFeatures(unittest.TestCase):
         # Verify the created reminder alert
         reminder_cause = [r["cause"] for r in reminders_data]
         self.assertIn("MAINT-EXCEED", reminder_cause)
-        print("Verified maintenance mode statuses, manual clear, suppression, and reminders successfully.")
+
+        # 9. Test Modify & Cancel Scheduled maintenance modes
+        # Can modify/delete Scheduled maintenance modes
+        mod_payload = {
+            "station_id": station_id,
+            "asset_no": asset_no,
+            "from_time": (now + timedelta(minutes=25)).isoformat(),
+            "to_time": (now + timedelta(minutes=45)).isoformat()
+        }
+        res_mod = self.client.put(f"/maintenance/{sched_data['id']}", json=mod_payload, headers=self.headers)
+        self.assertEqual(res_mod.status_code, 200)
+        self.assertEqual(res_mod.json()["to_time"][:16], (now + timedelta(minutes=45)).strftime("%Y-%m-%dT%H:%M"))
+
+        # Cannot modify Completed maintenance modes
+        res_mod_past_fail = self.client.put(f"/maintenance/{past_data['id']}", json=mod_payload, headers=self.headers)
+        self.assertEqual(res_mod_past_fail.status_code, 400)
+
+        # Cannot modify Active maintenance modes
+        # We need an active one: exceeded_data is active!
+        res_mod_active_fail = self.client.put(f"/maintenance/{exceeded_data['id']}", json=mod_payload, headers=self.headers)
+        self.assertEqual(res_mod_active_fail.status_code, 400)
+
+        # Can cancel/delete Scheduled maintenance modes
+        res_del = self.client.delete(f"/maintenance/{sched_data['id']}", headers=self.headers)
+        self.assertIn(res_del.status_code, (204, 244))
+
+        # Cannot cancel Completed maintenance modes
+        res_del_past_fail = self.client.delete(f"/maintenance/{past_data['id']}", headers=self.headers)
+        self.assertEqual(res_del_past_fail.status_code, 400)
+
+        # Cannot cancel Active maintenance modes
+        res_del_active_fail = self.client.delete(f"/maintenance/{exceeded_data['id']}", headers=self.headers)
+        self.assertEqual(res_del_active_fail.status_code, 400)
+
+        print("Verified maintenance mode statuses, manual clear, suppression, reminders, modification and cancellation successfully.")
 
 if __name__ == "__main__":
     unittest.main()
