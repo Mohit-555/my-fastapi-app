@@ -1183,10 +1183,9 @@ class EquipmentRoomHistoryResponse(BaseModel):
 
 class MaintenanceModeRequest(BaseModel):
     station_id: int
-    asset_type_hex: str
     asset_no: str
-    from_time: datetime
-    to_time: datetime
+    from_date: datetime
+    to_date: datetime
 
 
 class MaintenanceModeResponse(BaseModel):
@@ -1205,6 +1204,8 @@ class MaintenanceModeResponse(BaseModel):
     asset_no: str
     from_time: datetime
     to_time: datetime
+    from_date: datetime
+    to_date: datetime
     created_at: datetime
 
     class Config:

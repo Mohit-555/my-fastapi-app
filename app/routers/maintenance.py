@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.models import MaintenanceMode, Station, Division, Zone
+from app.models.models import MaintenanceMode, Station, Division, Zone, Asset
 from app.models.schemas import MaintenanceModeRequest, MaintenanceModeResponse, MaintenanceModeListResponse
 from app.constants import ASSET_TYPE_MAP
 
@@ -39,6 +39,8 @@ def _build_response_row(row: MaintenanceMode, index: int) -> MaintenanceModeResp
         asset_no=row.asset_no,
         from_time=row.from_time,
         to_time=row.to_time,
+        from_date=row.from_time,
+        to_date=row.to_time,
         created_at=row.created_at
     )
 
@@ -107,15 +109,24 @@ def activate_maintenance_mode(payload: MaintenanceModeRequest, db: Session = Dep
     if not station:
         raise HTTPException(status_code=404, detail=f"Station with ID {payload.station_id} not found")
 
-    if payload.asset_type_hex not in ASSET_TYPE_MAP:
-        raise HTTPException(status_code=400, detail=f"Invalid asset type hex: {payload.asset_type_hex}")
+    # Find asset by station_id and asset_no
+    asset = db.query(Asset).filter(
+        Asset.station_id == payload.station_id,
+        (Asset.asset_number_code == payload.asset_no) | (Asset.smms_asset_code == payload.asset_no)
+    ).first()
+    if not asset:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Asset '{payload.asset_no}' not found at station {payload.station_id}"
+        )
 
     record = MaintenanceMode(
         station_id=payload.station_id,
-        asset_type_hex=payload.asset_type_hex,
+        asset_type_hex=asset.asset_type_hex,
         asset_no=payload.asset_no,
-        from_time=payload.from_time,
-        to_time=payload.to_time,
+        from_time=payload.from_date,
+        to_time=payload.to_date,
+        asset_id=asset.id,
         created_at=datetime.utcnow()
     )
     db.add(record)

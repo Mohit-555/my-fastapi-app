@@ -208,5 +208,36 @@ class TestFixesAndFeatures(unittest.TestCase):
         self.assertEqual(data["page_size"], 10)
         print("Verified equipment room history returns 'total_pages' field: ", data["total_pages"])
 
+    def test_maintenance_mode_activation_with_new_fields(self):
+        # 1. Fetch an existing asset to use its station_id and asset_number_code
+        assets_resp = self.client.get("/assets", headers=self.headers)
+        self.assertEqual(assets_resp.status_code, 200)
+        assets = assets_resp.json()["rows"]
+        self.assertTrue(len(assets) > 0, "No assets found in database to perform maintenance mode test")
+        
+        asset = assets[0]
+        station_id = asset["station_id"]
+        asset_no = asset["asset_number_code"] # or smms_asset_code
+        
+        # 2. Call POST /maintenance
+        payload = {
+            "station_id": station_id,
+            "asset_no": asset_no,
+            "from_date": "2026-06-24T12:00:00Z",
+            "to_date": "2026-06-24T18:00:00Z"
+        }
+        response = self.client.post("/maintenance", json=payload, headers=self.headers)
+        self.assertEqual(response.status_code, 201, response.text)
+        
+        data = response.json()
+        self.assertEqual(data["station_id"], station_id)
+        self.assertEqual(data["asset_no"], asset_no)
+        self.assertIn("from_date", data)
+        self.assertIn("to_date", data)
+        self.assertIn("from_time", data)
+        self.assertIn("to_time", data)
+        self.assertEqual(data["asset_type_hex"], asset["asset_type_hex"])
+        print("Verified maintenance mode activation with new fields successfully.")
+
 if __name__ == "__main__":
     unittest.main()
