@@ -239,5 +239,154 @@ class TestFixesAndFeatures(unittest.TestCase):
         self.assertEqual(data["asset_type_hex"], asset["asset_type_hex"])
         print("Verified maintenance mode activation with both date and time fields successfully.")
 
+    def test_maintenance_mode_status_and_endpoints(self):
+        # 1. Fetch an existing asset
+        assets_resp = self.client.get("/assets", headers=self.headers)
+        self.assertEqual(assets_resp.status_code, 200)
+        assets = assets_resp.json()["rows"]
+        self.assertTrue(len(assets) > 0, "No assets found in database")
+        asset = assets[0]
+        station_id = asset["station_id"]
+        asset_no = asset["asset_number_code"]
+        
+        # Let's import datetime and timedelta
+        from datetime import datetime, timedelta
+
+        # Clean up any existing active maintenance modes for this asset to avoid conflicts
+        active_cleanup = self.client.get(f"/maintenance?station_id={station_id}&asset_no={asset_no}&status=Active", headers=self.headers)
+        if active_cleanup.status_code == 200:
+            for row in active_cleanup.json()["rows"]:
+                self.client.post(f"/maintenance/{row['id']}/clear", headers=self.headers)
+
+        now = datetime.utcnow()
+        # 2. Create Active Maintenance Mode
+        active_payload = {
+            "station_id": station_id,
+            "asset_no": asset_no,
+            "from_time": (now - timedelta(minutes=10)).isoformat(),
+            "to_time": (now + timedelta(minutes=10)).isoformat()
+        }
+        res_active = self.client.post("/maintenance", json=active_payload, headers=self.headers)
+        self.assertEqual(res_active.status_code, 201, res_active.text)
+        active_data = res_active.json()
+        self.assertEqual(active_data["status"], "Active")
+
+        # 3. Create Scheduled Maintenance Mode
+        sched_payload = {
+            "station_id": station_id,
+            "asset_no": asset_no,
+            "from_time": (now + timedelta(minutes=20)).isoformat(),
+            "to_time": (now + timedelta(minutes=40)).isoformat()
+        }
+        res_sched = self.client.post("/maintenance", json=sched_payload, headers=self.headers)
+        self.assertEqual(res_sched.status_code, 201, res_sched.text)
+        sched_data = res_sched.json()
+        self.assertEqual(sched_data["status"], "Scheduled")
+
+        # 4. Create Completed Maintenance Mode (by past times)
+        past_payload = {
+            "station_id": station_id,
+            "asset_no": asset_no,
+            "from_time": (now - timedelta(minutes=40)).isoformat(),
+            "to_time": (now - timedelta(minutes=20)).isoformat()
+        }
+        res_past = self.client.post("/maintenance", json=past_payload, headers=self.headers)
+        self.assertEqual(res_past.status_code, 201, res_past.text)
+        past_data = res_past.json()
+        self.assertEqual(past_data["status"], "Completed")
+
+        # 5. Verify GET /maintenance filtering by status
+        # Active filter
+        get_active = self.client.get("/maintenance?status=Active", headers=self.headers)
+        self.assertEqual(get_active.status_code, 200)
+        active_list = [row["id"] for row in get_active.json()["rows"]]
+        self.assertIn(active_data["id"], active_list)
+        self.assertNotIn(sched_data["id"], active_list)
+        self.assertNotIn(past_data["id"], active_list)
+
+        # Scheduled filter
+        get_sched = self.client.get("/maintenance?status=Scheduled", headers=self.headers)
+        self.assertEqual(get_sched.status_code, 200)
+        sched_list = [row["id"] for row in get_sched.json()["rows"]]
+        self.assertIn(sched_data["id"], sched_list)
+        self.assertNotIn(active_data["id"], sched_list)
+
+        # Completed filter
+        get_completed = self.client.get("/maintenance?status=Completed", headers=self.headers)
+        self.assertEqual(get_completed.status_code, 200)
+        comp_list = [row["id"] for row in get_completed.json()["rows"]]
+        self.assertIn(past_data["id"], comp_list)
+
+        # 6. Test Alert Suppression during active maintenance
+        # Try to post an alert for active asset - should fail with 400
+        alert_payload = {
+            "station_id": station_id,
+            "alert_type": "Failure",
+            "asset_type_hex": asset["asset_type_hex"],
+            "asset_no": asset_no,
+            "cause": "TEMP-HIGH",
+            "alert_status": "Active"
+        }
+        res_alert_fail = self.client.post("/alerts/events", json=alert_payload, headers=self.headers)
+        self.assertEqual(res_alert_fail.status_code, 400)
+        self.assertIn("Alert suppressed", res_alert_fail.json()["message"])
+
+        # 7. Test Manual Clear endpoint
+        res_clear = self.client.post(f"/maintenance/{active_data['id']}/clear", headers=self.headers)
+        self.assertEqual(res_clear.status_code, 200)
+        clear_data = res_clear.json()
+        self.assertEqual(clear_data["status"], "Completed")
+        self.assertTrue(clear_data["is_cleared"])
+        self.assertIsNotNone(clear_data["cleared_at"])
+
+        # Now alerts should NOT be suppressed for this asset since maintenance is cleared/completed
+        res_alert_ok = self.client.post("/alerts/events", json=alert_payload, headers=self.headers)
+        self.assertEqual(res_alert_ok.status_code, 201)
+        alert_ok_data = res_alert_ok.json()
+        self.assertEqual(alert_ok_data["asset_no"], asset_no)
+
+        # 8. Test Reminder Alerts for exceeded duration
+        # Let's create an active maintenance mode for a Signal (type '10') that started 50 mins ago
+        # Note: We need a station and asset of type '10' if possible. Let's find one or create one.
+        # But we can also just use the current asset, but we can set its asset_type_hex to '10' in the payload or use '10'.
+        # Since we resolved asset_type_hex dynamically from the asset, let's update our asset's type to '10' in DB or find an asset of type '10'.
+        # Actually, let's find an asset with type '10' or '20' or '00'.
+        signal_asset = None
+        for a in assets:
+            if a["asset_type_hex"] in ("10", "20", "00"):
+                signal_asset = a
+                break
+        if not signal_asset:
+            signal_asset = asset
+
+        limit_payload = {
+            "station_id": signal_asset["station_id"],
+            "asset_no": signal_asset["asset_number_code"],
+            # Started 50 mins ago (standard Signal limit is 45 min, standard other limit is 60 min, so 50 min exceeds Signal limit of 45 min)
+            "from_time": (now - timedelta(minutes=50)).isoformat(),
+            # Ends in 20 mins
+            "to_time": (now + timedelta(minutes=20)).isoformat()
+        }
+        # If we need this to be treated as Signal, let's ensure its asset_type_hex in the database is '10'.
+        # Let's query the DB and temporarily modify it, or just register it.
+        # Actually, since from_time is 50 mins ago, let's force it to 70 mins ago so it exceeds 60 mins (which covers all asset types!).
+        limit_payload["from_time"] = (now - timedelta(minutes=70)).isoformat()
+
+        res_exceeded = self.client.post("/maintenance", json=limit_payload, headers=self.headers)
+        self.assertEqual(res_exceeded.status_code, 201)
+        exceeded_data = res_exceeded.json()
+        self.assertEqual(exceeded_data["status"], "Active")
+
+        # Now trigger check-reminders
+        res_reminders = self.client.post("/maintenance/check-reminders", headers=self.headers)
+        self.assertEqual(res_reminders.status_code, 200)
+        reminders_data = res_reminders.json()
+        self.assertTrue(len(reminders_data) > 0)
+        
+        # Verify the created reminder alert
+        reminder_cause = [r["cause"] for r in reminders_data]
+        self.assertIn("MAINT-EXCEED", reminder_cause)
+        print("Verified maintenance mode statuses, manual clear, suppression, and reminders successfully.")
+
 if __name__ == "__main__":
     unittest.main()

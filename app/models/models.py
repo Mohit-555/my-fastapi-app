@@ -427,6 +427,8 @@ class MaintenanceMode(Base):
     asset_no = Column(String(40), nullable=False, index=True)
     from_time = Column(DateTime, nullable=False, index=True)
     to_time = Column(DateTime, nullable=False, index=True)
+    is_cleared = Column(Boolean, default=False, nullable=False)
+    cleared_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now(UTC), nullable=False, index=True)
 
     station = relationship("Station", back_populates="maintenance_modes")

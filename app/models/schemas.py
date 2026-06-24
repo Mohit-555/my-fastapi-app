@@ -1208,6 +1208,9 @@ class MaintenanceModeResponse(BaseModel):
     to_time: datetime
     from_date: datetime
     to_date: datetime
+    status: str
+    is_cleared: bool
+    cleared_at: Optional[datetime] = None
     created_at: datetime
 
     class Config:

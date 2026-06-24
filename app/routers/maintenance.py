@@ -8,8 +8,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.models import MaintenanceMode, Station, Division, Zone, Asset
-from app.models.schemas import MaintenanceModeRequest, MaintenanceModeResponse, MaintenanceModeListResponse
+from app.models.models import MaintenanceMode, Station, Division, Zone, Asset, AlertEvent
+from app.models.schemas import MaintenanceModeRequest, MaintenanceModeResponse, MaintenanceModeListResponse, AlertEventResponse
 from app.constants import ASSET_TYPE_MAP
 
 router = APIRouter(prefix="/maintenance", tags=["Maintenance"])
@@ -22,6 +22,16 @@ def _build_response_row(row: MaintenanceMode, index: int) -> MaintenanceModeResp
 
     asset_info = ASSET_TYPE_MAP.get(row.asset_type_hex)
     asset_name = asset_info[1] if asset_info else "Unknown"
+
+    now = datetime.utcnow()
+    if row.is_cleared:
+        status_val = "Completed"
+    elif now < row.from_time:
+        status_val = "Scheduled"
+    elif now > row.to_time:
+        status_val = "Completed"
+    else:
+        status_val = "Active"
 
     return MaintenanceModeResponse(
         id=row.id,
@@ -41,6 +51,9 @@ def _build_response_row(row: MaintenanceMode, index: int) -> MaintenanceModeResp
         to_time=row.to_time,
         from_date=row.from_time,
         to_date=row.to_time,
+        status=status_val,
+        is_cleared=row.is_cleared,
+        cleared_at=row.cleared_at,
         created_at=row.created_at
     )
 
@@ -54,6 +67,7 @@ def _base_query(
     asset_no: Optional[str],
     from_time: Optional[datetime],
     to_time: Optional[datetime],
+    status: Optional[str] = None,
 ):
     q = db.query(MaintenanceMode).join(Station).join(Division).join(Zone)
 
@@ -72,6 +86,16 @@ def _base_query(
     if to_time:
         q = q.filter(MaintenanceMode.to_time <= to_time)
 
+    if status:
+        now = datetime.utcnow()
+        status_clean = status.strip().title()
+        if status_clean == "Completed":
+            q = q.filter((MaintenanceMode.is_cleared == True) | (MaintenanceMode.to_time < now))
+        elif status_clean == "Scheduled":
+            q = q.filter((MaintenanceMode.is_cleared == False) & (MaintenanceMode.from_time > now))
+        elif status_clean == "Active":
+            q = q.filter((MaintenanceMode.is_cleared == False) & (MaintenanceMode.from_time <= now) & (MaintenanceMode.to_time >= now))
+
     return q.order_by(MaintenanceMode.created_at.desc(), MaintenanceMode.id.desc())
 
 
@@ -84,12 +108,13 @@ def list_maintenance_modes(
     asset_no: Optional[str] = Query(None),
     from_time: Optional[datetime] = Query(None),
     to_time: Optional[datetime] = Query(None),
+    status: Optional[str] = Query(None, description="Filter by status (Active, Scheduled, Completed)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
     """List maintenance mode entries with pagination and filters."""
-    q = _base_query(db, zone_id, division_id, station_id, asset_type_hex, asset_no, from_time, to_time)
+    q = _base_query(db, zone_id, division_id, station_id, asset_type_hex, asset_no, from_time, to_time, status)
     total = q.count()
     offset = (page - 1) * page_size
     rows = q.offset(offset).limit(page_size).all()
@@ -186,3 +211,77 @@ def download_maintenance_modes(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
+
+
+@router.post("/{id}/clear", response_model=MaintenanceModeResponse)
+def clear_maintenance_mode(id: int, db: Session = Depends(get_db)):
+    """Manually clear/terminate an active or scheduled maintenance mode early."""
+    record = db.query(MaintenanceMode).filter(MaintenanceMode.id == id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Maintenance mode record {id} not found")
+
+    record.is_cleared = True
+    record.cleared_at = datetime.utcnow()
+    db.commit()
+    db.refresh(record)
+    return _build_response_row(record, 1)
+
+
+@router.post("/check-reminders", response_model=List[AlertEventResponse])
+def check_maintenance_reminders(db: Session = Depends(get_db)):
+    """
+    Check all active maintenance modes and generate reminder alerts if they exceed:
+    - Track Circuit (20): 60 min
+    - Point Machine (00): 60 min
+    - Signal (10): 45 min
+    - Default/Others: 60 min
+    """
+    now = datetime.utcnow()
+    # Active modes are: not cleared, from_time <= now <= to_time
+    active_modes = db.query(MaintenanceMode).filter(
+        MaintenanceMode.is_cleared == False,
+        MaintenanceMode.from_time <= now,
+        MaintenanceMode.to_time >= now
+    ).all()
+
+    generated_alerts = []
+    for mode in active_modes:
+        # Determine duration limit
+        # Track Circuit (20): 60 min, Point Machine (00): 60 min, Signal (10): 45 min
+        limit_minutes = 60
+        if mode.asset_type_hex == "10":  # Signal
+            limit_minutes = 45
+
+        elapsed_minutes = (now - mode.from_time).total_seconds() / 60
+        if elapsed_minutes > limit_minutes:
+            # Exceeded standard duration! Generate a reminder alert if not already generated.
+            # We look for an AlertEvent with cause='MAINT-EXCEED' for this asset and station
+            # that was created after the maintenance mode's from_time.
+            exists = db.query(AlertEvent).filter(
+                AlertEvent.station_id == mode.station_id,
+                AlertEvent.asset_no == mode.asset_no,
+                AlertEvent.cause == "MAINT-EXCEED",
+                AlertEvent.alert_time >= mode.from_time
+            ).first()
+
+            if not exists:
+                alert = AlertEvent(
+                    station_id=mode.station_id,
+                    alert_type="Predictive",
+                    asset_type_hex=mode.asset_type_hex,
+                    asset_no=mode.asset_no,
+                    cause="MAINT-EXCEED",
+                    alert_status="Active",
+                    alert_time=now,
+                    remark=f"Maintenance mode exceeded limit of {limit_minutes} minutes.",
+                    asset_id=mode.asset_id
+                )
+                db.add(alert)
+                generated_alerts.append(alert)
+
+    if generated_alerts:
+        db.commit()
+        for alert in generated_alerts:
+            db.refresh(alert)
+
+    return generated_alerts

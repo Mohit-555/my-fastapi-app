@@ -788,6 +788,7 @@ def ensure_default_alert_causes(db: Session) -> None:
         {"cause_code": "TEMP-HIGH", "cause_detail": "Temperature high", "asset_type_id": "10", "alert_category": "PREDICTIVE"},
         {"cause_code": "MOTOR-OC", "cause_detail": "Motor overcurrent", "asset_type_id": "00", "alert_category": "FAILURE"},
         {"cause_code": "BAT-LOW", "cause_detail": "Battery voltage low", "asset_type_id": "41", "alert_category": "PREDICTIVE"},
+        {"cause_code": "MAINT-EXCEED", "cause_detail": "Maintenance duration exceeded standard limit", "asset_type_id": None, "alert_category": "PREDICTIVE"},
     ]
     for c in default_causes:
         exists = db.query(AlertCauseMaster).filter(AlertCauseMaster.cause_code == c["cause_code"]).first()

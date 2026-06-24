@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP
 from app.database import get_db
-from app.models.models import AlertEvent, Asset, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster, AssetInventory
+from app.models.models import AlertEvent, Asset, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster, AssetInventory, MaintenanceMode
 from app.models.schemas import (
     AlertEventCreate,
     AlertEventResponse,
@@ -990,6 +990,23 @@ def list_alert_events(
 def create_alert_event(payload: AlertEventCreate, db: Session = Depends(get_db)):
     """Create an alert event that appears in Alert Summary."""
     _validate_event_payload(payload, db)
+
+    # Suppress alert if asset is currently in active maintenance mode (unless it's a reminder alert)
+    if payload.cause.strip().upper() != "MAINT-EXCEED":
+        now = datetime.utcnow()
+        active_maint = db.query(MaintenanceMode).filter(
+            MaintenanceMode.station_id == payload.station_id,
+            MaintenanceMode.asset_no == payload.asset_no,
+            MaintenanceMode.is_cleared == False,
+            MaintenanceMode.from_time <= now,
+            MaintenanceMode.to_time >= now
+        ).first()
+        if active_maint:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Alert suppressed: Asset is currently in Maintenance Mode."
+            )
+
     record = AlertEvent(
         station_id=payload.station_id,
         alert_type=payload.alert_type.strip().title(),
