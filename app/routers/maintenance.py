@@ -37,6 +37,8 @@ def _build_response_row(row: MaintenanceMode, index: int) -> MaintenanceModeResp
         asset_type_hex=row.asset_type_hex,
         asset_type_name=asset_name,
         asset_no=row.asset_no,
+        from_time=row.from_time,
+        to_time=row.to_time,
         from_date=row.from_time,
         to_date=row.to_time,
         created_at=row.created_at
@@ -118,12 +120,21 @@ def activate_maintenance_mode(payload: MaintenanceModeRequest, db: Session = Dep
             detail=f"Asset '{payload.asset_no}' not found at station {payload.station_id}"
         )
 
+    # Resolve start and end times
+    from_dt = payload.from_date or payload.from_time
+    to_dt = payload.to_date or payload.to_time
+    if not from_dt or not to_dt:
+        raise HTTPException(
+            status_code=400,
+            detail="Either (from_time, to_time) or (from_date, to_date) must be provided"
+        )
+
     record = MaintenanceMode(
         station_id=payload.station_id,
         asset_type_hex=asset.asset_type_hex,
         asset_no=payload.asset_no,
-        from_time=payload.from_date,
-        to_time=payload.to_date,
+        from_time=from_dt,
+        to_time=to_dt,
         asset_id=asset.id,
         created_at=datetime.utcnow()
     )

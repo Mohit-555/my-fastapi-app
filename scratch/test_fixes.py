@@ -234,8 +234,10 @@ class TestFixesAndFeatures(unittest.TestCase):
         self.assertEqual(data["asset_no"], asset_no)
         self.assertIn("from_date", data)
         self.assertIn("to_date", data)
+        self.assertIn("from_time", data)
+        self.assertIn("to_time", data)
         self.assertEqual(data["asset_type_hex"], asset["asset_type_hex"])
-        print("Verified maintenance mode activation with new fields successfully.")
+        print("Verified maintenance mode activation with both date and time fields successfully.")
 
 if __name__ == "__main__":
     unittest.main()
