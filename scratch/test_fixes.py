@@ -199,5 +199,14 @@ class TestFixesAndFeatures(unittest.TestCase):
 
         print("Verified delete role menu endpoint validations successfully.")
 
+    def test_equipment_room_history_total_pages(self):
+        response = self.client.get("/equipment-room/history?page=1&page_size=10", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("total_pages", data)
+        self.assertEqual(data["page"], 1)
+        self.assertEqual(data["page_size"], 10)
+        print("Verified equipment room history returns 'total_pages' field: ", data["total_pages"])
+
 if __name__ == "__main__":
     unittest.main()

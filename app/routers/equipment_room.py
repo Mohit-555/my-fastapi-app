@@ -178,6 +178,7 @@ def get_equipment_room_history(
 ):
     rows = _generate_history_data(db, zone_id, division_id, station_id, room_type, from_time, to_time)
     total = len(rows)
+    total_pages = (total + page_size - 1) // page_size if total else 0
     start_idx = (page - 1) * page_size
     end_idx = start_idx + page_size
     paginated_rows = rows[start_idx:end_idx]
@@ -186,6 +187,7 @@ def get_equipment_room_history(
         "total": total,
         "page": page,
         "page_size": page_size,
+        "total_pages": total_pages,
         "rows": paginated_rows,
     }
 
