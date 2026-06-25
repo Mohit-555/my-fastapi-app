@@ -118,11 +118,13 @@ def list_maintenance_modes(
     total = q.count()
     offset = (page - 1) * page_size
     rows = q.offset(offset).limit(page_size).all()
+    total_pages = (total + page_size - 1) // page_size if total else 0
 
     return MaintenanceModeListResponse(
         total=total,
         page=page,
         page_size=page_size,
+        total_pages=total_pages,
         rows=[_build_response_row(r, idx + offset + 1) for idx, r in enumerate(rows)]
     )
 

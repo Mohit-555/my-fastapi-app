@@ -309,6 +309,7 @@ class TestFixesAndFeatures(unittest.TestCase):
         # Active filter
         get_active = self.client.get("/maintenance?status=Active", headers=self.headers)
         self.assertEqual(get_active.status_code, 200)
+        self.assertIn("total_pages", get_active.json())
         active_list = [row["id"] for row in get_active.json()["rows"]]
         self.assertIn(active_data["id"], active_list)
         self.assertNotIn(sched_data["id"], active_list)

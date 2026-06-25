@@ -1221,10 +1221,9 @@ class MaintenanceModeListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    total_pages: int
     rows: List[MaintenanceModeResponse]
 
-
-# ─── Alert Causes ─────────────────────────────────────────────────────────────
 
 from enum import Enum as PyEnum
 

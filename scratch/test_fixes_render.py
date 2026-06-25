@@ -132,8 +132,9 @@ def test_live_render_fixes():
 
     # Verify filtering list by status=Active
     maint_list_resp = httpx.get(f"{BASE_URL}/maintenance?status=Active", headers=headers)
+    assert "total_pages" in maint_list_resp.json()
     active_ids = [m["id"] for m in maint_list_resp.json()["rows"]]
-    print(f"Active maintenance IDs in system: {active_ids}")
+    print(f"Active maintenance IDs in system: {active_ids} (total_pages={maint_list_resp.json()['total_pages']})")
     assert active_maint["id"] in active_ids, "Created maintenance mode not in Active list!"
 
     # 5. Verify Alert Suppression
