@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
-from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP
+from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP, PARAMETER_TYPE_MAP
 from app.database import get_db
 from app.models.models import AlertEvent, Asset, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster, AssetInventory, MaintenanceMode
 from app.models.schemas import (
@@ -936,6 +936,20 @@ def get_alert_filters(db: Session = Depends(get_db)):
         for idx, make in enumerate(makes, start=1)
     ]
 
+    poll_intervals_list = [
+        AlertFilterOption(id=1, label="5 sec", value="5"),
+        AlertFilterOption(id=2, label="10 sec", value="10"),
+        AlertFilterOption(id=3, label="15 sec", value="15"),
+        AlertFilterOption(id=4, label="30 sec", value="30"),
+        AlertFilterOption(id=5, label="45 sec", value="45"),
+        AlertFilterOption(id=6, label="60 sec", value="60"),
+    ]
+
+    parameter_type_hexes_list = [
+        AlertFilterOption(id=idx, label=f"{name} ({hex_id})", value=hex_id)
+        for idx, (hex_id, (_, name, _)) in enumerate(PARAMETER_TYPE_MAP.items(), start=1)
+    ]
+
     return AlertFiltersResponse(
         zones=[DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex) for z in zones],
         divisions=[DropdownOption(id=d.id, label=d.division_name, code=d.division_code, hex_id=d.division_id_hex) for d in divisions],
@@ -947,6 +961,8 @@ def get_alert_filters(db: Session = Depends(get_db)):
         feedbacks=feedbacks_list,
         alert_statuses=alert_statuses_list,
         asset_makes=asset_makes_list,
+        poll_intervals=poll_intervals_list,
+        parameter_type_hexes=parameter_type_hexes_list,
     )
 
 

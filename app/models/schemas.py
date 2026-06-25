@@ -742,6 +742,8 @@ class AlertFiltersResponse(BaseModel):
     feedbacks: List[AlertFilterOption]
     alert_statuses: List[AlertFilterOption]
     asset_makes: List[AlertFilterOption] = []
+    poll_intervals: List[AlertFilterOption] = []
+    parameter_type_hexes: List[AlertFilterOption] = []
 
 
 # ─── Thresholds ───────────────────────────────────────────────────────────────

@@ -27,12 +27,17 @@ class TestFixesAndFeatures(unittest.TestCase):
         cls.headers = {"Authorization": f"Bearer {cls.token}"}
 
     def test_alert_filters_contains_makes(self):
-        # Verify that get_alert_filters returns asset_makes
+        # Verify that get_alert_filters returns asset_makes, poll_intervals, and parameter_type_hexes
         response = self.client.get("/alerts/filters", headers=self.headers)
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertIn("asset_makes", data)
+        self.assertIn("poll_intervals", data)
+        self.assertIn("parameter_type_hexes", data)
+        self.assertTrue(len(data["poll_intervals"]) > 0)
+        self.assertTrue(len(data["parameter_type_hexes"]) > 0)
         print("Alert Filters response data 'asset_makes':", data["asset_makes"])
+        print("Alert Filters response data 'poll_intervals':", data["poll_intervals"])
 
     def test_admin_user_create_and_delete(self):
         # 1. Create a user via POST /admin/users
