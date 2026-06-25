@@ -1,6 +1,9 @@
 import unittest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+import asyncio
+from unittest.mock import MagicMock
+from fastapi import Request
 from datetime import datetime
 
 from app.main import app
@@ -522,6 +525,30 @@ class TestFixesAndFeatures(unittest.TestCase):
         self.assertEqual(smm_post_data["vcc"], "ABC")
         self.assertEqual(smm_post_data["telemetry_data"][0]["parameters"][0]["prv"], 12.5)
         print("Verified telemetry integration endpoints successfully.")
+
+        # 5. Test Live SSE Stream (GET /telemetry/live/{asset_number})
+        # Connecting to public endpoint directly via async function call
+        from app.routers.telemetry import live_telemetry_stream
+        from fastapi.responses import StreamingResponse
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.is_disconnected = MagicMock(return_value=False)
+
+        async def run_sse_test():
+            response = await live_telemetry_stream(
+                asset_number=asset["asset_number_code"],
+                request=mock_request,
+                poll_interval=1,
+                db=db
+            )
+            generator = response.body_iterator
+            first_event = await generator.__anext__()
+            return response, first_event
+
+        sse_response, sse_first_event = asyncio.run(run_sse_test())
+        self.assertEqual(sse_response.media_type, "text/event-stream")
+        self.assertEqual(sse_first_event, ": ping\n\n")
+        print("Verified live telemetry stream endpoint successfully.")
 
 if __name__ == "__main__":
     unittest.main()

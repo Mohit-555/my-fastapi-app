@@ -11,10 +11,10 @@ import json
 from datetime import datetime, timedelta
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 
 from app.database import get_db, SessionLocal
 from app.models.models import Telemetry, Gateway, Station, Division, Zone, Threshold, Asset, AssetTypeMaster
@@ -25,6 +25,7 @@ from app.models.schemas import (
 from app.constants import ASSET_TYPE_MAP, PARAMETER_TYPE_MAP, PARAMETER_REPR_MAP
 
 router = APIRouter(prefix="/telemetry", tags=["Telemetry Query"])
+integration_router = APIRouter(tags=["Telemetry Integration"])
 
 
 def _resolve_station_ids(
@@ -336,66 +337,91 @@ def get_latest_by_station(
 
 # ── SSE Live Stream ───────────────────────────────────────────────────────────
 
-async def _sse_event_generator(station_id: int, asset_type_hexes: Optional[List[str]], poll_interval: int):
+async def _sse_event_generator(request: Request, asset_number: str, poll_interval: int):
     """
     Async generator that polls for new telemetry every `poll_interval` seconds
     and yields SSE-formatted events.
     """
     last_seen_id = 0
 
+    db = SessionLocal()
+    try:
+        asset = (
+            db.query(Asset)
+            .filter(
+                or_(
+                    Asset.asset_number_code == asset_number,
+                    Asset.smms_asset_code == asset_number
+                )
+            )
+            .first()
+        )
+        if not asset:
+            yield f"event: error\ndata: {json.dumps({'detail': f'Asset {asset_number} not found'})}\n\n"
+            return
+
+        gateway_id = asset.gateway.id if asset.gateway else None
+        if not gateway_id:
+            yield f"event: error\ndata: {json.dumps({'detail': f'Asset {asset_number} has no gateway'})}\n\n"
+            return
+
+        gw_stngw_id = asset.gateway.stngw_id
+        station_id = asset.station_id
+        prefix = f"{asset.asset_type_hex}{asset.asset_number_id}"
+        asset_type_hex = asset.asset_type_hex
+        asset_type_name = asset.asset_type.asset_type_name if asset.asset_type else None
+    finally:
+        db.close()
+
+    yield ": ping\n\n"
+
     while True:
+        if await request.is_disconnected():
+            break
+
         db = SessionLocal()
         try:
-            gateways = db.query(Gateway).filter(Gateway.station_id == station_id).all()
-            gw_ids = [g.id for g in gateways]
-            gateway_map = {g.id: g for g in gateways}
-
-            if gw_ids:
-                q = (
-                    db.query(Telemetry)
-                    .filter(
-                        Telemetry.gateway_id.in_(gw_ids),
-                        Telemetry.id > last_seen_id,
-                    )
-                    .order_by(Telemetry.id.asc())
-                    .limit(100)
+            q = (
+                db.query(Telemetry)
+                .filter(
+                    Telemetry.gateway_id == gateway_id,
+                    Telemetry.para_id.like(f"{prefix}%"),
+                    Telemetry.id > last_seen_id,
                 )
-                new_rows = q.all()
+                .order_by(Telemetry.id.asc())
+                .limit(100)
+            )
+            new_rows = q.all()
 
-                if new_rows:
-                    last_seen_id = new_rows[-1].id
+            if new_rows:
+                last_seen_id = new_rows[-1].id
 
-                    # Group by para_id and emit one event per para_id
-                    grouped: dict[str, list] = {}
-                    for row in new_rows:
-                        pid = row.para_id
-                        if len(pid) != 8:
-                            continue
-                        if asset_type_hexes and pid[0:2] not in asset_type_hexes:
-                            continue
-                        grouped.setdefault(pid, []).append(row)
+                grouped: dict[str, list] = {}
+                for row in new_rows:
+                    pid = row.para_id
+                    if len(pid) != 8:
+                        continue
+                    grouped.setdefault(pid, []).append(row)
 
-                    for pid, rows in grouped.items():
-                        gw = gateway_map[rows[0].gateway_id]
-                        param_info = PARAMETER_TYPE_MAP.get(pid[4:6])
-                        asset_info = ASSET_TYPE_MAP.get(pid[0:2])
-                        threshold = _get_threshold(db, pid[0:2], pid[4:6], station_id)
+                for pid, rows in grouped.items():
+                    param_info = PARAMETER_TYPE_MAP.get(pid[4:6])
+                    threshold = _get_threshold(db, asset_type_hex, pid[4:6], station_id)
 
-                        payload = {
-                            "para_id": pid,
-                            "stngw_id": gw.stngw_id,
-                            "asset_type_hex": pid[0:2],
-                            "asset_type_name": asset_info[1] if asset_info else None,
-                            "parameter_name": param_info[1] if param_info else None,
-                            "parameter_unit": param_info[2] if param_info else None,
-                            "points": [
-                                {"t": r.prt or r.received_at.isoformat(), "v": r.prv}
-                                for r in rows
-                            ],
-                            "threshold_warning_high": threshold.warning_high if threshold else None,
-                            "threshold_critical_high": threshold.critical_high if threshold else None,
-                        }
-                        yield f"data: {json.dumps(payload)}\n\n"
+                    payload = {
+                        "para_id": pid,
+                        "stngw_id": gw_stngw_id,
+                        "asset_type_hex": asset_type_hex,
+                        "asset_type_name": asset_type_name,
+                        "parameter_name": param_info[1] if param_info else None,
+                        "parameter_unit": param_info[2] if param_info else None,
+                        "points": [
+                            {"t": r.prt or r.received_at.isoformat(), "v": r.prv}
+                            for r in rows
+                        ],
+                        "threshold_warning_high": threshold.warning_high if threshold else None,
+                        "threshold_critical_high": threshold.critical_high if threshold else None,
+                    }
+                    yield f"data: {json.dumps(payload)}\n\n"
 
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
@@ -404,50 +430,36 @@ async def _sse_event_generator(station_id: int, asset_type_hexes: Optional[List[
 
         await asyncio.sleep(poll_interval)
 
-@router.get("/live/{station_id}")
+
+@integration_router.get("/telemetry/live/{asset_number}")
 async def live_telemetry_stream(
-    station_id: int,
-    token: str = Query(..., description="Access token (required because EventSource cannot send headers)"),
-    asset_type_hex: Optional[str] = Query(
-        None,
-        description="Comma-separated asset_type_hex values to subscribe to, e.g. '00' or '00,20'",
-    ),
+    asset_number: str,
+    request: Request,
     poll_interval: int = Query(5, ge=1, le=60, description="Polling interval in seconds (1–60)"),
     db: Session = Depends(get_db),
 ):
     """
-    Server-Sent Events stream for live telemetry at a station.
+    Server-Sent Events stream for live telemetry of a specific asset.
 
     Connect with EventSource in the browser:
-      const es = new EventSource('/telemetry/live/12?token=YOUR_TOKEN&asset_type_hex=00&poll_interval=5');
+      const es = new EventSource('/telemetry/live/PT-101?poll_interval=5');
       es.onmessage = (e) => { const d = JSON.parse(e.data); ... };
-
-    Each event payload:
-    {
-      "para_id": "00010202",
-      "stngw_id": "05011200",
-      "asset_type_name": "Point Machine",
-      "parameter_name": "Peak Current",
-      "parameter_unit": "A",
-      "points": [{"t": "...", "v": 7.63}],
-      "threshold_warning_high": 9.0,
-      "threshold_critical_high": 11.0
-    }
     """
-    from app.auth_utils import get_current_user_from_token
-    get_current_user_from_token(token, db)   # validates token — raises 401 if invalid
-
-    station = db.query(Station).filter(Station.id == station_id).first()
-    if not station:
-        raise HTTPException(status_code=404, detail=f"Station {station_id} not found")
-
-    asset_type_hexes = (
-        [h.strip().upper() for h in asset_type_hex.split(",")]
-        if asset_type_hex else None
+    asset = (
+        db.query(Asset)
+        .filter(
+            or_(
+                Asset.asset_number_code == asset_number,
+                Asset.smms_asset_code == asset_number
+            )
+        )
+        .first()
     )
+    if not asset:
+        raise HTTPException(status_code=404, detail=f"Asset {asset_number} not found")
 
     return StreamingResponse(
-        _sse_event_generator(station_id, asset_type_hexes, poll_interval),
+        _sse_event_generator(request, asset_number, poll_interval),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -747,7 +759,7 @@ def download_telemetry_history(
 import uuid
 from pydantic import BaseModel, Field, AliasChoices
 
-integration_router = APIRouter(tags=["Telemetry Integration"])
+
 
 class AssetNumberFilter(BaseModel):
     sc: str
