@@ -337,7 +337,7 @@ def get_latest_by_station(
 
 # ── SSE Live Stream ───────────────────────────────────────────────────────────
 
-async def _sse_event_generator(request: Request, asset_number: str, poll_interval: int):
+async def _sse_event_generator(request: Request, station_id: int, asset_number: str, poll_interval: int):
     """
     Async generator that polls for new telemetry every `poll_interval` seconds
     and yields SSE-formatted events.
@@ -349,6 +349,7 @@ async def _sse_event_generator(request: Request, asset_number: str, poll_interva
         asset = (
             db.query(Asset)
             .filter(
+                Asset.station_id == station_id,
                 or_(
                     Asset.asset_number_code == asset_number,
                     Asset.smms_asset_code == asset_number
@@ -357,7 +358,7 @@ async def _sse_event_generator(request: Request, asset_number: str, poll_interva
             .first()
         )
         if not asset:
-            yield f"event: error\ndata: {json.dumps({'detail': f'Asset {asset_number} not found'})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'detail': f'Asset {asset_number} not found at station {station_id}'})}\n\n"
             return
 
         gateway_id = asset.gateway.id if asset.gateway else None
@@ -431,23 +432,25 @@ async def _sse_event_generator(request: Request, asset_number: str, poll_interva
         await asyncio.sleep(poll_interval)
 
 
-@router.get("/live/{asset_number}")
+@router.get("/live")
 async def live_telemetry_stream(
+    station_id: int,
     asset_number: str,
     request: Request,
     poll_interval: int = Query(5, ge=1, le=60, description="Polling interval in seconds (1–60)"),
     db: Session = Depends(get_db),
 ):
     """
-    Server-Sent Events stream for live telemetry of a specific asset.
+    Server-Sent Events stream for live telemetry of a specific asset at a station.
 
     Connect with EventSource in the browser:
-      const es = new EventSource('/telemetry/live/PT-101?poll_interval=5');
+      const es = new EventSource('/telemetry/live?station_id=1&asset_number=PT-101&poll_interval=5');
       es.onmessage = (e) => { const d = JSON.parse(e.data); ... };
     """
     asset = (
         db.query(Asset)
         .filter(
+            Asset.station_id == station_id,
             or_(
                 Asset.asset_number_code == asset_number,
                 Asset.smms_asset_code == asset_number
@@ -456,10 +459,10 @@ async def live_telemetry_stream(
         .first()
     )
     if not asset:
-        raise HTTPException(status_code=404, detail=f"Asset {asset_number} not found")
+        raise HTTPException(status_code=404, detail=f"Asset {asset_number} not found at station {station_id}")
 
     return StreamingResponse(
-        _sse_event_generator(request, asset_number, poll_interval),
+        _sse_event_generator(request, station_id, asset_number, poll_interval),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

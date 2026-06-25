@@ -526,9 +526,9 @@ class TestFixesAndFeatures(unittest.TestCase):
         self.assertEqual(smm_post_data["telemetry_data"][0]["parameters"][0]["prv"], 12.5)
         print("Verified telemetry integration endpoints successfully.")
 
-        # 5. Test Live SSE Stream (GET /telemetry/live/{asset_number})
+        # 5. Test Live SSE Stream (GET /telemetry/live)
         # Check that it requires authentication
-        res_unauth = self.client.get(f"/telemetry/live/{asset['asset_number_code']}")
+        res_unauth = self.client.get(f"/telemetry/live?station_id={asset['station_id']}&asset_number={asset['asset_number_code']}")
         self.assertEqual(res_unauth.status_code, 403)
 
         # Connecting to endpoint handler directly via async function call
@@ -540,6 +540,7 @@ class TestFixesAndFeatures(unittest.TestCase):
 
         async def run_sse_test():
             response = await live_telemetry_stream(
+                station_id=asset["station_id"],
                 asset_number=asset["asset_number_code"],
                 request=mock_request,
                 poll_interval=1,
