@@ -244,6 +244,96 @@ def test_live_render_fixes():
         print(f"Modify Active Maintenance (should fail with 400) status: {r_mod_fail.status_code}")
         assert r_mod_fail.status_code == 400
 
+        # --- Testing Telemetry Integration Endpoints ---
+        print("\n--- Testing Telemetry Integration Endpoints ---")
+        # 1. Fetch station details to get division and zone codes
+        stn_resp = httpx.get(f"{BASE_URL}/stations/{station_id}", headers=headers)
+        assert stn_resp.status_code == 200
+        stn_data = stn_resp.json()
+        zone_code = stn_data.get("zone")
+        division_code = stn_data.get("division")
+        station_code = stn_data.get("station_code")
+        
+        # Determine codes
+        if not zone_code or not division_code:
+            # Fallback values
+            zone_code = "NCR"
+            division_code = "PRYJ"
+            
+        print(f"Asset location details: Zone={zone_code}, Div={division_code}, Station={station_code}")
+        
+        # 2. Ingest telemetry data via gateway
+        test_para_id = f"{asset_type_hex}{created[0]['asset_number_id']}0A00" # e.g. DC Track Circuit Voltage
+        telemetry_payload = {
+            "imei": "999999999999999",
+            "stngw_id": created[0]["station_gateway_id"],
+            "parameters": [
+                {
+                    "para_id": test_para_id,
+                    "prv": [110.5],
+                    "prt": [now.strftime("%d-%m-%Y %H:%M:%S.000")]
+                }
+            ]
+        }
+        print(f"Ingesting telemetry for para_id {test_para_id}...")
+        ingest_resp = httpx.post(f"{BASE_URL}/gateway/data", json=telemetry_payload, headers=headers)
+        print(f"Ingest Status Code: {ingest_resp.status_code}")
+        assert ingest_resp.status_code == 202
+
+        # 3. Test CRIS history report endpoint
+        hist_payload = {
+            "start_date": (now - timedelta(minutes=15)).strftime("%d/%m/%Y"),
+            "start_time": (now - timedelta(minutes=15)).strftime("%H:%M:%S"),
+            "end_date": (now + timedelta(minutes=15)).strftime("%d/%m/%Y"),
+            "end_time": (now + timedelta(minutes=15)).strftime("%H:%M:%S"),
+            "request": {
+                "zone": [zone_code],
+                "division": [division_code],
+                "station": [station_code],
+                "asset_type": [created[0]["asset_type_code"]]
+            },
+            "page_number": 1,
+            "page_size": 10
+        }
+        print("Querying /vc_telemetry_history...")
+        hist_resp = httpx.post(f"{BASE_URL}/vc_telemetry_history", json=hist_payload)
+        print(f"History report status: {hist_resp.status_code}")
+        assert hist_resp.status_code == 200
+        hist_body = hist_resp.json()
+        assert hist_body["vcc"] == "XYZ"
+        print("History response zone length:", len(hist_body.get("zone", [])))
+        
+        # 4. Test SMMS telemetry GET endpoint
+        smm_get_url = f"{BASE_URL}/get_asset_telemetry/{zone_code}/{division_code}/{station_code}/{created[0]['smms_asset_code']}/{test_para_id}"
+        print(f"Querying SMM GET {smm_get_url}...")
+        smm_get_resp = httpx.get(smm_get_url)
+        print(f"SMM GET status: {smm_get_resp.status_code}")
+        assert smm_get_resp.status_code == 200
+        smm_get_data = smm_get_resp.json()
+        assert smm_get_data["telemetry_data"][0]["parameters"][0]["para_id"] == test_para_id
+        assert smm_get_data["telemetry_data"][0]["parameters"][0]["prv"] == 110.5
+        
+        # 5. Test SMMS telemetry POST endpoint
+        smm_post_payload = {
+            "rqi": "rqi-smm-999",
+            "vcc": "ABC",
+            "zc": zone_code,
+            "dc": division_code,
+            "sc": station_code,
+            "smm_asset_code": created[0]["smms_asset_code"],
+            "para_id": [test_para_id]
+        }
+        smm_post_url = f"{BASE_URL}/get_asset_telemetry/{zone_code}/{division_code}/{station_code}/{created[0]['smms_asset_code']}/{test_para_id}"
+        print(f"Querying SMM POST {smm_post_url}...")
+        smm_post_resp = httpx.post(smm_post_url, json=smm_post_payload)
+        print(f"SMM POST status: {smm_post_resp.status_code}")
+        assert smm_post_resp.status_code == 200
+        smm_post_data = smm_post_resp.json()
+        assert smm_post_data["resi"] == "RES-rqi-smm-999"
+        assert smm_post_data["vcc"] == "ABC"
+        assert smm_post_data["telemetry_data"][0]["parameters"][0]["prv"] == 110.5
+        print("Telemetry integration endpoints verified successfully on Render.")
+
     print("\nAll Live Render Verification Tests Completed Successfully!")
 
 if __name__ == "__main__":

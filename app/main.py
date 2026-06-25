@@ -125,6 +125,7 @@ app.include_router(gateway.router, dependencies=protected_route)
 
 # ── Telemetry query & live stream ─────────────────────────────────────────────
 app.include_router(telemetry.router, dependencies=protected_route)
+app.include_router(telemetry.integration_router)
 app.include_router(auth.router)
 # ── Decode utilities ──────────────────────────────────────────────────────────
 app.include_router(decode.router, dependencies=protected_route)

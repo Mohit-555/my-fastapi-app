@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 from app.database import get_db, SessionLocal
-from app.models.models import Telemetry, Gateway, Station, Division, Zone, Threshold
+from app.models.models import Telemetry, Gateway, Station, Division, Zone, Threshold, Asset, AssetTypeMaster
 from app.models.schemas import (
     TelemetryQueryResponse, TelemetrySeriesResponse, TelemetryPoint,
     TelemetryHistoryResponse, TelemetryHistoryColumn, TelemetryHistoryRow,
@@ -740,4 +740,260 @@ def download_telemetry_history(
         iter([output.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── Telemetry Integration Endpoints ───────────────────────────────────────────
+import uuid
+from pydantic import BaseModel, Field, AliasChoices
+
+integration_router = APIRouter(tags=["Telemetry Integration"])
+
+class AssetNumberFilter(BaseModel):
+    sc: str
+    asset_number_code: str = Field(..., validation_alias=AliasChoices("asset_number_code", "assetNumberCode"))
+
+class TelemetryHistoryRequestFilter(BaseModel):
+    zone: Optional[List[str]] = []
+    division: Optional[List[str]] = []
+    station: Optional[List[str]] = []
+    asset_type: Optional[List[str]] = Field([], validation_alias=AliasChoices("asset_type", "assetType"))
+    asset_number: Optional[List[AssetNumberFilter]] = Field([], validation_alias=AliasChoices("asset_number", "assetNumber"))
+
+class TelemetryHistoryReportRequest(BaseModel):
+    start_date: str = Field(..., validation_alias=AliasChoices("start_date", "startDate"))
+    start_time: str = Field(..., validation_alias=AliasChoices("start_time", "startTime"))
+    end_date: str = Field(..., validation_alias=AliasChoices("end_date", "endDate"))
+    end_time: str = Field(..., validation_alias=AliasChoices("end_time", "endTime"))
+    request: TelemetryHistoryRequestFilter
+    page_number: Optional[int] = Field(1, validation_alias=AliasChoices("page_number", "pageNumber"))
+    page_size: Optional[int] = Field(20, validation_alias=AliasChoices("page_size", "pageSize"))
+
+class SMMTelemetryRequest(BaseModel):
+    rqi: Optional[str] = None
+    vcc: Optional[str] = "XYZ"
+    zc: Optional[str] = None
+    dc: Optional[str] = None
+    sc: Optional[str] = None
+    smm_asset_code: Optional[str] = Field(None, validation_alias=AliasChoices("smm_asset_code", "smmAssetCode"))
+    para_id: Optional[List[str]] = Field([], validation_alias=AliasChoices("para_id", "paraId"))
+
+
+@integration_router.post("/vc_telemetry_history")
+def vc_telemetry_history(payload: TelemetryHistoryReportRequest, db: Session = Depends(get_db)):
+    # 1. Parse start and end datetimes
+    def _parse_dt(date_str: str, time_str: str) -> datetime:
+        for d_fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+            try:
+                d = datetime.strptime(date_str.strip(), d_fmt).date()
+                break
+            except ValueError:
+                continue
+        else:
+            raise HTTPException(status_code=400, detail=f"Could not parse date: {date_str}")
+        
+        for t_fmt in ("%H:%M:%S", "%H:%M"):
+            try:
+                t = datetime.strptime(time_str.strip(), t_fmt).time()
+                break
+            except ValueError:
+                continue
+        else:
+            raise HTTPException(status_code=400, detail=f"Could not parse time: {time_str}")
+        
+        return datetime.combine(d, t)
+
+    start_dt = _parse_dt(payload.start_date, payload.start_time)
+    end_dt = _parse_dt(payload.end_date, payload.end_time)
+
+    # 2. Filter assets
+    asset_q = db.query(Asset).join(Station).join(Division).join(Zone)
+    
+    req_filter = payload.request
+    if req_filter.zone:
+        asset_q = asset_q.filter(Zone.zone_code.in_(req_filter.zone))
+    if req_filter.division:
+        asset_q = asset_q.filter(Division.division_code.in_(req_filter.division))
+    if req_filter.station:
+        asset_q = asset_q.filter(Station.station_code.in_(req_filter.station))
+    if req_filter.asset_type:
+        asset_q = asset_q.join(AssetTypeMaster).filter(AssetTypeMaster.asset_type_code.in_(req_filter.asset_type))
+        
+    if req_filter.asset_number:
+        conditions = []
+        for item in req_filter.asset_number:
+            conditions.append(and_(Station.station_code == item.sc, Asset.asset_number_code == item.asset_number_code))
+        from sqlalchemy import or_
+        asset_q = asset_q.filter(or_(*conditions))
+
+    total_assets = asset_q.count()
+    offset = (payload.page_number - 1) * payload.page_size
+    assets = asset_q.offset(offset).limit(payload.page_size).all()
+
+    # 3. Build hierarchy map
+    hierarchy = {}
+
+    for asset in assets:
+        zc = asset.station.division.zone.zone_code
+        dc = asset.station.division.division_code
+        sc = asset.station.station_code
+        
+        gateway = asset.gateway
+        if not gateway:
+            continue
+            
+        prefix = f"{asset.asset_type_hex}{asset.asset_number_id}"
+        
+        telemetry_rows = (
+            db.query(Telemetry)
+            .filter(
+                Telemetry.gateway_id == gateway.id,
+                Telemetry.para_id.like(f"{prefix}%"),
+                Telemetry.received_at >= start_dt,
+                Telemetry.received_at <= end_dt
+            )
+            .order_by(Telemetry.received_at.desc())
+            .all()
+        )
+        
+        param_values = {}
+        for row in telemetry_rows:
+            pt_hex = row.para_id[4:6]
+            param_info = PARAMETER_TYPE_MAP.get(pt_hex)
+            if not param_info:
+                continue
+            param_name = param_info[1]
+            key = f"{asset.asset_number_code} {param_name}"
+            if key not in param_values:
+                param_values[key] = row.prv
+
+        if not param_values:
+            continue
+
+        zone_node = hierarchy.setdefault(zc, {})
+        division_node = zone_node.setdefault(dc, {})
+        station_node = division_node.setdefault(sc, {})
+        station_node.update(param_values)
+
+    zone_list = []
+    for zc, divisions_dict in hierarchy.items():
+        div_list = []
+        for dc, stations_dict in divisions_dict.items():
+            stn_list = []
+            for sc, params in stations_dict.items():
+                stn_list.append({
+                    "sc": sc,
+                    "parameters": params
+                })
+            div_list.append({
+                "dc": dc,
+                "station": stn_list
+            })
+        zone_list.append({
+            "zc": zc,
+            "division": div_list
+        })
+
+    return {
+        "vcc": "XYZ",
+        "vcn": "XYZ TECHNOLOGIES",
+        "start_date": payload.start_date,
+        "start_time": payload.start_time,
+        "end_date": payload.end_date,
+        "end_time": payload.end_time,
+        "zone": zone_list
+    }
+
+
+def _handle_get_asset_telemetry(
+    zc: str,
+    dc: str,
+    sc: str,
+    smm_asset_code: str,
+    para_id: str,
+    payload_rqi: Optional[str],
+    payload_vcc: Optional[str],
+    payload_para_ids: Optional[List[str]],
+    db: Session
+):
+    asset = db.query(Asset).filter(Asset.smms_asset_code == smm_asset_code).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail=f"Asset with SMMS code '{smm_asset_code}' not found")
+
+    gateway = asset.gateway
+    if not gateway:
+        raise HTTPException(status_code=404, detail=f"Gateway not found for asset '{smm_asset_code}'")
+
+    pids = []
+    if payload_para_ids:
+        pids = [pid.strip().upper() for pid in payload_para_ids if pid]
+    else:
+        pids = [pid.strip().upper() for pid in para_id.split(",") if pid]
+
+    telemetry_data_list = []
+    for pid in pids:
+        row = (
+            db.query(Telemetry)
+            .filter(Telemetry.gateway_id == gateway.id, Telemetry.para_id == pid)
+            .order_by(Telemetry.received_at.desc())
+            .first()
+        )
+        if row:
+            ts_str = row.prt
+            if not ts_str:
+                ts_str = row.received_at.strftime("%d-%m-%Y %H:%M:%S.000")
+            telemetry_data_list.append({
+                "para_id": pid,
+                "prv": row.prv,
+                "prt": ts_str
+            })
+
+    return {
+        "resi": "RES-" + (payload_rqi or uuid.uuid4().hex[:12]),
+        "vcc": payload_vcc or "XYZ",
+        "zc": zc,
+        "dc": dc,
+        "sc": sc,
+        "telemetry_data": [
+            {
+                "sms_asset_code": smm_asset_code,
+                "parameters": telemetry_data_list
+            }
+        ]
+    }
+
+
+@integration_router.get("/get_asset_telemetry/{zc}/{dc}/{sc}/{smm_asset_code}/{para_id}")
+def get_asset_telemetry_get(
+    zc: str,
+    dc: str,
+    sc: str,
+    smm_asset_code: str,
+    para_id: str,
+    db: Session = Depends(get_db)
+):
+    return _handle_get_asset_telemetry(
+        zc=zc, dc=dc, sc=sc, smm_asset_code=smm_asset_code, para_id=para_id,
+        payload_rqi=None, payload_vcc="XYZ", payload_para_ids=None,
+        db=db
+    )
+
+
+@integration_router.post("/get_asset_telemetry/{zc}/{dc}/{sc}/{smm_asset_code}/{para_id}")
+def get_asset_telemetry_post(
+    zc: str,
+    dc: str,
+    sc: str,
+    smm_asset_code: str,
+    para_id: str,
+    payload: Optional[SMMTelemetryRequest] = None,
+    db: Session = Depends(get_db)
+):
+    rqi = payload.rqi if payload else None
+    vcc = payload.vcc if payload else "XYZ"
+    pids = payload.para_id if payload else None
+    return _handle_get_asset_telemetry(
+        zc=zc, dc=dc, sc=sc, smm_asset_code=smm_asset_code, para_id=para_id,
+        payload_rqi=rqi, payload_vcc=vcc, payload_para_ids=pids,
+        db=db
     )

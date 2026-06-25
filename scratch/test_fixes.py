@@ -433,5 +433,95 @@ class TestFixesAndFeatures(unittest.TestCase):
 
         print("Verified maintenance mode statuses, manual clear, suppression, reminders, modification and cancellation successfully.")
 
+    def test_telemetry_integration_endpoints(self):
+        # 1. Fetch an existing asset to query telemetry
+        assets_resp = self.client.get("/assets", headers=self.headers)
+        self.assertEqual(assets_resp.status_code, 200)
+        assets = assets_resp.json()["rows"]
+        self.assertTrue(len(assets) > 0)
+        asset = assets[0]
+        
+        # Let's get station, division, zone details
+        db = SessionLocal()
+        try:
+            db_asset = db.query(Asset).filter(Asset.id == asset["id"]).first()
+            station_code = db_asset.station.station_code
+            division_code = db_asset.station.division.division_code
+            zone_code = db_asset.station.division.zone.zone_code
+            asset_type_code = db_asset.asset_type.asset_type_code
+            smm_asset_code = db_asset.smms_asset_code
+            gateway_id = db_asset.gateway.id
+        finally:
+            db.close()
+            
+        # Create a telemetry record for testing
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+        para_id = f"{asset['asset_type_hex']}{asset['asset_number_id']}0100"
+        db = SessionLocal()
+        try:
+            # Delete any existing telemetries for clean test
+            db.query(Telemetry).filter(Telemetry.gateway_id == gateway_id, Telemetry.para_id == para_id).delete()
+            telem = Telemetry(
+                gateway_id=gateway_id,
+                para_id=para_id,
+                prv=12.5,
+                prt=now.strftime("%d-%m-%Y %H:%M:%S.123"),
+                received_at=now
+            )
+            db.add(telem)
+            db.commit()
+        finally:
+            db.close()
+
+        # 2. Test vc_telemetry_history (POST, public endpoint)
+        hist_payload = {
+            "start_date": (now - timedelta(minutes=15)).strftime("%d/%m/%Y"),
+            "start_time": (now - timedelta(minutes=15)).strftime("%H:%M:%S"),
+            "end_date": (now + timedelta(minutes=15)).strftime("%d/%m/%Y"),
+            "end_time": (now + timedelta(minutes=15)).strftime("%H:%M:%S"),
+            "request": {
+                "zone": [zone_code],
+                "division": [division_code],
+                "station": [station_code],
+                "asset_type": [asset_type_code]
+            },
+            "page_number": 1,
+            "page_size": 10
+        }
+        res_hist = self.client.post("/vc_telemetry_history", json=hist_payload)
+        self.assertEqual(res_hist.status_code, 200, res_hist.text)
+        hist_data = res_hist.json()
+        self.assertEqual(hist_data["vcc"], "XYZ")
+        self.assertTrue(len(hist_data["zone"]) > 0)
+        
+        # 3. Test get_asset_telemetry GET
+        res_smm_get = self.client.get(f"/get_asset_telemetry/{zone_code}/{division_code}/{station_code}/{smm_asset_code}/{para_id}")
+        self.assertEqual(res_smm_get.status_code, 200)
+        smm_get_data = res_smm_get.json()
+        self.assertEqual(smm_get_data["telemetry_data"][0]["parameters"][0]["para_id"], para_id)
+        self.assertEqual(smm_get_data["telemetry_data"][0]["parameters"][0]["prv"], 12.5)
+
+        # 4. Test get_asset_telemetry POST
+        smm_payload = {
+            "rqi": "test-rqi-123",
+            "vcc": "ABC",
+            "zc": zone_code,
+            "dc": division_code,
+            "sc": station_code,
+            "smm_asset_code": smm_asset_code,
+            "para_id": [para_id]
+        }
+        res_smm_post = self.client.post(
+            f"/get_asset_telemetry/{zone_code}/{division_code}/{station_code}/{smm_asset_code}/{para_id}",
+            json=smm_payload
+        )
+        self.assertEqual(res_smm_post.status_code, 200)
+        smm_post_data = res_smm_post.json()
+        self.assertEqual(smm_post_data["resi"], "RES-test-rqi-123")
+        self.assertEqual(smm_post_data["vcc"], "ABC")
+        self.assertEqual(smm_post_data["telemetry_data"][0]["parameters"][0]["prv"], 12.5)
+        print("Verified telemetry integration endpoints successfully.")
+
 if __name__ == "__main__":
     unittest.main()
