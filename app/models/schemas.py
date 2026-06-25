@@ -427,7 +427,6 @@ class TelemetryHistoryColumn(BaseModel):
 class TelemetryHistoryResponse(BaseModel):
     station_id: Optional[int]
     station_name: Optional[str]
-    asset_type_hex: Optional[str]
     asset_number: Optional[str]
     from_time: Optional[str]
     to_time: Optional[str]
