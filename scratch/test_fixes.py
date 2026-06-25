@@ -527,7 +527,11 @@ class TestFixesAndFeatures(unittest.TestCase):
         print("Verified telemetry integration endpoints successfully.")
 
         # 5. Test Live SSE Stream (GET /telemetry/live/{asset_number})
-        # Connecting to public endpoint directly via async function call
+        # Check that it requires authentication
+        res_unauth = self.client.get(f"/telemetry/live/{asset['asset_number_code']}")
+        self.assertEqual(res_unauth.status_code, 403)
+
+        # Connecting to endpoint handler directly via async function call
         from app.routers.telemetry import live_telemetry_stream
         from fastapi.responses import StreamingResponse
 

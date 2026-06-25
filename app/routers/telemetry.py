@@ -431,7 +431,7 @@ async def _sse_event_generator(request: Request, asset_number: str, poll_interva
         await asyncio.sleep(poll_interval)
 
 
-@integration_router.get("/telemetry/live/{asset_number}")
+@router.get("/live/{asset_number}")
 async def live_telemetry_stream(
     asset_number: str,
     request: Request,
