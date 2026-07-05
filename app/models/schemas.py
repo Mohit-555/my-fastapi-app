@@ -519,6 +519,7 @@ class AssetFiltersResponse(BaseModel):
     stations: List[DropdownOption]
     asset_types: List[AssetTypeGroupOption]
     asset_makes: List[AssetMakeOption]
+    roles: List[AlertFilterOption] = []
 
 class AssetDetailRow(BaseModel):
     id: int
@@ -766,6 +767,7 @@ class AlertFiltersResponse(BaseModel):
     asset_makes: List[AlertFilterOption] = []
     poll_intervals: List[AlertFilterOption] = []
     parameter_type_hexes: List[AlertFilterOption] = []
+    roles: List[AlertFilterOption] = []
 
 
 # ─── Thresholds ───────────────────────────────────────────────────────────────

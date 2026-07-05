@@ -15,7 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.models import AssetInventory, Division, Threshold, Station, Zone, AssetTypeMaster, Asset, Gateway, AssetParameter
+from app.models.models import AssetInventory, Division, Threshold, Station, Zone, AssetTypeMaster, Asset, Gateway, AssetParameter, Role
 from app.models.schemas import (
     AssetDetailResponse,
     AssetDetailRow,
@@ -35,6 +35,7 @@ from app.models.schemas import (
     StationMinimalResponse,
     AssetFiltersResponse,
     DropdownOption,
+    AlertFilterOption,
     AssetCreate,
     AssetListResponse,
     AssetResponse,
@@ -491,12 +492,19 @@ def get_asset_filters(db: Session = Depends(get_db)):
             station_name=s.station_name
         ))
 
+    roles = db.query(Role).order_by(Role.id).all()
+    roles_list = [
+        AlertFilterOption(id=r.id, label=r.display_name or r.name, value=str(r.id))
+        for r in roles
+    ]
+
     return AssetFiltersResponse(
         zones=zones_list,
         divisions=divisions_list,
         stations=stations_list,
         asset_types=asset_groups,
         asset_makes=asset_makes_list,
+        roles=roles_list,
     )
 
 

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP, PARAMETER_TYPE_MAP
 from app.database import get_db
-from app.models.models import AlertEvent, Asset, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster, AssetInventory, MaintenanceMode
+from app.models.models import AlertEvent, Asset, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster, AssetInventory, MaintenanceMode, Role
 from app.models.schemas import (
     AlertEventCreate,
     AlertEventResponse,
@@ -1119,6 +1119,12 @@ def get_alert_filters(db: Session = Depends(get_db)):
             station_name=s.station_name
         ))
 
+    roles = db.query(Role).order_by(Role.id).all()
+    roles_list = [
+        AlertFilterOption(id=r.id, label=r.display_name or r.name, value=str(r.id))
+        for r in roles
+    ]
+
     return AlertFiltersResponse(
         zones=zones_list,
         divisions=divisions_list,
@@ -1132,6 +1138,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
         asset_makes=asset_makes_list,
         poll_intervals=poll_intervals_list,
         parameter_type_hexes=parameter_type_hexes_list,
+        roles=roles_list,
     )
 
 
