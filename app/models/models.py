@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, ForeignKey, Text, UniqueConstraint, Enum
+from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, ForeignKey, Text, UniqueConstraint, Enum, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime,UTC
 from typing import Optional
@@ -55,6 +55,7 @@ class Station(Base):
     address = Column(String, nullable=True)
     description = Column(String, nullable=True)
     status = Column(String, default="Active", nullable=True)
+    asset_types = Column(JSON, nullable=True)
 
     division = relationship("Division", back_populates="stations")
     gateways = relationship("Gateway", back_populates="station", cascade="all, delete-orphan")

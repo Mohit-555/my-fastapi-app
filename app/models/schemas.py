@@ -195,6 +195,7 @@ class StationBase(BaseModel):
     address: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = "Active"
+    asset_types: Optional[List[int]] = Field(default=None, validation_alias=AliasChoices('asset_types', 'assetTypes'))
 
 class StationCreate(StationBase):
     pass
@@ -210,6 +211,7 @@ class StationUpdate(BaseModel):
     address: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
+    asset_types: Optional[List[int]] = Field(default=None, validation_alias=AliasChoices('asset_types', 'assetTypes'))
 
 class StationResponse(BaseModel):
     id: int
@@ -221,6 +223,7 @@ class StationResponse(BaseModel):
     address: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = "Active"
+    asset_types: Optional[List[int]] = []
 
     stationCode: str = ""
     stationName: str = ""
@@ -244,6 +247,7 @@ class StationResponse(BaseModel):
                 "address": data.address,
                 "description": data.description,
                 "status": data.status or "Active",
+                "asset_types": data.asset_types or [],
                 "stationCode": data.station_code,
                 "stationName": data.station_name,
                 "name": data.station_name,
