@@ -131,6 +131,15 @@ def seed():
     print("Creating tables...")
     Base.metadata.create_all(bind=engine)
 
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    if 'stations' in inspector.get_table_names():
+        columns = [col['name'] for col in inspector.get_columns('stations')]
+        if 'asset_types' not in columns:
+            print("Adding column asset_types to stations table...")
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE stations ADD COLUMN asset_types JSON NULL"))
+
     db = SessionLocal()
     try:
         if db.query(Zone).count() > 0:
