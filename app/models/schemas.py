@@ -445,6 +445,12 @@ class AssetTypeOption(BaseModel):
     code: str            # e.g. "EOP"
     label: str           # e.g. "Point Machine"
     group_label: str     # display group for the UI, e.g. "Point Machine"
+    zone_ids: List[int] = []
+    zone_codes: List[str] = []
+    division_ids: List[int] = []
+    division_codes: List[str] = []
+    station_ids: List[int] = []
+    station_codes: List[str] = []
 
 
 class AssetTypeGroupOption(BaseModel):
@@ -535,6 +541,10 @@ class DropdownOption(BaseModel):
     label: str
     code: str
     hex_id: str
+    zone_id: Optional[int] = None
+    zone_code: Optional[str] = None
+    division_id: Optional[int] = None
+    division_code: Optional[str] = None
 
 # ─── Alert Summary ────────────────────────────────────────────────────────────
 

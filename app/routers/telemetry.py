@@ -22,9 +22,43 @@ from app.models.schemas import (
     TelemetryQueryResponse, TelemetrySeriesResponse, TelemetryPoint,
     TelemetryHistoryResponse, TelemetryHistoryColumn, TelemetryHistoryRow,
 )
-from app.constants import ASSET_TYPE_MAP, PARAMETER_TYPE_MAP, PARAMETER_REPR_MAP
+from app.constants import ASSET_TYPE_MAP, PARAMETER_TYPE_MAP, PARAMETER_REPR_MAP, ASSET_TYPE_DISPLAY_GROUPS
 
 router = APIRouter(prefix="/telemetry", tags=["Telemetry Query"])
+
+
+def _blank_to_none(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    val = value.strip()
+    return None if val == "" else val
+
+
+def _resolve_asset_types_to_hex(db: Session, asset_type: Optional[str]) -> Optional[str]:
+    asset_type = _blank_to_none(asset_type)
+    if not asset_type:
+        return None
+
+    parts = [p.strip() for p in asset_type.split(",") if p.strip()]
+    if all(p.isdigit() for p in parts):
+        ids = [int(p) for p in parts]
+        db_types = db.query(AssetTypeMaster).filter(AssetTypeMaster.id.in_(ids)).all()
+        hexes = [t.asset_type_id for t in db_types if t.asset_type_id]
+        if not hexes:
+            return "IMPOSSIBLE_HEX"
+        return ",".join(hexes)
+
+    hex_list = []
+    for part in parts:
+        if part.upper() in ASSET_TYPE_MAP:
+            hex_list.append(part.upper())
+        else:
+            group_hexes = ASSET_TYPE_DISPLAY_GROUPS.get(part)
+            if group_hexes:
+                hex_list.extend(group_hexes)
+    if hex_list:
+        return ",".join(hex_list)
+    return None
 integration_router = APIRouter(tags=["Telemetry Integration"])
 
 
@@ -136,9 +170,9 @@ def query_telemetry(
     division_id: Optional[int]  = Query(None, description="Filter by division"),
     station_id:  Optional[int]  = Query(None, description="Filter by station"),
     # ── Asset filters ─────────────────────────────────────────────────────────
-    asset_type_hex: Optional[str] = Query(
+    asset_type: Optional[str] = Query(
         None,
-        description="Asset type hex(es), comma-separated. e.g. '00' or '2D,2E,2F' for AC Track Circuit group",
+        description="Asset type database ID(s), name(s), or hex(es), comma-separated.",
     ),
     asset_number_hex: Optional[str] = Query(
         None,
@@ -167,17 +201,16 @@ def query_telemetry(
     for every matching para_id × gateway combination.
 
     Examples:
-      GET /telemetry?station_id=12&asset_type_hex=00
+      GET /telemetry?station_id=12&asset_type=1
         → All Point Machine readings at station 12 for the last hour
-
-      GET /telemetry?zone_id=7&division_id=3&asset_type_hex=2D,2E,2F&from_time=2025-11-04T10:00:00
-        → AC Track Circuit data across all stations in a division since a given time
     """
     now = datetime.utcnow()
     if from_time is None:
         from_time = now - timedelta(hours=1)
     if to_time is None:
         to_time = now
+
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
 
     # ── Resolve station IDs from location filter ──────────────────────────────
     station_ids = _resolve_station_ids(db, zone_id, division_id, station_id)
@@ -288,7 +321,7 @@ def query_telemetry(
 @router.get("/latest/{station_id}", response_model=List[TelemetrySeriesResponse])
 def get_latest_by_station(
     station_id: int,
-    asset_type_hex: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """
@@ -303,6 +336,7 @@ def get_latest_by_station(
     if not gateways:
         return []
 
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     asset_type_hexes = (
         [h.strip().upper() for h in asset_type_hex.split(",")]
         if asset_type_hex else None

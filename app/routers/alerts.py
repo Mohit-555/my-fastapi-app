@@ -85,6 +85,33 @@ def _asset_group_hexes(asset_type: Optional[str]) -> Optional[List[str]]:
     return ASSET_TYPE_DISPLAY_GROUPS.get(asset_type)
 
 
+def _resolve_asset_types_to_hex(db: Session, asset_type: Optional[str]) -> Optional[str]:
+    asset_type = _blank_to_none(asset_type)
+    if not asset_type:
+        return None
+
+    parts = [p.strip() for p in asset_type.split(",") if p.strip()]
+    if all(p.isdigit() for p in parts):
+        ids = [int(p) for p in parts]
+        db_types = db.query(AssetTypeMaster).filter(AssetTypeMaster.id.in_(ids)).all()
+        hexes = [t.asset_type_id for t in db_types if t.asset_type_id]
+        if not hexes:
+            return "IMPOSSIBLE_HEX"
+        return ",".join(hexes)
+
+    hex_list = []
+    for part in parts:
+        if part.upper() in ASSET_TYPE_MAP:
+            hex_list.append(part.upper())
+        else:
+            group_hexes = ASSET_TYPE_DISPLAY_GROUPS.get(part)
+            if group_hexes:
+                hex_list.extend(group_hexes)
+    if hex_list:
+        return ",".join(hex_list)
+    return None
+
+
 def _page_meta(total_rows: int, page: int, page_size: int) -> tuple[int, int]:
     total_pages = (total_rows + page_size - 1) // page_size if total_rows else 0
     offset = (page - 1) * page_size
@@ -119,7 +146,6 @@ def _base_summary_query(
     station: Optional[str],
     alert_type: Optional[str],
     asset_type_hex: Optional[str],
-    asset_type: Optional[str],
     asset_no: Optional[str],
     cause: Optional[str],
     from_date: Optional[date],
@@ -171,11 +197,10 @@ def _base_summary_query(
     if alert_type:
         q = q.filter(func.lower(AlertEvent.alert_type) == alert_type.lower())
 
-    asset_hexes = _asset_group_hexes(asset_type)
     if asset_type_hex:
         asset_hexes = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
-    if asset_hexes:
-        q = q.filter(AlertEvent.asset_type_hex.in_(asset_hexes))
+        if asset_hexes:
+            q = q.filter(AlertEvent.asset_type_hex.in_(asset_hexes))
 
     if asset_no:
         q = q.filter(func.lower(AlertEvent.asset_no).like(f"%{asset_no.lower()}%"))
@@ -252,7 +277,6 @@ def _base_history_query(
     station: Optional[str],
     alert_type: Optional[str],
     asset_type_hex: Optional[str],
-    asset_type: Optional[str],
     asset_no: Optional[str],
     cause: Optional[str],
     feedback: Optional[str],
@@ -315,11 +339,10 @@ def _base_history_query(
     if alert_type:
         q = q.filter(func.lower(AlertEvent.alert_type) == alert_type.lower())
 
-    asset_hexes = _asset_group_hexes(asset_type)
     if asset_type_hex:
         asset_hexes = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
-    if asset_hexes:
-        q = q.filter(AlertEvent.asset_type_hex.in_(asset_hexes))
+        if asset_hexes:
+            q = q.filter(AlertEvent.asset_type_hex.in_(asset_hexes))
 
     if asset_no:
         q = q.filter(func.lower(AlertEvent.asset_no).like(f"%{asset_no.lower()}%"))
@@ -385,7 +408,6 @@ def _base_live_query(
     station: Optional[str],
     alert_type: Optional[str],
     asset_type_hex: Optional[str],
-    asset_type: Optional[str],
 ):
     q = (
         db.query(
@@ -434,11 +456,10 @@ def _base_live_query(
     if alert_type:
         q = q.filter(func.lower(AlertEvent.alert_type) == alert_type.lower())
 
-    asset_hexes = _asset_group_hexes(asset_type)
     if asset_type_hex:
         asset_hexes = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
-    if asset_hexes:
-        q = q.filter(AlertEvent.asset_type_hex.in_(asset_hexes))
+        if asset_hexes:
+            q = q.filter(AlertEvent.asset_type_hex.in_(asset_hexes))
 
     return q.order_by(AlertEvent.alert_time.desc(), AlertEvent.id.desc())
 
@@ -487,7 +508,7 @@ def list_alert_asset_numbers(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
-    asset_type_hex: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """
@@ -497,6 +518,7 @@ def list_alert_asset_numbers(
     Fallback: AlertEvent.asset_no for any unregistered asset numbers
     that appear in historical alerts.
     """
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     hex_list: Optional[List[str]] = None
     if asset_type_hex:
         hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
@@ -555,13 +577,14 @@ def list_alert_causes(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
-    asset_type_hex: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),
     asset_no: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """
     Return a list of unique causes filtered by zone, division, station, asset type, and asset number.
     """
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     q_master = db.query(AlertCauseMaster)
     hex_list = []
     if asset_type_hex:
@@ -611,15 +634,15 @@ def get_alert_live(
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
     alert_type: Optional[str] = Query(None),
-    asset_type_hex: Optional[str] = Query(None),
     asset_type: Optional[str] = Query(None),
     limit: int = Query(100, le=1000),
     db: Session = Depends(get_db),
 ):
     """Return unresolved live alert cards and live counters."""
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     raw_rows = _base_live_query(
         db, zone_id, division_id, station_id, None, None, None,
-        alert_type, asset_type_hex, asset_type,
+        alert_type, asset_type_hex,
     ).limit(limit).all()
     alerts = _live_cards(raw_rows)
     predictive = sum(1 for row in alerts if row.alert_type.lower() == "predictive")
@@ -640,7 +663,6 @@ def get_alert_summary(
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
     alert_type: Optional[str] = Query(None),
-    asset_type_hex: Optional[str] = Query(None),
     asset_type: Optional[str] = Query(None),
     asset_no: Optional[str] = Query(None),
     cause: Optional[str] = Query(None),
@@ -654,9 +676,10 @@ def get_alert_summary(
     db: Session = Depends(get_db),
 ):
     """Return the Alert Summary table with the same filters shown in the UI."""
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     q = _base_summary_query(
         db, zone_id, division_id, station_id, None, None, None, alert_type,
-        asset_type_hex, asset_type, asset_no, cause, from_date, from_time, to_date, to_time,
+        asset_type_hex, asset_no, cause, from_date, from_time, to_date, to_time,
     )
     summary_sq = q.subquery()
     total_rows = db.query(func.count()).select_from(summary_sq).scalar() or 0
@@ -716,7 +739,6 @@ def download_alert_summary(
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
     alert_type: Optional[str] = Query(None),
-    asset_type_hex: Optional[str] = Query(None),
     asset_type: Optional[str] = Query(None),
     asset_no: Optional[str] = Query(None),
     cause: Optional[str] = Query(None),
@@ -727,9 +749,10 @@ def download_alert_summary(
     db: Session = Depends(get_db),
 ):
     """Download the Alert Summary report as CSV."""
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     raw_rows = _base_summary_query(
         db, zone_id, division_id, station_id, None, None, None, alert_type,
-        asset_type_hex, asset_type, asset_no, cause, from_date, from_time, to_date, to_time,
+        asset_type_hex, asset_no, cause, from_date, from_time, to_date, to_time,
     ).all()
     return _download_alert_summary_response(_summary_rows(raw_rows))
 
@@ -740,7 +763,6 @@ def get_alert_history(
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
     alert_type: Optional[str] = Query(None),
-    asset_type_hex: Optional[str] = Query(None),
     asset_type: Optional[str] = Query(None),
     asset_no: Optional[str] = Query(None),
     cause: Optional[str] = Query(None),
@@ -755,9 +777,10 @@ def get_alert_history(
     db: Session = Depends(get_db),
 ):
     """Return raw alert history rows for the Alert History table."""
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     q = _base_history_query(
         db, zone_id, division_id, station_id, None, None, None, alert_type,
-        asset_type_hex, asset_type, asset_no, cause, feedback, alert_status,
+        asset_type_hex, asset_no, cause, feedback, alert_status,
         from_date, from_time, to_date, to_time,
     )
     total = q.count()
@@ -882,6 +905,39 @@ def get_alert_filters(db: Session = Depends(get_db)):
         if row.asset_no
     ]
 
+    # Fetch all assets to build the interconnected list for asset types
+    asset_locations = (
+        db.query(
+            Asset.asset_type_hex,
+            Asset.station_id,
+            Station.station_code,
+            Station.division_id,
+            Division.division_code,
+            Division.zone_id,
+            Zone.zone_code
+        )
+        .join(Station, Station.id == Asset.station_id)
+        .join(Division, Division.id == Station.division_id)
+        .join(Zone, Zone.id == Division.zone_id)
+        .distinct()
+        .all()
+    )
+
+    loc_by_type = {}
+    for row in asset_locations:
+        at = row.asset_type_hex.upper()
+        group = loc_by_type.setdefault(at, {
+            "zone_ids": set(), "zone_codes": set(),
+            "division_ids": set(), "division_codes": set(),
+            "station_ids": set(), "station_codes": set()
+        })
+        group["zone_ids"].add(row.zone_id)
+        group["zone_codes"].add(row.zone_code)
+        group["division_ids"].add(row.division_id)
+        group["division_codes"].add(row.division_code)
+        group["station_ids"].add(row.station_id)
+        group["station_codes"].add(row.station_code)
+
     db_types_map = {t.asset_type_id: t for t in db.query(AssetTypeMaster).all()}
 
     asset_groups = []
@@ -892,12 +948,19 @@ def get_alert_filters(db: Session = Depends(get_db)):
         for h in hexes:
             t = db_types_map.get(h)
             if t:
+                loc = loc_by_type.get(h.upper(), {})
                 members.append(AssetTypeOption(
                     id=member_id,
                     hex_id=h,
                     code=t.asset_type_code,
                     label=t.asset_type_name,
                     group_label=group_label,
+                    zone_ids=sorted(list(loc.get("zone_ids", set()))),
+                    zone_codes=sorted(list(loc.get("zone_codes", set()))),
+                    division_ids=sorted(list(loc.get("division_ids", set()))),
+                    division_codes=sorted(list(loc.get("division_codes", set()))),
+                    station_ids=sorted(list(loc.get("station_ids", set()))),
+                    station_codes=sorted(list(loc.get("station_codes", set()))),
                 ))
                 member_id += 1
         asset_groups.append(AssetTypeGroupOption(
@@ -950,10 +1013,45 @@ def get_alert_filters(db: Session = Depends(get_db)):
         for idx, (hex_id, (_, name, _)) in enumerate(PARAMETER_TYPE_MAP.items(), start=1)
     ]
 
+    zones_by_id = {z.id: z for z in zones}
+    divisions_by_id = {d.id: d for d in divisions}
+
+    zones_list = [
+        DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex)
+        for z in zones
+    ]
+
+    divisions_list = []
+    for d in divisions:
+        z = zones_by_id.get(d.zone_id)
+        divisions_list.append(DropdownOption(
+            id=d.id,
+            label=d.division_name,
+            code=d.division_code,
+            hex_id=d.division_id_hex,
+            zone_id=d.zone_id,
+            zone_code=z.zone_code if z else None
+        ))
+
+    stations_list = []
+    for s in stations:
+        d = divisions_by_id.get(s.division_id)
+        z = zones_by_id.get(d.zone_id) if d else None
+        stations_list.append(DropdownOption(
+            id=s.id,
+            label=s.station_name,
+            code=s.station_code,
+            hex_id=s.station_id_hex,
+            division_id=s.division_id,
+            division_code=d.division_code if d else None,
+            zone_id=d.zone_id if d else None,
+            zone_code=z.zone_code if z else None
+        ))
+
     return AlertFiltersResponse(
-        zones=[DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex) for z in zones],
-        divisions=[DropdownOption(id=d.id, label=d.division_name, code=d.division_code, hex_id=d.division_id_hex) for d in divisions],
-        stations=[DropdownOption(id=s.id, label=s.station_name, code=s.station_code, hex_id=s.station_id_hex) for s in stations],
+        zones=zones_list,
+        divisions=divisions_list,
+        stations=stations_list,
         alert_types=alert_types_list,
         asset_types=asset_groups,
         asset_numbers=asset_numbers_list,
@@ -970,7 +1068,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
 def list_alert_events(
     station_id: Optional[int] = Query(None),
     alert_type: Optional[str] = Query(None),
-    asset_type_hex: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),
     asset_no: Optional[str] = Query(None),
     cause: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
@@ -984,8 +1082,13 @@ def list_alert_events(
     normalized_alert_type = _normalize_alert_type(alert_type)
     if normalized_alert_type:
         q = q.filter(func.lower(AlertEvent.alert_type) == normalized_alert_type.lower())
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     if _blank_to_none(asset_type_hex):
-        q = q.filter(AlertEvent.asset_type_hex == asset_type_hex.upper())
+        hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
+        if len(hex_list) == 1:
+            q = q.filter(AlertEvent.asset_type_hex == hex_list[0])
+        elif len(hex_list) > 1:
+            q = q.filter(AlertEvent.asset_type_hex.in_(hex_list))
     if _blank_to_none(asset_no):
         q = q.filter(func.lower(AlertEvent.asset_no).like(f"%{asset_no.lower()}%"))
     if _blank_to_none(cause):

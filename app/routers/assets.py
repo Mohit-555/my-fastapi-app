@@ -53,6 +53,40 @@ from app.constants import (
 router = APIRouter(prefix="/assets", tags=["Assets & Thresholds"])
 
 
+def _blank_to_none(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    val = value.strip()
+    return None if val == "" else val
+
+
+def _resolve_asset_types_to_hex(db: Session, asset_type: Optional[str]) -> Optional[str]:
+    asset_type = _blank_to_none(asset_type)
+    if not asset_type:
+        return None
+
+    parts = [p.strip() for p in asset_type.split(",") if p.strip()]
+    if all(p.isdigit() for p in parts):
+        ids = [int(p) for p in parts]
+        db_types = db.query(AssetTypeMaster).filter(AssetTypeMaster.id.in_(ids)).all()
+        hexes = [t.asset_type_id for t in db_types if t.asset_type_id]
+        if not hexes:
+            return "IMPOSSIBLE_HEX"
+        return ",".join(hexes)
+
+    hex_list = []
+    for part in parts:
+        if part.upper() in ASSET_TYPE_MAP:
+            hex_list.append(part.upper())
+        else:
+            group_hexes = ASSET_TYPE_DISPLAY_GROUPS.get(part)
+            if group_hexes:
+                hex_list.extend(group_hexes)
+    if hex_list:
+        return ",".join(hex_list)
+    return None
+
+
 # ── Asset Type Endpoints ──────────────────────────────────────────────────────
 
 @router.get("/types", response_model=List[AssetTypeOption])
@@ -120,10 +154,11 @@ def list_asset_types_grouped(db: Session = Depends(get_db)):
 
 @router.get("/parameters", response_model=List[ParameterTypeOption])
 def list_parameter_types(
-    asset_type_hex: Optional[str] = Query(
+    asset_type: Optional[str] = Query(
         None,
-        description="Filter by asset_type_hex to get only relevant parameters"
-    )
+        description="Filter by asset_type database ID to get only relevant parameters"
+    ),
+    db: Session = Depends(get_db),
 ):
     """
     Return all known parameter types (bytes 4–5 of para_id).
@@ -190,7 +225,11 @@ def _asset_detail_query(
     if station_id is not None:
         q = q.filter(Station.id == station_id)
     if asset_type_hex:
-        q = q.filter(AssetInventory.asset_type_hex == asset_type_hex.upper())
+        hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
+        if len(hex_list) == 1:
+            q = q.filter(AssetInventory.asset_type_hex == hex_list[0])
+        elif len(hex_list) > 1:
+            q = q.filter(AssetInventory.asset_type_hex.in_(hex_list))
     if asset_make:
         q = q.filter(func.lower(AssetInventory.asset_make) == asset_make.lower())
 
@@ -239,7 +278,7 @@ def get_asset_detail(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
-    asset_type_hex: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),
     asset_make: Optional[str] = Query(None),
     view: str = Query("table", description="Frontend view mode. Currently supports table data."),
     db: Session = Depends(get_db),
@@ -250,6 +289,7 @@ def get_asset_detail(
     Filters map to the UI controls: Zone, Division, Station, Asset Type,
     View, and Asset Make.
     """
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     raw_rows = _asset_detail_query(
         db=db,
         zone_id=zone_id,
@@ -271,11 +311,12 @@ def download_asset_detail(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
-    asset_type_hex: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),
     asset_make: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """Download the Asset Detail report as CSV."""
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     raw_rows = _asset_detail_query(
         db=db,
         zone_id=zone_id,
@@ -312,14 +353,19 @@ def download_asset_detail(
 
 @router.get("/makes", response_model=List[AssetMakeOption])
 def list_asset_makes(
-    asset_type_hex: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),
     station_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ):
     """Return distinct asset makes for the Asset Make dropdown."""
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     q = db.query(AssetInventory.asset_make).distinct()
     if asset_type_hex:
-        q = q.filter(AssetInventory.asset_type_hex == asset_type_hex.upper())
+        hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
+        if len(hex_list) == 1:
+            q = q.filter(AssetInventory.asset_type_hex == hex_list[0])
+        elif len(hex_list) > 1:
+            q = q.filter(AssetInventory.asset_type_hex.in_(hex_list))
     if station_id is not None:
         q = q.filter(AssetInventory.station_id == station_id)
 
@@ -344,6 +390,39 @@ def get_asset_filters(db: Session = Depends(get_db)):
         for idx, make in enumerate(makes, start=1)
     ]
 
+    # Fetch all assets to build the interconnected list for asset types
+    asset_locations = (
+        db.query(
+            Asset.asset_type_hex,
+            Asset.station_id,
+            Station.station_code,
+            Station.division_id,
+            Division.division_code,
+            Division.zone_id,
+            Zone.zone_code
+        )
+        .join(Station, Station.id == Asset.station_id)
+        .join(Division, Division.id == Station.division_id)
+        .join(Zone, Zone.id == Division.zone_id)
+        .distinct()
+        .all()
+    )
+
+    loc_by_type = {}
+    for row in asset_locations:
+        at = row.asset_type_hex.upper()
+        group = loc_by_type.setdefault(at, {
+            "zone_ids": set(), "zone_codes": set(),
+            "division_ids": set(), "division_codes": set(),
+            "station_ids": set(), "station_codes": set()
+        })
+        group["zone_ids"].add(row.zone_id)
+        group["zone_codes"].add(row.zone_code)
+        group["division_ids"].add(row.division_id)
+        group["division_codes"].add(row.division_code)
+        group["station_ids"].add(row.station_id)
+        group["station_codes"].add(row.station_code)
+
     db_types_map = {t.asset_type_id: t for t in db.query(AssetTypeMaster).all()}
 
     # Grouped asset types
@@ -355,12 +434,19 @@ def get_asset_filters(db: Session = Depends(get_db)):
         for h in hexes:
             t = db_types_map.get(h)
             if t:
+                loc = loc_by_type.get(h.upper(), {})
                 members.append(AssetTypeOption(
                     id=member_id,
                     hex_id=h,
                     code=t.asset_type_code,
                     label=t.asset_type_name,
                     group_label=group_label,
+                    zone_ids=sorted(list(loc.get("zone_ids", set()))),
+                    zone_codes=sorted(list(loc.get("zone_codes", set()))),
+                    division_ids=sorted(list(loc.get("division_ids", set()))),
+                    division_codes=sorted(list(loc.get("division_codes", set()))),
+                    station_ids=sorted(list(loc.get("station_ids", set()))),
+                    station_codes=sorted(list(loc.get("station_codes", set()))),
                 ))
                 member_id += 1
         asset_groups.append(AssetTypeGroupOption(
@@ -371,10 +457,45 @@ def get_asset_filters(db: Session = Depends(get_db)):
         ))
         group_id += 1
 
+    zones_by_id = {z.id: z for z in zones}
+    divisions_by_id = {d.id: d for d in divisions}
+
+    zones_list = [
+        DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex)
+        for z in zones
+    ]
+
+    divisions_list = []
+    for d in divisions:
+        z = zones_by_id.get(d.zone_id)
+        divisions_list.append(DropdownOption(
+            id=d.id,
+            label=d.division_name,
+            code=d.division_code,
+            hex_id=d.division_id_hex,
+            zone_id=d.zone_id,
+            zone_code=z.zone_code if z else None
+        ))
+
+    stations_list = []
+    for s in stations:
+        d = divisions_by_id.get(s.division_id)
+        z = zones_by_id.get(d.zone_id) if d else None
+        stations_list.append(DropdownOption(
+            id=s.id,
+            label=s.station_name,
+            code=s.station_code,
+            hex_id=s.station_id_hex,
+            division_id=s.division_id,
+            division_code=d.division_code if d else None,
+            zone_id=d.zone_id if d else None,
+            zone_code=z.zone_code if z else None
+        ))
+
     return AssetFiltersResponse(
-        zones=[DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex) for z in zones],
-        divisions=[DropdownOption(id=d.id, label=d.division_name, code=d.division_code, hex_id=d.division_id_hex) for d in divisions],
-        stations=[DropdownOption(id=s.id, label=s.station_name, code=s.station_code, hex_id=s.station_id_hex) for s in stations],
+        zones=zones_list,
+        divisions=divisions_list,
+        stations=stations_list,
         asset_types=asset_groups,
         asset_makes=asset_makes_list,
     )
@@ -383,16 +504,21 @@ def get_asset_filters(db: Session = Depends(get_db)):
 @router.get("/inventory", response_model=List[AssetInventoryResponse])
 def list_asset_inventory(
     station_id: Optional[int] = Query(None),
-    asset_type_hex: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),
     asset_make: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """List raw asset inventory records used by the Asset Detail report."""
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     q = db.query(AssetInventory)
     if station_id is not None:
         q = q.filter(AssetInventory.station_id == station_id)
     if asset_type_hex:
-        q = q.filter(AssetInventory.asset_type_hex == asset_type_hex.upper())
+        hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
+        if len(hex_list) == 1:
+            q = q.filter(AssetInventory.asset_type_hex == hex_list[0])
+        elif len(hex_list) > 1:
+            q = q.filter(AssetInventory.asset_type_hex.in_(hex_list))
     if asset_make:
         q = q.filter(func.lower(AssetInventory.asset_make) == asset_make.lower())
     return q.order_by(AssetInventory.station_id, AssetInventory.asset_type_hex, AssetInventory.asset_make).all()
@@ -488,7 +614,7 @@ def delete_asset_inventory(inventory_id: int, db: Session = Depends(get_db)):
 
 @router.get("/thresholds", response_model=List[ThresholdResponse])
 def list_thresholds(
-    asset_type_hex: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),
     station_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ):
@@ -496,9 +622,14 @@ def list_thresholds(
     List thresholds. Filter by asset_type_hex and/or station_id.
     Results with station_id=NULL are global defaults.
     """
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     q = db.query(Threshold)
     if asset_type_hex:
-        q = q.filter(Threshold.asset_type_hex == asset_type_hex.upper())
+        hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
+        if len(hex_list) == 1:
+            q = q.filter(Threshold.asset_type_hex == hex_list[0])
+        elif len(hex_list) > 1:
+            q = q.filter(Threshold.asset_type_hex.in_(hex_list))
     if station_id is not None:
         q = q.filter(Threshold.station_id == station_id)
     return q.order_by(Threshold.asset_type_hex, Threshold.parameter_type_hex).all()
@@ -665,7 +796,7 @@ def _build_response(record: Asset) -> AssetResponse:
 @router.get("", response_model=AssetListResponse)
 def list_assets(
     station_id:     Optional[int]  = Query(None, description="Filter by station"),
-    asset_type_hex: Optional[str]  = Query(None, description="Filter by asset type hex (e.g. 00)"),
+    asset_type:     Optional[str]  = Query(None, description="Filter by asset type (ID or hex)"),
     is_active:      Optional[bool] = Query(None, description="Filter by active status"),
     search:         Optional[str]  = Query(
         None,
@@ -679,16 +810,21 @@ def list_assets(
     List all physical asset instances with optional filters and pagination.
 
     - `station_id` — filter to one station
-    - `asset_type_hex` — e.g. `00` (Point Machine), `20` (DC Track Circuit)
+    - `asset_type` — e.g. database ID, name, or hex (Point Machine, etc.)
     - `is_active` — `true` / `false`
     - `search` — partial match on asset_number_code, smms_asset_code, or smms_asset_name
     """
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     q = db.query(Asset)
 
     if station_id is not None:
         q = q.filter(Asset.station_id == station_id)
     if asset_type_hex:
-        q = q.filter(Asset.asset_type_hex == asset_type_hex.upper())
+        hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
+        if len(hex_list) == 1:
+            q = q.filter(Asset.asset_type_hex == hex_list[0])
+        elif len(hex_list) > 1:
+            q = q.filter(Asset.asset_type_hex.in_(hex_list))
     if is_active is not None:
         q = q.filter(Asset.is_active == is_active)
     if search:

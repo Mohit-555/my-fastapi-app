@@ -8,11 +8,45 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.models import MaintenanceMode, Station, Division, Zone, Asset, AlertEvent
+from app.models.models import MaintenanceMode, Station, Division, Zone, Asset, AlertEvent, AssetTypeMaster
 from app.models.schemas import MaintenanceModeRequest, MaintenanceModeResponse, MaintenanceModeListResponse, AlertEventResponse
-from app.constants import ASSET_TYPE_MAP
+from app.constants import ASSET_TYPE_MAP, ASSET_TYPE_DISPLAY_GROUPS
 
 router = APIRouter(prefix="/maintenance", tags=["Maintenance"])
+
+
+def _blank_to_none(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    val = value.strip()
+    return None if val == "" else val
+
+
+def _resolve_asset_types_to_hex(db: Session, asset_type: Optional[str]) -> Optional[str]:
+    asset_type = _blank_to_none(asset_type)
+    if not asset_type:
+        return None
+
+    parts = [p.strip() for p in asset_type.split(",") if p.strip()]
+    if all(p.isdigit() for p in parts):
+        ids = [int(p) for p in parts]
+        db_types = db.query(AssetTypeMaster).filter(AssetTypeMaster.id.in_(ids)).all()
+        hexes = [t.asset_type_id for t in db_types if t.asset_type_id]
+        if not hexes:
+            return "IMPOSSIBLE_HEX"
+        return ",".join(hexes)
+
+    hex_list = []
+    for part in parts:
+        if part.upper() in ASSET_TYPE_MAP:
+            hex_list.append(part.upper())
+        else:
+            group_hexes = ASSET_TYPE_DISPLAY_GROUPS.get(part)
+            if group_hexes:
+                hex_list.extend(group_hexes)
+    if hex_list:
+        return ",".join(hex_list)
+    return None
 
 
 def _build_response_row(row: MaintenanceMode, index: int) -> MaintenanceModeResponse:
@@ -78,7 +112,11 @@ def _base_query(
     if station_id is not None:
         q = q.filter(MaintenanceMode.station_id == station_id)
     if asset_type_hex:
-        q = q.filter(MaintenanceMode.asset_type_hex == asset_type_hex)
+        hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
+        if len(hex_list) == 1:
+            q = q.filter(MaintenanceMode.asset_type_hex == hex_list[0])
+        elif len(hex_list) > 1:
+            q = q.filter(MaintenanceMode.asset_type_hex.in_(hex_list))
     if asset_no:
         q = q.filter(MaintenanceMode.asset_no.ilike(f"%{asset_no}%"))
     if from_time:
@@ -104,7 +142,7 @@ def list_maintenance_modes(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
-    asset_type_hex: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),
     asset_no: Optional[str] = Query(None),
     from_time: Optional[datetime] = Query(None),
     to_time: Optional[datetime] = Query(None),
@@ -114,6 +152,7 @@ def list_maintenance_modes(
     db: Session = Depends(get_db),
 ):
     """List maintenance mode entries with pagination and filters."""
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     q = _base_query(db, zone_id, division_id, station_id, asset_type_hex, asset_no, from_time, to_time, status)
     total = q.count()
     offset = (page - 1) * page_size
@@ -177,13 +216,14 @@ def download_maintenance_modes(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
-    asset_type_hex: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),
     asset_no: Optional[str] = Query(None),
     from_time: Optional[datetime] = Query(None),
     to_time: Optional[datetime] = Query(None),
     db: Session = Depends(get_db),
 ):
     """Export filtered maintenance mode records to a CSV file."""
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     rows = _base_query(db, zone_id, division_id, station_id, asset_type_hex, asset_no, from_time, to_time).all()
 
     output = io.StringIO()
