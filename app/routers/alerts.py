@@ -926,24 +926,6 @@ def get_alert_filters(db: Session = Depends(get_db)):
         .all()
     )
 
-    loc_by_type = {}
-    for row in asset_locations:
-        at = row.asset_type_hex.upper()
-        group = loc_by_type.setdefault(at, {
-            "zone_ids": set(), "zone_codes": set(), "zone_names": set(),
-            "division_ids": set(), "division_codes": set(), "division_names": set(),
-            "station_ids": set(), "station_codes": set(), "station_names": set()
-        })
-        group["zone_ids"].add(row.zone_id)
-        group["zone_codes"].add(row.zone_code)
-        group["zone_names"].add(row.zone_name)
-        group["division_ids"].add(row.division_id)
-        group["division_codes"].add(row.division_code)
-        group["division_names"].add(row.division_name)
-        group["station_ids"].add(row.station_id)
-        group["station_codes"].add(row.station_code)
-        group["station_names"].add(row.station_name)
-
     db_types_map = {t.asset_type_id: t for t in db.query(AssetTypeMaster).all()}
 
     asset_groups = []
@@ -954,24 +936,25 @@ def get_alert_filters(db: Session = Depends(get_db)):
         for h in hexes:
             t = db_types_map.get(h)
             if t:
-                loc = loc_by_type.get(h.upper(), {})
-                members.append(AssetTypeOption(
-                    id=member_id,
-                    hex_id=h,
-                    code=t.asset_type_code,
-                    label=t.asset_type_name,
-                    group_label=group_label,
-                    zone_ids=sorted(list(loc.get("zone_ids", set()))),
-                    zone_codes=sorted(list(loc.get("zone_codes", set()))),
-                    zone_names=sorted(list(loc.get("zone_names", set()))),
-                    division_ids=sorted(list(loc.get("division_ids", set()))),
-                    division_codes=sorted(list(loc.get("division_codes", set()))),
-                    division_names=sorted(list(loc.get("division_names", set()))),
-                    station_ids=sorted(list(loc.get("station_ids", set()))),
-                    station_codes=sorted(list(loc.get("station_codes", set()))),
-                    station_names=sorted(list(loc.get("station_names", set()))),
-                ))
-                member_id += 1
+                for row in asset_locations:
+                    if row.asset_type_hex.upper() == h.upper():
+                        members.append(AssetTypeOption(
+                            id=member_id,
+                            hex_id=h,
+                            code=t.asset_type_code,
+                            label=t.asset_type_name,
+                            group_label=group_label,
+                            zone_id=row.zone_id,
+                            zone_code=row.zone_code,
+                            zone_name=row.zone_name,
+                            division_id=row.division_id,
+                            division_code=row.division_code,
+                            division_name=row.division_name,
+                            station_id=row.station_id,
+                            station_code=row.station_code,
+                            station_name=row.station_name,
+                        ))
+                        member_id += 1
         asset_groups.append(AssetTypeGroupOption(
             id=group_id,
             group_label=group_label,
