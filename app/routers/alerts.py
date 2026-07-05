@@ -911,10 +911,13 @@ def get_alert_filters(db: Session = Depends(get_db)):
             Asset.asset_type_hex,
             Asset.station_id,
             Station.station_code,
+            Station.station_name,
             Station.division_id,
             Division.division_code,
+            Division.division_name,
             Division.zone_id,
-            Zone.zone_code
+            Zone.zone_code,
+            Zone.zone_name
         )
         .join(Station, Station.id == Asset.station_id)
         .join(Division, Division.id == Station.division_id)
@@ -927,16 +930,19 @@ def get_alert_filters(db: Session = Depends(get_db)):
     for row in asset_locations:
         at = row.asset_type_hex.upper()
         group = loc_by_type.setdefault(at, {
-            "zone_ids": set(), "zone_codes": set(),
-            "division_ids": set(), "division_codes": set(),
-            "station_ids": set(), "station_codes": set()
+            "zone_ids": set(), "zone_codes": set(), "zone_names": set(),
+            "division_ids": set(), "division_codes": set(), "division_names": set(),
+            "station_ids": set(), "station_codes": set(), "station_names": set()
         })
         group["zone_ids"].add(row.zone_id)
         group["zone_codes"].add(row.zone_code)
+        group["zone_names"].add(row.zone_name)
         group["division_ids"].add(row.division_id)
         group["division_codes"].add(row.division_code)
+        group["division_names"].add(row.division_name)
         group["station_ids"].add(row.station_id)
         group["station_codes"].add(row.station_code)
+        group["station_names"].add(row.station_name)
 
     db_types_map = {t.asset_type_id: t for t in db.query(AssetTypeMaster).all()}
 
@@ -957,10 +963,13 @@ def get_alert_filters(db: Session = Depends(get_db)):
                     group_label=group_label,
                     zone_ids=sorted(list(loc.get("zone_ids", set()))),
                     zone_codes=sorted(list(loc.get("zone_codes", set()))),
+                    zone_names=sorted(list(loc.get("zone_names", set()))),
                     division_ids=sorted(list(loc.get("division_ids", set()))),
                     division_codes=sorted(list(loc.get("division_codes", set()))),
+                    division_names=sorted(list(loc.get("division_names", set()))),
                     station_ids=sorted(list(loc.get("station_ids", set()))),
                     station_codes=sorted(list(loc.get("station_codes", set()))),
+                    station_names=sorted(list(loc.get("station_names", set()))),
                 ))
                 member_id += 1
         asset_groups.append(AssetTypeGroupOption(
@@ -977,10 +986,83 @@ def get_alert_filters(db: Session = Depends(get_db)):
         AlertFilterOption(id=3, label="Failure", value="Failure"),
     ]
 
-    asset_numbers_list = [
-        AlertFilterOption(id=idx, label=val, value=val)
-        for idx, val in enumerate(asset_numbers, start=1)
-    ]
+    zones_by_id = {z.id: z for z in zones}
+    divisions_by_id = {d.id: d for d in divisions}
+    stations_by_id = {s.id: s for s in stations}
+
+    # Fetch all assets from db to build the comprehensive cascading asset number list
+    db_assets = (
+        db.query(Asset)
+        .join(Station, Station.id == Asset.station_id)
+        .join(Division, Division.id == Station.division_id)
+        .join(Zone, Zone.id == Division.zone_id)
+        .join(AssetTypeMaster, AssetTypeMaster.asset_type_id == Asset.asset_type_hex)
+        .all()
+    )
+
+    asset_numbers_map = {}
+    for a in db_assets:
+        key = (a.asset_number_code.upper(), a.station_id, a.asset_type_hex.upper())
+        asset_numbers_map[key] = DropdownOption(
+            id=a.id,
+            label=a.asset_number_code,
+            code=a.asset_number_code,
+            hex_id=a.asset_number_id,
+            zone_id=a.station.division.zone_id,
+            zone_code=a.station.division.zone.zone_code,
+            zone_name=a.station.division.zone.zone_name,
+            division_id=a.station.division_id,
+            division_code=a.station.division.division_code,
+            division_name=a.station.division.division_name,
+            station_id=a.station_id,
+            station_code=a.station.station_code,
+            station_name=a.station.station_name,
+            asset_type_id=a.asset_type.id if a.asset_type else None,
+            asset_type_code=a.asset_type.asset_type_code if a.asset_type else None,
+            asset_type_name=a.asset_type.asset_type_name if a.asset_type else None,
+            asset_type_hex=a.asset_type_hex
+        )
+
+    # Ensure any custom/manual event assets are also in the list
+    event_assets = (
+        db.query(AlertEvent.asset_no, AlertEvent.station_id, AlertEvent.asset_type_hex)
+        .distinct()
+        .all()
+    )
+
+    idx_counter = len(db_assets) + 1
+    for row in event_assets:
+        if not row.asset_no:
+            continue
+        key = (row.asset_no.upper(), row.station_id, row.asset_type_hex.upper())
+        if key not in asset_numbers_map:
+            s = stations_by_id.get(row.station_id)
+            d = divisions_by_id.get(s.division_id) if s else None
+            z = zones_by_id.get(d.zone_id) if d else None
+            t = db_types_map.get(row.asset_type_hex.upper())
+            
+            asset_numbers_map[key] = DropdownOption(
+                id=idx_counter,
+                label=row.asset_no,
+                code=row.asset_no,
+                hex_id="00",
+                zone_id=z.id if z else None,
+                zone_code=z.zone_code if z else None,
+                zone_name=z.zone_name if z else None,
+                division_id=d.id if d else None,
+                division_code=d.division_code if d else None,
+                division_name=d.division_name if d else None,
+                station_id=row.station_id,
+                station_code=s.station_code if s else None,
+                station_name=s.station_name if s else None,
+                asset_type_id=t.id if t else None,
+                asset_type_code=t.asset_type_code if t else None,
+                asset_type_name=t.asset_type_name if t else None,
+                asset_type_hex=row.asset_type_hex
+            )
+            idx_counter += 1
+
+    asset_numbers_list = sorted(list(asset_numbers_map.values()), key=lambda x: x.label)
 
     feedbacks_list = [
         AlertFilterOption(id=idx, label=val, value=val)
@@ -1013,11 +1095,8 @@ def get_alert_filters(db: Session = Depends(get_db)):
         for idx, (hex_id, (_, name, _)) in enumerate(PARAMETER_TYPE_MAP.items(), start=1)
     ]
 
-    zones_by_id = {z.id: z for z in zones}
-    divisions_by_id = {d.id: d for d in divisions}
-
     zones_list = [
-        DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex)
+        DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex, zone_name=z.zone_name)
         for z in zones
     ]
 
@@ -1030,7 +1109,9 @@ def get_alert_filters(db: Session = Depends(get_db)):
             code=d.division_code,
             hex_id=d.division_id_hex,
             zone_id=d.zone_id,
-            zone_code=z.zone_code if z else None
+            zone_code=z.zone_code if z else None,
+            zone_name=z.zone_name if z else None,
+            division_name=d.division_name
         ))
 
     stations_list = []
@@ -1044,8 +1125,11 @@ def get_alert_filters(db: Session = Depends(get_db)):
             hex_id=s.station_id_hex,
             division_id=s.division_id,
             division_code=d.division_code if d else None,
+            division_name=d.division_name if d else None,
             zone_id=d.zone_id if d else None,
-            zone_code=z.zone_code if z else None
+            zone_code=z.zone_code if z else None,
+            zone_name=z.zone_name if z else None,
+            station_name=s.station_name
         ))
 
     return AlertFiltersResponse(

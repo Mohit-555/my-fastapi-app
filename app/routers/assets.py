@@ -396,10 +396,13 @@ def get_asset_filters(db: Session = Depends(get_db)):
             Asset.asset_type_hex,
             Asset.station_id,
             Station.station_code,
+            Station.station_name,
             Station.division_id,
             Division.division_code,
+            Division.division_name,
             Division.zone_id,
-            Zone.zone_code
+            Zone.zone_code,
+            Zone.zone_name
         )
         .join(Station, Station.id == Asset.station_id)
         .join(Division, Division.id == Station.division_id)
@@ -412,16 +415,19 @@ def get_asset_filters(db: Session = Depends(get_db)):
     for row in asset_locations:
         at = row.asset_type_hex.upper()
         group = loc_by_type.setdefault(at, {
-            "zone_ids": set(), "zone_codes": set(),
-            "division_ids": set(), "division_codes": set(),
-            "station_ids": set(), "station_codes": set()
+            "zone_ids": set(), "zone_codes": set(), "zone_names": set(),
+            "division_ids": set(), "division_codes": set(), "division_names": set(),
+            "station_ids": set(), "station_codes": set(), "station_names": set()
         })
         group["zone_ids"].add(row.zone_id)
         group["zone_codes"].add(row.zone_code)
+        group["zone_names"].add(row.zone_name)
         group["division_ids"].add(row.division_id)
         group["division_codes"].add(row.division_code)
+        group["division_names"].add(row.division_name)
         group["station_ids"].add(row.station_id)
         group["station_codes"].add(row.station_code)
+        group["station_names"].add(row.station_name)
 
     db_types_map = {t.asset_type_id: t for t in db.query(AssetTypeMaster).all()}
 
@@ -443,10 +449,13 @@ def get_asset_filters(db: Session = Depends(get_db)):
                     group_label=group_label,
                     zone_ids=sorted(list(loc.get("zone_ids", set()))),
                     zone_codes=sorted(list(loc.get("zone_codes", set()))),
+                    zone_names=sorted(list(loc.get("zone_names", set()))),
                     division_ids=sorted(list(loc.get("division_ids", set()))),
                     division_codes=sorted(list(loc.get("division_codes", set()))),
+                    division_names=sorted(list(loc.get("division_names", set()))),
                     station_ids=sorted(list(loc.get("station_ids", set()))),
                     station_codes=sorted(list(loc.get("station_codes", set()))),
+                    station_names=sorted(list(loc.get("station_names", set()))),
                 ))
                 member_id += 1
         asset_groups.append(AssetTypeGroupOption(
@@ -461,7 +470,7 @@ def get_asset_filters(db: Session = Depends(get_db)):
     divisions_by_id = {d.id: d for d in divisions}
 
     zones_list = [
-        DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex)
+        DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex, zone_name=z.zone_name)
         for z in zones
     ]
 
@@ -474,7 +483,9 @@ def get_asset_filters(db: Session = Depends(get_db)):
             code=d.division_code,
             hex_id=d.division_id_hex,
             zone_id=d.zone_id,
-            zone_code=z.zone_code if z else None
+            zone_code=z.zone_code if z else None,
+            zone_name=z.zone_name if z else None,
+            division_name=d.division_name
         ))
 
     stations_list = []
@@ -488,8 +499,11 @@ def get_asset_filters(db: Session = Depends(get_db)):
             hex_id=s.station_id_hex,
             division_id=s.division_id,
             division_code=d.division_code if d else None,
+            division_name=d.division_name if d else None,
             zone_id=d.zone_id if d else None,
-            zone_code=z.zone_code if z else None
+            zone_code=z.zone_code if z else None,
+            zone_name=z.zone_name if z else None,
+            station_name=s.station_name
         ))
 
     return AssetFiltersResponse(

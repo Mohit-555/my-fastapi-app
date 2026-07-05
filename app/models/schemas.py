@@ -447,10 +447,13 @@ class AssetTypeOption(BaseModel):
     group_label: str     # display group for the UI, e.g. "Point Machine"
     zone_ids: List[int] = []
     zone_codes: List[str] = []
+    zone_names: List[str] = []
     division_ids: List[int] = []
     division_codes: List[str] = []
+    division_names: List[str] = []
     station_ids: List[int] = []
     station_codes: List[str] = []
+    station_names: List[str] = []
 
 
 class AssetTypeGroupOption(BaseModel):
@@ -543,8 +546,17 @@ class DropdownOption(BaseModel):
     hex_id: str
     zone_id: Optional[int] = None
     zone_code: Optional[str] = None
+    zone_name: Optional[str] = None
     division_id: Optional[int] = None
     division_code: Optional[str] = None
+    division_name: Optional[str] = None
+    station_id: Optional[int] = None
+    station_code: Optional[str] = None
+    station_name: Optional[str] = None
+    asset_type_id: Optional[int] = None
+    asset_type_code: Optional[str] = None
+    asset_type_name: Optional[str] = None
+    asset_type_hex: Optional[str] = None
 
 # ─── Alert Summary ────────────────────────────────────────────────────────────
 
@@ -746,7 +758,7 @@ class AlertFiltersResponse(BaseModel):
     stations: List[DropdownOption]
     alert_types: List[AlertFilterOption]
     asset_types: List[AssetTypeGroupOption]
-    asset_numbers: List[AlertFilterOption]
+    asset_numbers: List[DropdownOption]
     causes: List[AlertFilterOption]
     feedbacks: List[AlertFilterOption]
     alert_statuses: List[AlertFilterOption]
