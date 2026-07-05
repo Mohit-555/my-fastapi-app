@@ -991,6 +991,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
             label=a.asset_number_code,
             code=a.asset_number_code,
             hex_id=a.asset_number_id,
+            value=a.asset_number_code,
             zone_id=a.station.division.zone_id,
             zone_code=a.station.division.zone.zone_code,
             zone_name=a.station.division.zone.zone_name,
@@ -1029,6 +1030,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
                 label=row.asset_no,
                 code=row.asset_no,
                 hex_id="00",
+                value=row.asset_no,
                 zone_id=z.id if z else None,
                 zone_code=z.zone_code if z else None,
                 zone_name=z.zone_name if z else None,
@@ -1079,7 +1081,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
     ]
 
     zones_list = [
-        DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex, zone_name=z.zone_name)
+        DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex, value=z.zone_code, zone_name=z.zone_name)
         for z in zones
     ]
 
@@ -1091,6 +1093,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
             label=d.division_name,
             code=d.division_code,
             hex_id=d.division_id_hex,
+            value=d.division_code,
             zone_id=d.zone_id,
             zone_code=z.zone_code if z else None,
             zone_name=z.zone_name if z else None,
@@ -1106,6 +1109,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
             label=s.station_name,
             code=s.station_code,
             hex_id=s.station_id_hex,
+            value=s.station_code,
             division_id=s.division_id,
             division_code=d.division_code if d else None,
             division_name=d.division_name if d else None,

@@ -544,6 +544,7 @@ class DropdownOption(BaseModel):
     label: str
     code: str
     hex_id: str
+    value: Optional[str] = None
     zone_id: Optional[int] = None
     zone_code: Optional[str] = None
     zone_name: Optional[str] = None
