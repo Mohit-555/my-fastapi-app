@@ -274,6 +274,16 @@ def ensure_default_divisions(db: Session) -> None:
 
 
 def ensure_default_stations(db: Session) -> None:
+    station_asset_types_map = {
+        "LKO": [1, 2, 3],
+        "NDLS": [1, 2, 3],
+        "MJA": [1, 3],
+        "HWH": [1, 3],
+        "PRYG": [2],
+        "AGC": [1, 2, 3],
+        "CNB": [1, 2, 3],
+        "UMB": [1, 2, 3],
+    }
     stations = db.query(Station).all()
     for s in stations:
         st_name = s.station_name.title()
@@ -285,6 +295,8 @@ def ensure_default_stations(db: Session) -> None:
             s.description = f"{st_name} Railway Station"
         if not s.status:
             s.status = "Active"
+        if not s.asset_types:
+            s.asset_types = station_asset_types_map.get(s.station_code, [1, 2, 3])
     db.commit()
 
 
@@ -845,6 +857,123 @@ def ensure_default_assets(db: Session) -> None:
             "model": "LED-SIG",
             "attr1": "Standard",
             "location": "Agra Cantt Home",
+        },
+        {
+            "smms_asset_code": "SMMS-PT-103",
+            "smms_asset_name": "Point Machine 103",
+            "asset_number_code": "PT-103",
+            "asset_number_id": "03",
+            "asset_type_hex": "00",
+            "station_code": "LKO",
+            "station_gateway_id": "01011200",
+            "make": "Alstom",
+            "model": "A100",
+            "attr1": "Standard",
+            "location": "Lucknow west",
+        },
+        {
+            "smms_asset_code": "SMMS-SIG-103",
+            "smms_asset_name": "Signal 103",
+            "asset_number_code": "SIG-103",
+            "asset_number_id": "03",
+            "asset_type_hex": "10",
+            "station_code": "LKO",
+            "station_gateway_id": "01011200",
+            "make": "Siemens",
+            "model": "LED-103",
+            "attr1": "Standard",
+            "location": "Lucknow home signal",
+        },
+        {
+            "smms_asset_code": "SMMS-TC-103",
+            "smms_asset_name": "Track Circuit 103",
+            "asset_number_code": "TC-103",
+            "asset_number_id": "03",
+            "asset_type_hex": "20",
+            "station_code": "LKO",
+            "station_gateway_id": "01011200",
+            "make": "Ansaldo",
+            "model": "DC-103",
+            "attr1": "Standard",
+            "location": "Lucknow Yard",
+        },
+        {
+            "smms_asset_code": "SMMS-PT-104",
+            "smms_asset_name": "Point Machine 104",
+            "asset_number_code": "PT-104",
+            "asset_number_id": "04",
+            "asset_type_hex": "00",
+            "station_code": "NDLS",
+            "station_gateway_id": "02011200",
+            "make": "Siemens",
+            "model": "S700",
+            "attr1": "Standard",
+            "location": "New Delhi North Yard",
+        },
+        {
+            "smms_asset_code": "SMMS-SIG-104",
+            "smms_asset_name": "Signal 104",
+            "asset_number_code": "SIG-104",
+            "asset_number_id": "04",
+            "asset_type_hex": "10",
+            "station_code": "NDLS",
+            "station_gateway_id": "02011200",
+            "make": "Alstom",
+            "model": "LED-SIG",
+            "attr1": "Standard",
+            "location": "New Delhi platform 1",
+        },
+        {
+            "smms_asset_code": "SMMS-PT-105",
+            "smms_asset_name": "Point Machine 105",
+            "asset_number_code": "PM-101",
+            "asset_number_id": "05",
+            "asset_type_hex": "00",
+            "station_code": "MJA",
+            "station_gateway_id": "03011200",
+            "make": "CEL",
+            "model": "PM-MJA",
+            "attr1": "Standard",
+            "location": "Meja Road Yard",
+        },
+        {
+            "smms_asset_code": "SMMS-PT-106",
+            "smms_asset_name": "Point Machine 106",
+            "asset_number_code": "PT-106",
+            "asset_number_id": "06",
+            "asset_type_hex": "00",
+            "station_code": "HWH",
+            "station_gateway_id": "04011200",
+            "make": "Alstom",
+            "model": "HWH-PM",
+            "attr1": "Standard",
+            "location": "Howrah West Yard",
+        },
+        {
+            "smms_asset_code": "SMMS-TC-107",
+            "smms_asset_name": "Track Circuit 107",
+            "asset_number_code": "TC-107",
+            "asset_number_id": "07",
+            "asset_type_hex": "20",
+            "station_code": "PRYG",
+            "station_gateway_id": "05011200",
+            "make": "Ansaldo",
+            "model": "DC-TC",
+            "attr1": "Standard",
+            "location": "Prayagraj Ghat east",
+        },
+        {
+            "smms_asset_code": "SMMS-PT-108",
+            "smms_asset_name": "Point Machine 108",
+            "asset_number_code": "PT-108",
+            "asset_number_id": "08",
+            "asset_type_hex": "00",
+            "station_code": "UMB",
+            "station_gateway_id": "08011200",
+            "make": "Siemens",
+            "model": "S700",
+            "attr1": "Standard",
+            "location": "Ambala Cantt Yard",
         }
     ]
 
