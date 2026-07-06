@@ -457,6 +457,42 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
                 db.add(room)
     db.commit()
 
+    # 4b. Ensure EVERY division in the database has at least one station
+    all_divisions = db.query(Division).all()
+    for div in all_divisions:
+        station_count = db.query(Station).filter(Station.division_id == div.id).count()
+        if station_count == 0:
+            st_code = f"{div.division_code[:3].upper()}S"
+            dup = db.query(Station).filter(Station.station_code == st_code).first()
+            if dup:
+                st_code = f"{div.division_code[:2].upper()}ST"
+            
+            st_hex = div.division_id_hex or "01"
+            
+            station = Station(
+                station_code=st_code,
+                station_name=f"{div.division_name.title()} Station",
+                station_id_hex=st_hex,
+                division_id=div.id,
+                category="A1",
+                address=f"{div.division_name.title()} Division Station",
+                description=f"Auto-generated station for {div.division_name} division",
+                status="Active",
+                asset_types=[1, 2, 3]
+            )
+            db.add(station)
+            db.flush()
+
+            for room_type in ["RR", "IPS", "BATT"]:
+                room = EquipmentRoom(
+                    station_id=station.id,
+                    room_type=room_type,
+                    temperature=None,
+                    humidity=None
+                )
+                db.add(room)
+    db.commit()
+
     # 5. Ensure Default Asset Inventories
     DEFAULT_INVENTORIES = [
         {"station_code": "LKO", "asset_type_hex": "00", "asset_make": "Alstom", "count": 18},
@@ -621,19 +657,22 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
 
     # 7. Ensure Default Gateways & Telemetry
     gateways_by_station = {}
-    for st_code, stngw_id in [
-        ("LKO", "01011200"),
-        ("NDLS", "02011200"),
-        ("MJA", "03011200"),
-        ("HWH", "04011200"),
-        ("PRYG", "05011200"),
-        ("AGC", "06011200"),
-        ("CNB", "07011200"),
-        ("UMB", "08011200"),
-    ]:
-        station = db.query(Station).filter(Station.station_code == st_code).first()
-        if not station:
-            continue
+    hardcoded_gws = {
+        "LKO": "01011200",
+        "NDLS": "02011200",
+        "MJA": "03011200",
+        "HWH": "04011200",
+        "PRYG": "05011200",
+        "AGC": "06011200",
+        "CNB": "07011200",
+        "UMB": "08011200",
+    }
+    all_stations = db.query(Station).all()
+    for station in all_stations:
+        stngw_id = hardcoded_gws.get(station.station_code)
+        if not stngw_id:
+            stngw_id = f"GW{station.id:06d}"
+        
         gw = db.query(Gateway).filter(Gateway.stngw_id == stngw_id).first()
         if not gw:
             gw = Gateway(
@@ -995,6 +1034,41 @@ def ensure_default_assets(db: Session) -> None:
                 model=item["model"],
                 attr1=item["attr1"],
                 location=item["location"],
+                is_active=True
+            ))
+    db.commit()
+
+    # 4b. Ensure EVERY station in the database has at least one asset
+    all_stations = db.query(Station).all()
+    for s in all_stations:
+        asset_count = db.query(Asset).filter(Asset.station_id == s.id).count()
+        if asset_count == 0:
+            # Retrieve the Gateway corresponding to this station
+            gw = db.query(Gateway).filter(Gateway.station_id == s.id).first()
+            if gw:
+                stngw_id = gw.stngw_id
+            else:
+                stngw_id = f"GW{s.id:06d}"
+                gw = Gateway(
+                    stngw_id=stngw_id,
+                    station_id=s.id,
+                    imei=f"imei_{stngw_id}"
+                )
+                db.add(gw)
+                db.flush()
+
+            db.add(Asset(
+                smms_asset_code=f"SMMS-PT-{s.station_code}",
+                smms_asset_name=f"Point Machine {s.station_name}",
+                asset_number_code=f"PM-101",
+                asset_number_id="01",
+                asset_type_hex="00",
+                station_gateway_id=stngw_id,
+                station_id=s.id,
+                make="Siemens",
+                model="S700",
+                attr1="Standard",
+                location=f"{s.station_name} Yard",
                 is_active=True
             ))
     db.commit()
