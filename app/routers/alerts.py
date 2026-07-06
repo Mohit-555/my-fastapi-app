@@ -928,17 +928,15 @@ def get_alert_filters(db: Session = Depends(get_db)):
 
     db_types_map = {t.asset_type_id: t for t in db.query(AssetTypeMaster).all()}
 
-    asset_groups = []
-    group_id = 1
+    flat_asset_types = []
     member_id = 1
     for group_label, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
-        members = []
         for h in hexes:
             t = db_types_map.get(h)
             if t:
                 for row in asset_locations:
                     if row.asset_type_hex.upper() == h.upper():
-                        members.append(AssetTypeOption(
+                        flat_asset_types.append(AssetTypeOption(
                             id=member_id,
                             hex_id=h,
                             code=t.asset_type_code,
@@ -955,13 +953,6 @@ def get_alert_filters(db: Session = Depends(get_db)):
                             station_name=row.station_name,
                         ))
                         member_id += 1
-        asset_groups.append(AssetTypeGroupOption(
-            id=group_id,
-            group_label=group_label,
-            asset_type_hexes=hexes,
-            members=members,
-        ))
-        group_id += 1
 
     alert_types_list = [
         AlertFilterOption(id=1, label="All", value="ALL"),
@@ -1130,7 +1121,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
         divisions=divisions_list,
         stations=stations_list,
         alert_types=alert_types_list,
-        asset_types=asset_groups,
+        asset_types=flat_asset_types,
         asset_numbers=asset_numbers_list,
         causes=cause_options_list,
         feedbacks=feedbacks_list,

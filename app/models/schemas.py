@@ -521,7 +521,7 @@ class AssetFiltersResponse(BaseModel):
     zones: List[DropdownOption]
     divisions: List[DropdownOption]
     stations: List[DropdownOption]
-    asset_types: List[AssetTypeGroupOption]
+    asset_types: List[AssetTypeOption]
     asset_makes: List[AssetMakeOption]
     roles: List[AlertFilterOption] = []
 
@@ -763,7 +763,7 @@ class AlertFiltersResponse(BaseModel):
     divisions: List[DropdownOption]
     stations: List[DropdownOption]
     alert_types: List[AlertFilterOption]
-    asset_types: List[AssetTypeGroupOption]
+    asset_types: List[AssetTypeOption]
     asset_numbers: List[DropdownOption]
     causes: List[AlertFilterOption]
     feedbacks: List[AlertFilterOption]
