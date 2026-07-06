@@ -905,19 +905,61 @@ def get_alert_filters(db: Session = Depends(get_db)):
         if row.asset_no
     ]
 
-    # Fetch all assets to build the interconnected list for asset types
+    # Fetch all masters
+    all_masters = db.query(AssetTypeMaster).all()
+    db_types_by_id = {t.id: t for t in all_masters}
+    db_types_map = {t.asset_type_id.upper(): t for t in all_masters}
+
+    # Set of tuples: (hex, zone_id, zone_code, zone_name, division_id, division_code, division_name, station_id, station_code, station_name)
+    available_combinations = set()
+
+    # 1. Add from Station.asset_types column
+    stations_info = (
+        db.query(
+            Station.id.label("station_id"),
+            Station.station_code.label("station_code"),
+            Station.station_name.label("station_name"),
+            Station.asset_types.label("station_asset_types"),
+            Division.id.label("division_id"),
+            Division.division_code.label("division_code"),
+            Division.division_name.label("division_name"),
+            Zone.id.label("zone_id"),
+            Zone.zone_code.label("zone_code"),
+            Zone.zone_name.label("zone_name")
+        )
+        .join(Division, Division.id == Station.division_id)
+        .join(Zone, Zone.id == Division.zone_id)
+        .all()
+    )
+
+    for s in stations_info:
+        at_list = s.station_asset_types
+        if at_list and isinstance(at_list, list):
+            for tid in at_list:
+                t_master = db_types_by_id.get(tid)
+                if not t_master and isinstance(tid, str):
+                    t_master = db_types_map.get(tid.upper())
+                if t_master:
+                    available_combinations.add((
+                        t_master.asset_type_id.upper(),
+                        s.zone_id, s.zone_code, s.zone_name,
+                        s.division_id, s.division_code, s.division_name,
+                        s.station_id, s.station_code, s.station_name
+                    ))
+
+    # 2. Add from actual assets in the Asset table (as fallback / extra safety)
     asset_locations = (
         db.query(
-            Asset.asset_type_hex,
-            Asset.station_id,
-            Station.station_code,
-            Station.station_name,
-            Station.division_id,
-            Division.division_code,
-            Division.division_name,
-            Division.zone_id,
-            Zone.zone_code,
-            Zone.zone_name
+            Asset.asset_type_hex.label("asset_type_hex"),
+            Station.id.label("station_id"),
+            Station.station_code.label("station_code"),
+            Station.station_name.label("station_name"),
+            Division.id.label("division_id"),
+            Division.division_code.label("division_code"),
+            Division.division_name.label("division_name"),
+            Zone.id.label("zone_id"),
+            Zone.zone_code.label("zone_code"),
+            Zone.zone_name.label("zone_name")
         )
         .join(Station, Station.id == Asset.station_id)
         .join(Division, Division.id == Station.division_id)
@@ -926,31 +968,39 @@ def get_alert_filters(db: Session = Depends(get_db)):
         .all()
     )
 
-    db_types_map = {t.asset_type_id: t for t in db.query(AssetTypeMaster).all()}
+    for row in asset_locations:
+        if row.asset_type_hex:
+            available_combinations.add((
+                row.asset_type_hex.upper(),
+                row.zone_id, row.zone_code, row.zone_name,
+                row.division_id, row.division_code, row.division_name,
+                row.station_id, row.station_code, row.station_name
+            ))
 
     flat_asset_types = []
     member_id = 1
     for group_label, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
         for h in hexes:
-            t = db_types_map.get(h)
+            t = db_types_map.get(h.upper())
             if t:
-                for row in asset_locations:
-                    if row.asset_type_hex.upper() == h.upper():
+                for comb in available_combinations:
+                    comb_hex = comb[0]
+                    if comb_hex.upper() == h.upper():
                         flat_asset_types.append(AssetTypeOption(
                             id=member_id,
                             hex_id=h,
                             code=t.asset_type_code,
                             label=t.asset_type_name,
                             group_label=group_label,
-                            zone_id=row.zone_id,
-                            zone_code=row.zone_code,
-                            zone_name=row.zone_name,
-                            division_id=row.division_id,
-                            division_code=row.division_code,
-                            division_name=row.division_name,
-                            station_id=row.station_id,
-                            station_code=row.station_code,
-                            station_name=row.station_name,
+                            zone_id=comb[1],
+                            zone_code=comb[2],
+                            zone_name=comb[3],
+                            division_id=comb[4],
+                            division_code=comb[5],
+                            division_name=comb[6],
+                            station_id=comb[7],
+                            station_code=comb[8],
+                            station_name=comb[9],
                         ))
                         member_id += 1
 
@@ -1050,8 +1100,18 @@ def get_alert_filters(db: Session = Depends(get_db)):
         for idx, val in enumerate(alert_statuses, start=1)
     ]
 
-    makes_rows = db.query(AssetInventory.asset_make).distinct().order_by(AssetInventory.asset_make).all()
-    makes = [row.asset_make for row in makes_rows if row.asset_make]
+    makes_inv = db.query(AssetInventory.asset_make).distinct().all()
+    makes_asset = db.query(Asset.make).distinct().all()
+    makes_set = set()
+    for row in makes_inv:
+        if row[0]:
+            makes_set.add(row[0].strip())
+    for row in makes_asset:
+        if row[0]:
+            makes_set.add(row[0].strip())
+    makes = sorted(list(makes_set))
+    if not makes:
+        makes = ["Alstom", "Ansaldo", "CEL", "Siemens", "Kernex", "Medha"]
     asset_makes_list = [
         AlertFilterOption(id=idx, label=make, value=make)
         for idx, make in enumerate(makes, start=1)
