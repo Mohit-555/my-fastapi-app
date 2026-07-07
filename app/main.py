@@ -3,12 +3,13 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from app.database import SessionLocal, engine
 from app.auth_utils import get_current_user
@@ -136,3 +137,9 @@ app.include_router(decode.router, dependencies=protected_route)
 @app.get("/", tags=["Health"])
 def root():
     return {"status": "ok", "message": "RDPMS API is running", "version": "1.1.0"}
+
+
+@app.get("/metrics", tags=["Metrics"])
+def metrics():
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
