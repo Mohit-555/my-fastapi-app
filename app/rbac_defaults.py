@@ -368,7 +368,7 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
     db.commit()
 
     # 3. Ensure Users
-    default_password_hash = hash_password("Password@123")
+    default_password_hash = hash_password("admin123")
 
     for u_data in DEFAULT_USERS:
         # Resolve zone and division
@@ -393,6 +393,7 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
             user.designation = u_data["designation"]
             user.zone_id = zone_id
             user.division_id = division_id
+            user.hashed_password = default_password_hash
             user.is_active = u_data["is_active"]
         else:
             user = User(
