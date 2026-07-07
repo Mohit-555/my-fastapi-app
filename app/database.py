@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     )
 
     DATABASE_URL: str
+    API_KEY: str = "your-secret-api-key-here-change-in-production"
 
     @property
     def database_url(self) -> str:
