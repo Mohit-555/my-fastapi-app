@@ -13,6 +13,7 @@ from prometheus_client import Counter, Histogram
 from app.database import get_db, settings
 from app.models.models import Gateway, Telemetry, AssetParameter, Asset, AlertEvent
 from app.routers.gateway import _resolve_station_from_stngw_id, _offset_event_timestamp
+from app.services.parameter_config_service import param_config_service
 
 router = APIRouter(prefix="/webhook", tags=["Webhook Ingestion"])
 logger = logging.getLogger("webhook")
@@ -337,6 +338,15 @@ def receive_fixed_parameters(
                         )
                         records_to_insert.append(record)
                         saved_count += 1
+                    
+                    if param.prv:
+                        latest_value = param.prv[-1]
+                        health = param_config_service.check_parameter_health(
+                            para_id=para_id_upper,
+                            value=latest_value
+                        )
+                        if health["status"] == "warning":
+                            logger.warning(f"Parameter {param.para_id} is in warning state: {health['message']}")
                 except Exception as e:
                     errors.append({
                         "para_id": param.para_id,

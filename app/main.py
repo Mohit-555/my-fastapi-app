@@ -14,9 +14,15 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from app.database import SessionLocal, engine
 from app.auth_utils import get_current_user
 from app.models.models import Base
-from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin, equipment_room, maintenance, webhook
+from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin, equipment_room, maintenance, webhook, config, statistics
 from app.routers import auth
 from app.rbac_defaults import ensure_default_menus, ensure_default_roles_users_and_permissions, ensure_default_zones, ensure_default_divisions, ensure_default_stations, ensure_default_asset_types, ensure_default_alert_causes, ensure_default_assets
+from app.services.scheduler import scheduler
+from app.services.redis_service import redis_service
+from app.services.database_service import db_service
+from contextlib import asynccontextmanager
+import asyncio
+
 try:
     from seed import seed as seed_zones_and_divisions
 except ImportError:
@@ -51,10 +57,24 @@ with SessionLocal() as db:
     ensure_default_alert_causes(db)
     ensure_default_assets(db)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    await db_service.initialize()
+    scheduler.start()
+    yield
+    # Shutdown
+    await scheduler.stop()
+    await db_service.close()
+    redis_service.close()
+
+
 app = FastAPI(
     title="RDPMS API",
     description="Remote Diagnostic and Predictive Maintenance System — RDSO/SPN/257/2025",
     version="1.1.0",
+    lifespan=lifespan,
 )
 
 
@@ -132,6 +152,8 @@ app.include_router(auth.router)
 app.include_router(webhook.router)
 # ── Decode utilities ──────────────────────────────────────────────────────────
 app.include_router(decode.router, dependencies=protected_route)
+app.include_router(config.router, dependencies=protected_route)
+app.include_router(statistics.router, dependencies=protected_route)
 
 
 @app.get("/", tags=["Health"])
