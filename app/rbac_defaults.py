@@ -841,6 +841,87 @@ def ensure_default_alert_causes(db: Session) -> None:
         {"cause_code": "MOTOR-OC", "cause_detail": "Motor overcurrent", "asset_type_id": "00", "alert_category": "FAILURE"},
         {"cause_code": "BAT-LOW", "cause_detail": "Battery voltage low", "asset_type_id": "41", "alert_category": "PREDICTIVE"},
         {"cause_code": "MAINT-EXCEED", "cause_detail": "Maintenance duration exceeded standard limit", "asset_type_id": None, "alert_category": "PREDICTIVE"},
+
+        # --- Phase 3 Annexure C Codes ---
+        # Point Machine Failures
+        {"cause_code": "PT_N_IND_VOLT_FAIL_AT_LOC", "cause_detail": "Point failed in Normal. Normal Indication Voltage at Loc is low/failed/detection break.", "asset_type_id": "00", "alert_category": "FAILURE"},
+        {"cause_code": "PT_R_IND_VOLT_FAIL_AT_LOC", "cause_detail": "Point failed in Reverse. Reverse Indication Voltage at Loc is low/failed/detection break.", "asset_type_id": "00", "alert_category": "FAILURE"},
+        {"cause_code": "PT_N_VOLT_CURR_FAIL", "cause_detail": "Point failed in Normal. Voltage or Current for normal operation in Loc failed.", "asset_type_id": "00", "alert_category": "FAILURE"},
+        {"cause_code": "PT_R_VOLT_CURR_FAIL", "cause_detail": "Point failed in Reverse. Voltage or Current for reverse operation in Loc failed.", "asset_type_id": "00", "alert_category": "FAILURE"},
+        {"cause_code": "PT_N_OBS", "cause_detail": "Point failed in Normal. Point in Obstruction.", "asset_type_id": "00", "alert_category": "FAILURE"},
+        {"cause_code": "PT_R_OBS", "cause_detail": "Point failed in Reverse. Point in Obstruction.", "asset_type_id": "00", "alert_category": "FAILURE"},
+        # Point Machine Predictive
+        {"cause_code": "PT_N_VOLT_CURR_LOW", "cause_detail": "Predictive Alert: Voltage or Current for Normal operation Low at Loc.", "asset_type_id": "00", "alert_category": "PREDICTIVE"},
+        {"cause_code": "PT_R_VOLT_CURR_LOW", "cause_detail": "Predictive Alert: Voltage or Current for Reverse operation Low at Loc.", "asset_type_id": "00", "alert_category": "PREDICTIVE"},
+        {"cause_code": "PT_N_TIME_HIGH", "cause_detail": "Predictive Alert: Normal Operation Time high.", "asset_type_id": "00", "alert_category": "PREDICTIVE"},
+        {"cause_code": "PT_R_TIME_HIGH", "cause_detail": "Predictive Alert: Reverse Operation Time high.", "asset_type_id": "00", "alert_category": "PREDICTIVE"},
+
+        # Track Circuit Failures
+        {"cause_code": "TC_SHORT", "cause_detail": "Track Ckt failed. TR Down. Possible shorting in track.", "asset_type_id": "20", "alert_category": "FAILURE"},
+        {"cause_code": "TC_TFC_OP_VOLT_FAIL", "cause_detail": "Track Ckt failed. TFC output voltage failed.", "asset_type_id": "20", "alert_category": "FAILURE"},
+        # Track Circuit Predictive
+        {"cause_code": "TC_TFC_IP_VOLT_LOW", "cause_detail": "Track Ckt predictive Alert: TFC input voltage Low/failed in Loc.", "asset_type_id": "20", "alert_category": "PREDICTIVE"},
+        {"cause_code": "TC_TFC_OP_VOLT_LOW", "cause_detail": "Track Ckt predictive Alert: Battery charging but TFC output voltage Low.", "asset_type_id": "20", "alert_category": "PREDICTIVE"},
+        {"cause_code": "TC_BT_CHG_CURR_HIGH", "cause_detail": "Track Ckt predictive Alert: Battery charging current high.", "asset_type_id": "20", "alert_category": "PREDICTIVE"},
+        {"cause_code": "TC_BT_CHG_CURR_LOW", "cause_detail": "Track Ckt predictive Alert: Battery not charging.", "asset_type_id": "20", "alert_category": "PREDICTIVE"},
+        {"cause_code": "TC_TR_VOLT_LOW", "cause_detail": "Track Ckt predictive Alert: Track Relay Voltage Low/Under energization.", "asset_type_id": "20", "alert_category": "PREDICTIVE"},
+        {"cause_code": "TC_TR_OVER_ENERIZATION", "cause_detail": "Track Ckt predictive Alert: Track Relay Voltage high/Over energization.", "asset_type_id": "20", "alert_category": "PREDICTIVE"},
+        {"cause_code": "TC_CH_RES_LOW", "cause_detail": "Track Ckt predictive Alert: Feed End Choke Resistance Low or short.", "asset_type_id": "20", "alert_category": "PREDICTIVE"},
+        {"cause_code": "TC_CH_RES_HIGH", "cause_detail": "Track Ckt predictive Alert: Feed End Choke Resistance High.", "asset_type_id": "20", "alert_category": "PREDICTIVE"},
+
+        # Signal Failures
+        {"cause_code": "SIG_RG_VOLT_CURR_FAIL", "cause_detail": "Sig failed. RG Aspect failed. HR DN. Signal blank in ON position.", "asset_type_id": "10", "alert_category": "FAILURE"},
+        {"cause_code": "SIG_HG_VOLT_CURR_FAIL", "cause_detail": "Sig failed. HG Aspect failed. Voltage of HPR OK at Loc but Voltage or Current failed.", "asset_type_id": "10", "alert_category": "FAILURE"},
+        {"cause_code": "SIG_HHG_VOLT_CURR_FAIL", "cause_detail": "Sig failed. HHG Aspect failed. Voltage of HPR OK at Loc but Voltage or Current failed.", "asset_type_id": "10", "alert_category": "FAILURE"},
+        {"cause_code": "SIG_DG_VOLT_CURR_FAIL", "cause_detail": "Sig failed. DG Aspect failed. Voltage of DPR OK at Loc but Voltage or Current failed.", "asset_type_id": "10", "alert_category": "FAILURE"},
+        # Signal Predictive
+        {"cause_code": "SIG_RG_VOLT_CURR_LOW", "cause_detail": "Sig predictive Alert: Voltage or Current of RG Aspect Low.", "asset_type_id": "10", "alert_category": "PREDICTIVE"},
+        {"cause_code": "SIG_HG_VOLT_CURR_LOW", "cause_detail": "Sig predictive Alert: Voltage or Current of HG Aspect Low.", "asset_type_id": "10", "alert_category": "PREDICTIVE"},
+        {"cause_code": "SIG_HHG_VOLT_CURR_LOW", "cause_detail": "Sig predictive Alert: Voltage or Current of HHG Aspect Low.", "asset_type_id": "10", "alert_category": "PREDICTIVE"},
+        {"cause_code": "SIG_DG_VOLT_CURR_LOW", "cause_detail": "Sig predictive Alert: Voltage or Current of DG Aspect Low.", "asset_type_id": "10", "alert_category": "PREDICTIVE"},
+        {"cause_code": "SIG_RG_CURR_HIGH", "cause_detail": "Sig predictive Alert: Current of RG Aspect high.", "asset_type_id": "10", "alert_category": "PREDICTIVE"},
+        {"cause_code": "SIG_HG_CURR_HIGH", "cause_detail": "Sig predictive Alert: Current of HG Aspect high.", "asset_type_id": "10", "alert_category": "PREDICTIVE"},
+        {"cause_code": "SIG_HHG_CURR_HIGH", "cause_detail": "Sig predictive Alert: Current of HHG Aspect high.", "asset_type_id": "10", "alert_category": "PREDICTIVE"},
+        {"cause_code": "SIG_DG_CURR_HIGH", "cause_detail": "Sig predictive Alert: Current of DG Aspect high.", "asset_type_id": "10", "alert_category": "PREDICTIVE"},
+
+        # IPS Failures
+        {"cause_code": "IPS_110_DC_VOLT_FAIL", "cause_detail": "IPS failed. 110 DC O/P Voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_110_AC_SIG_VOLT_FAIL", "cause_detail": "IPS failed. 110 AC Sig-1 O/P Voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_110_AC_TR_VOLT_FAIL", "cause_detail": "IPS failed. 110 AC TR-1 O/P Voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_IIP_VOLT_FAIL", "cause_detail": "IPS failed. IIP voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_SMR_1_VOLT_FAIL", "cause_detail": "IPS failed. SMR-1 voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_DC_R_INT_VOLT_FAIL", "cause_detail": "IPS failed. DC R INT voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_DC_R_EXT_VOLT_FAIL", "cause_detail": "IPS failed. DC R EXT voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_DC_AXLE_C_VOLT_FAIL", "cause_detail": "IPS failed. DC AXLE C voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_DC_PAN_IND_VOLT_FAIL", "cause_detail": "IPS failed. DC PAN IND voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_DC_BLOCK_LOCAL_VOLT_FAIL", "cause_detail": "IPS failed. DC BLOCK LOCAL voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_DC_HKT_MAG_VOLT_FAIL", "cause_detail": "IPS failed. DC HKT MAG voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_DC_BLOCK_LINE_UP_VOLT_FAIL", "cause_detail": "IPS failed. DC BLOCK LINE UP voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_DC_BLOCK_LINE_DN_VOLT_FAIL", "cause_detail": "IPS failed. DC BLOCK LINE DN voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_DC_BLOCK_TEL_UP_VOLT_FAIL", "cause_detail": "IPS failed. DC BLOCK TEL UP voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_DC_BLOCK_TEL_DN_VOLT_FAIL", "cause_detail": "IPS failed. DC BLOCK TEL DN voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_DC_DATALOG_VOLT_FAIL", "cause_detail": "IPS failed. DC DATALOG voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_DC_EI_VOLT_FAIL", "cause_detail": "IPS failed. DC EI voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_BATT_CHAR_CURR_FAIL", "cause_detail": "IPS failed. Battery Charging current failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        # IPS Predictive
+        {"cause_code": "IPS_110_DC_VOLT_LOW", "cause_detail": "IPS predictive Alert: 110 DC O/P Voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_110_AC_SIG_VOLT_LOW", "cause_detail": "IPS predictive Alert: 110 AC Sig-1 O/P Voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_110_AC_TR_VOLT_LOW", "cause_detail": "IPS predictive Alert: 110 AC TR-1 O/P Voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_BATT_CHAR_CURR_LOW", "cause_detail": "IPS predictive Alert: Battery Charging current low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_IIP_VOLT_LOW", "cause_detail": "IPS predictive Alert: IIP voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_SMR_1_VOLT_LOW", "cause_detail": "IPS predictive Alert: SMR-1 voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_DC_R_INT_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC R INT voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_DC_R_EXT_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC R EXT voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_DC_AXLE_C_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC AXLE C voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_DC_PAN_IND_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC PAN IND voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_DC_BLOCK_LOCAL_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC BLOCK LOCAL voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_DC_HKT_MAG_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC HKT MAG voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_DC_BLOCK_LINE_UP_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC BLOCK LINE UP voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_DC_BLOCK_LINE_DN_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC BLOCK LINE DN voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_DC_BLOCK_TEL_UP_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC BLOCK TEL UP voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_DC_BLOCK_TEL_DN_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC BLOCK TEL DN voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_DC_DATALOG_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC DATALOG voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_DC_EI_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC EI voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
     ]
     for c in default_causes:
         exists = db.query(AlertCauseMaster).filter(AlertCauseMaster.cause_code == c["cause_code"]).first()

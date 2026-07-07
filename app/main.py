@@ -20,6 +20,7 @@ from app.rbac_defaults import ensure_default_menus, ensure_default_roles_users_a
 from app.services.scheduler import scheduler
 from app.services.redis_service import redis_service
 from app.services.database_service import db_service
+from app.services.alert_processor import alert_processor
 from contextlib import asynccontextmanager
 import asyncio
 
@@ -63,8 +64,11 @@ async def lifespan(app: FastAPI):
     # Startup
     await db_service.initialize()
     scheduler.start()
+    alert_processor_task = asyncio.create_task(alert_processor.start())
     yield
     # Shutdown
+    await alert_processor.stop()
+    await alert_processor_task
     await scheduler.stop()
     await db_service.close()
     redis_service.close()

@@ -622,6 +622,8 @@ class AlertEventResponse(BaseModel):
     maintainer_name: Optional[str]
     designation: Optional[str]
     mobile: Optional[str]
+    escalation_level: Optional[str] = None
+    escalated_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     class Config:

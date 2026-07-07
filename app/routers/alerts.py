@@ -1239,6 +1239,20 @@ def create_alert_event(payload: AlertEventCreate, db: Session = Depends(get_db))
     """Create an alert event that appears in Alert Summary."""
     _validate_event_payload(payload, db)
 
+    # Check for duplicate active alert
+    existing = db.query(AlertEvent).filter(
+        AlertEvent.station_id == payload.station_id,
+        AlertEvent.asset_no == payload.asset_no.strip(),
+        AlertEvent.cause == payload.cause.strip().upper(),
+        AlertEvent.alert_status == "Active"
+    ).first()
+    
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Duplicate alert: Already active for {payload.asset_no} - {payload.cause}"
+        )
+
     # Suppress alert if asset is currently in active maintenance mode (unless it's a reminder alert)
     if payload.cause.strip().upper() != "MAINT-EXCEED":
         now = datetime.utcnow()
@@ -1275,6 +1289,15 @@ def create_alert_event(payload: AlertEventCreate, db: Session = Depends(get_db))
     db.add(record)
     db.commit()
     db.refresh(record)
+
+    # Track in alert engine
+    from app.services.alert_engine import alert_engine
+    key = f"{record.asset_no}:{record.cause}:{record.alert_type}"
+    alert_engine.active_alerts[key] = {
+        "alert_id": record.id,
+        "timestamp": record.alert_time
+    }
+
     return record
 
 
@@ -1289,6 +1312,20 @@ def update_alert_feedback(event_id: int, payload: AlertFeedbackUpdate, db: Sessi
 
     record.feedback = payload.feedback.upper()
     record.feedback_time = payload.feedback_time or datetime.utcnow()
+
+    # Auto-resolve on feedback submission
+    if record.feedback in {"T", "PT", "F", "M"}:
+        record.alert_status = "Cleared"
+        if not record.rectification_time:
+            record.rectification_time = datetime.utcnow()
+            
+        # Clear active alert tracking
+        from app.services.alert_engine import alert_engine
+        key = f"{record.asset_no}:{record.cause}:{record.alert_type}"
+        if key in alert_engine.active_alerts:
+            del alert_engine.active_alerts[key]
+        alert_engine.alert_history[key] = datetime.utcnow()
+
     db.commit()
     db.refresh(record)
     return record
@@ -1341,6 +1378,14 @@ def update_alert_rectification(
     if payload.remarks is not None:
         record.remark = payload.remarks
 
+    if record.alert_status == "Cleared":
+        # Clear active alert tracking
+        from app.services.alert_engine import alert_engine
+        key = f"{record.asset_no}:{record.cause}:{record.alert_type}"
+        if key in alert_engine.active_alerts:
+            del alert_engine.active_alerts[key]
+        alert_engine.alert_history[key] = datetime.utcnow()
+
     db.commit()
     db.refresh(record)
     return record
@@ -1369,3 +1414,44 @@ def update_alert_event(event_id: int, payload: AlertEventUpdate, db: Session = D
     db.commit()
     db.refresh(record)
     return record
+
+
+@router.post("/{event_id}/escalate", response_model=AlertEventResponse)
+def escalate_alert(
+    event_id: int,
+    target_level: Optional[str] = Query(None, regex="^(JE|SSE|ASTE|DSTE)$"),
+    db: Session = Depends(get_db)
+):
+    """Escalate an alert event to the next hierarchy level (JE -> SSE -> ASTE -> DSTE)."""
+    record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Alert event {event_id} not found")
+        
+    hierarchy = ["JE", "SSE", "ASTE", "DSTE"]
+    
+    if target_level and not isinstance(target_level, str):
+        target_level = None
+
+    if target_level:
+        escalate_to = target_level
+    else:
+        # Automatically escalate to next level
+        current = record.escalation_level
+        if not current:
+            escalate_to = "JE"
+        else:
+            try:
+                idx = hierarchy.index(current)
+                if idx < len(hierarchy) - 1:
+                    escalate_to = hierarchy[idx + 1]
+                else:
+                    escalate_to = hierarchy[-1]  # Keep at max level
+            except ValueError:
+                escalate_to = "JE"
+                
+    record.escalation_level = escalate_to
+    record.escalated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(record)
+    return record
+

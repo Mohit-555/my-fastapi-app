@@ -90,6 +90,7 @@ class Telemetry(Base):
     prt = Column(String(30), nullable=True)
     raw_payload = Column(Text, nullable=True)
     received_at = Column(DateTime, default=datetime.now(UTC))
+    is_processed = Column(Boolean, default=False, nullable=False, server_default="false", index=True)
 
     gateway = relationship("Gateway", back_populates="telemetry")
 
@@ -192,6 +193,8 @@ class AlertEvent(Base):
     maintainer_name = Column(String(100), nullable=True)
     designation = Column(String(100), nullable=True)
     mobile = Column(String(20), nullable=True)
+    escalation_level = Column(String(20), nullable=True)
+    escalated_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now(UTC))
     updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
 
