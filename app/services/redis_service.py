@@ -1,6 +1,7 @@
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+import json
 
 logger = logging.getLogger("redis_service")
 
@@ -414,6 +415,79 @@ class RedisService:
             "healthy": healthy,
             "faulty": total - healthy
         }
+
+    # ============ Asset Sync Results ============
+    
+    async def store_sync_results(self, results: Dict[str, Any]):
+        """Store asset sync results in Redis"""
+        key = f"sync:results:{datetime.now().strftime('%Y-%m-%d')}"
+        data = {
+            "timestamp": datetime.now().isoformat(),
+            "success": str(results["success"]),
+            "failed": str(results["failed"]),
+            "created_total": str(results["created_total"]),
+            "updated_total": str(results["updated_total"]),
+            "details": json.dumps(results["details"])
+        }
+        if not self.is_fallback:
+            try:
+                self.client.hset(key, mapping=data)
+                self.client.expire(key, 86400 * 7)  # Keep for 7 days
+                logger.info(f"Stored sync results in Redis: {results['success']} success, {results['failed']} failed")
+                return
+            except Exception as e:
+                logger.error(f"Error storing sync results in Redis: {e}")
+        
+        self._in_memory_db[key] = {
+            "data": data,
+            "expiry": datetime.now().timestamp() + 86400 * 7
+        }
+        logger.info(f"Stored sync results in in-memory cache: {results['success']} success, {results['failed']} failed")
+
+    async def get_sync_results(self, date: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Get sync results for a specific date"""
+        if not date:
+            date = datetime.now().strftime('%Y-%m-%d')
+        key = f"sync:results:{date}"
+        
+        if not self.is_fallback:
+            try:
+                data = self.client.hgetall(key)
+                if data:
+                    try:
+                        data["details"] = json.loads(data.get("details", "[]"))
+                    except Exception:
+                        data["details"] = []
+                    for field in ["success", "failed", "created_total", "updated_total"]:
+                        if field in data:
+                            try:
+                                data[field] = int(data[field])
+                            except ValueError:
+                                data[field] = 0
+                    return data
+                return None
+            except Exception as e:
+                logger.error(f"Error getting sync results from Redis: {e}")
+                return None
+        
+        record = self._in_memory_db.get(key)
+        if record:
+            if datetime.now().timestamp() > record.get("expiry", 0):
+                del self._in_memory_db[key]
+                return None
+            data = dict(record["data"])
+            try:
+                data["details"] = json.loads(data.get("details", "[]"))
+            except Exception:
+                data["details"] = []
+            for field in ["success", "failed", "created_total", "updated_total"]:
+                if field in data:
+                    try:
+                        data[field] = int(data[field])
+                    except ValueError:
+                        data[field] = 0
+            return data
+        return None
 
 # Singleton instance
 redis_service = RedisService()

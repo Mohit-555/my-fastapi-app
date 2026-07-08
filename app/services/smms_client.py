@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.database import settings
-from app.models.models import Asset, Station, Division, Zone, AssetParameter, ParameterConfig, Gateway
-from app.utils.logger import logger
+from app.models.models import Asset, Station, Division, Zone, AssetParameter, Gateway
+import logging
+logger = logging.getLogger("smms_client")
 
 class SMMSClient:
     """

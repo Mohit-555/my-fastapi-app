@@ -1,10 +1,23 @@
 import asyncio
 import json
 from typing import Dict, Set, Optional, List, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import WebSocket, WebSocketDisconnect
 import logging
+from dataclasses import dataclass
+
 logger = logging.getLogger("websocket_manager")
+
+@dataclass
+class ConnectionMetadata:
+    connection_id: str
+    station_code: str
+    websocket: WebSocket
+    connected_at: datetime
+    last_ping: datetime
+    last_pong: datetime
+    subscriptions: Dict[str, Any]
+    is_alive: bool = True
 
 class ConnectionManager:
     """
@@ -15,9 +28,11 @@ class ConnectionManager:
     def __init__(self):
         # station_code -> set of WebSocket connections
         self.station_connections: Dict[str, Set[WebSocket]] = {}
-        # connection_id -> {station_code, subscriptions}
-        self.connection_metadata: Dict[str, Dict[str, Any]] = {}
+        # connection_id -> ConnectionMetadata
+        self.connection_metadata: Dict[str, ConnectionMetadata] = {}
         self.connection_counter = 0
+        self.heartbeat_interval = 30  # seconds
+        self.heartbeat_timeout = 60  # seconds
     
     async def connect(self, websocket: WebSocket, station_code: str, client_info: Dict[str, Any] = None):
         """Accept a new WebSocket connection and register it"""
@@ -32,33 +47,90 @@ class ConnectionManager:
             self.station_connections[station_code] = set()
         self.station_connections[station_code].add(websocket)
         
-        # Store metadata
-        self.connection_metadata[connection_id] = {
-            "station_code": station_code,
-            "websocket": websocket,
-            "connected_at": datetime.now().isoformat(),
-            "subscriptions": client_info or {},
-            "last_activity": datetime.now()
-        }
+        # Store metadata with heartbeat tracking
+        now = datetime.now()
+        self.connection_metadata[connection_id] = ConnectionMetadata(
+            connection_id=connection_id,
+            station_code=station_code,
+            websocket=websocket,
+            connected_at=now,
+            last_ping=now,
+            last_pong=now,
+            subscriptions=client_info or {}
+        )
+        
+        # Start heartbeat for this connection
+        asyncio.create_task(self._heartbeat_loop(connection_id))
         
         logger.info(f"WebSocket connected: {connection_id} for station {station_code}")
         return connection_id
     
+    async def _heartbeat_loop(self, connection_id: str):
+        """Send periodic pings to keep connection alive"""
+        while True:
+            try:
+                await asyncio.sleep(self.heartbeat_interval)
+                
+                if connection_id not in self.connection_metadata:
+                    break
+                
+                metadata = self.connection_metadata[connection_id]
+                
+                # Check if connection is stale
+                now = datetime.now()
+                time_since_pong = (now - metadata.last_pong).total_seconds()
+                
+                if time_since_pong > self.heartbeat_timeout:
+                    logger.warning(f"Connection {connection_id} timed out (no pong for {time_since_pong}s)")
+                    await self._close_connection(connection_id)
+                    break
+                
+                # Send ping
+                await metadata.websocket.send_text(json.dumps({
+                    "type": "ping",
+                    "timestamp": now.isoformat()
+                }))
+                metadata.last_ping = now
+                
+            except Exception as e:
+                logger.error(f"Error in heartbeat loop for {connection_id}: {e}")
+                await self._close_connection(connection_id)
+                break
+    
+    async def _close_connection(self, connection_id: str):
+        """Close a connection and clean up"""
+        if connection_id not in self.connection_metadata:
+            return
+        
+        metadata = self.connection_metadata[connection_id]
+        
+        # Remove from station connections
+        if metadata.station_code in self.station_connections:
+            if metadata.websocket in self.station_connections[metadata.station_code]:
+                self.station_connections[metadata.station_code].remove(metadata.websocket)
+            if not self.station_connections[metadata.station_code]:
+                del self.station_connections[metadata.station_code]
+        
+        # Close websocket
+        try:
+            await metadata.websocket.close()
+        except Exception:
+            pass
+        
+        # Remove metadata
+        del self.connection_metadata[connection_id]
+        logger.info(f"Closed connection {connection_id}")
+        
+    def handle_pong(self, connection_id: str):
+        """Handle pong response from client"""
+        if connection_id in self.connection_metadata:
+            self.connection_metadata[connection_id].last_pong = datetime.now()
+    
     def disconnect(self, websocket: WebSocket):
         """Remove a disconnected WebSocket"""
-        for station_code, connections in self.station_connections.items():
-            if websocket in connections:
-                connections.remove(websocket)
-                # Clean up empty station sets
-                if not connections:
-                    del self.station_connections[station_code]
-                break
-        
-        # Clean up metadata
         for conn_id, meta in list(self.connection_metadata.items()):
-            if meta["websocket"] == websocket:
-                del self.connection_metadata[conn_id]
-                logger.info(f"WebSocket disconnected: {conn_id}")
+            if meta.websocket == websocket:
+                asyncio.create_task(self._close_connection(conn_id))
                 break
     
     async def broadcast_to_station(

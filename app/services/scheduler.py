@@ -4,6 +4,9 @@ from datetime import datetime, timedelta, date
 from typing import Dict, Any
 from app.services.statistics_service import statistics_service
 from app.services.redis_service import redis_service
+from app.services.smms_client import smms_client
+from app.models.models import Station
+from app.database import SessionLocal
 
 logger = logging.getLogger("scheduler")
 
@@ -13,6 +16,7 @@ class TaskScheduler:
     def __init__(self):
         self.tasks = []
         self.is_running = False
+        self.sync_lock = asyncio.Lock()  # Prevent overlapping syncs
     
     def start(self):
         """Start all background tasks in a non-blocking manner"""
@@ -32,6 +36,11 @@ class TaskScheduler:
         # Cleanup old Redis keys
         self.tasks.append(
             asyncio.create_task(self._cleanup_task())
+        )
+        
+        # Asset sync (NEW)
+        self.tasks.append(
+            asyncio.create_task(self._asset_sync_task())
         )
     
     async def stop(self):
@@ -99,6 +108,93 @@ class TaskScheduler:
     async def _aggregate_daily_stats(self, date_val: date):
         """Aggregate statistics for a specific date"""
         logger.info(f"Aggregating daily statistics for {date_val}")
+
+    async def _asset_sync_task(self):
+        """Synchronize assets from SMMS daily at 2:00 AM"""
+        while self.is_running:
+            try:
+                # Calculate next run (2:00 AM)
+                now = datetime.now()
+                next_run = now.replace(hour=2, minute=0, second=0, microsecond=0)
+                if now >= next_run:
+                    next_run = next_run + timedelta(days=1)
+                
+                wait_seconds = (next_run - now).total_seconds()
+                logger.info(f"Asset sync scheduled in {wait_seconds/3600:.1f} hours")
+                
+                await asyncio.sleep(wait_seconds)
+                
+                # Perform sync
+                async with self.sync_lock:
+                    await self._perform_asset_sync()
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in asset sync task: {e}")
+                await asyncio.sleep(300)  # Retry after 5 minutes on error
+    
+    async def _perform_asset_sync(self):
+        """Perform asset synchronization for all active stations"""
+        logger.info("Starting scheduled asset sync from SMMS")
+        
+        db = SessionLocal()
+        try:
+            # Get all active stations
+            stations = db.query(Station).filter(Station.is_active == True).all()
+            logger.info(f"Syncing assets for {len(stations)} stations")
+            
+            results = {
+                "success": 0,
+                "failed": 0,
+                "created_total": 0,
+                "updated_total": 0,
+                "details": []
+            }
+            
+            for station in stations:
+                try:
+                    result = await smms_client.sync_assets_for_station(
+                        station.station_code, 
+                        db
+                    )
+                    
+                    if result.get("status") == "success":
+                        results["success"] += 1
+                        results["created_total"] += result.get("created", 0)
+                        results["updated_total"] += result.get("updated", 0)
+                        results["details"].append({
+                            "station": station.station_code,
+                            "status": "success",
+                            "created": result.get("created", 0),
+                            "updated": result.get("updated", 0)
+                        })
+                    else:
+                        results["failed"] += 1
+                        results["details"].append({
+                            "station": station.station_code,
+                            "status": "failed",
+                            "error": result.get("message", "Unknown error")
+                        })
+                        
+                except Exception as e:
+                    results["failed"] += 1
+                    results["details"].append({
+                        "station": station.station_code,
+                        "status": "failed",
+                        "error": str(e)
+                    })
+                    logger.error(f"Error syncing station {station.station_code}: {e}")
+            
+            # Store sync results in Redis for monitoring
+            await redis_service.store_sync_results(results)
+            
+            logger.info(f"Asset sync completed: {results['success']} succeeded, {results['failed']} failed")
+            
+        except Exception as e:
+            logger.error(f"Asset sync task failed: {e}")
+        finally:
+            db.close()
 
 # Singleton instance
 scheduler = TaskScheduler()

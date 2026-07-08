@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, ForeignKey, Text, UniqueConstraint, Enum, JSON
+from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, ForeignKey, Text, UniqueConstraint, Enum, JSON, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime,UTC
 from typing import Optional
@@ -193,12 +193,18 @@ class AlertEvent(Base):
     maintainer_name = Column(String(100), nullable=True)
     designation = Column(String(100), nullable=True)
     mobile = Column(String(20), nullable=True)
-    escalation_level = Column(String(20), nullable=True)
+    escalation_level = Column(String(20), nullable=True, index=True)
     escalated_at = Column(DateTime, nullable=True)
     escalated_to = Column(String(100), nullable=True)
-    vendor_code = Column(String(20), default="XYZ", nullable=True)
+    vendor_code = Column(String(20), default="XYZ", nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.now(UTC))
     updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
+
+    __table_args__ = (
+        Index('idx_alerts_time_status', 'alert_time', 'alert_status'),
+        Index('idx_alerts_station_time', 'station_id', 'alert_time'),
+        Index('idx_alerts_asset_cause', 'asset_no', 'cause'),
+    )
 
     station = relationship("Station", back_populates="alert_events")
     asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True, index=True)
@@ -487,8 +493,8 @@ class Asset(Base):
     attr1 = Column(String(100))   # sub-asset type
     attr2 = Column(String(100))
     location = Column(String(200))
-    is_active = Column(Boolean, default=True)
-    vendor_code = Column(String(20), default="XYZ", nullable=True)
+    is_active = Column(Boolean, default=True, index=True)
+    vendor_code = Column(String(20), default="XYZ", nullable=True, index=True)
     last_sync = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now(UTC))
     updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
@@ -537,4 +543,8 @@ class AssetParameter(Base):
     updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
 
     asset = relationship("Asset", back_populates="parameters")
+
+    __table_args__ = (
+        Index('idx_asset_params_lookup', 'asset_id', 'para_id'),
+    )
 

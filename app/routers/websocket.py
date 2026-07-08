@@ -47,6 +47,9 @@ async def websocket_telemetry(
             data = await websocket.receive_text()
             try:
                 message = json.loads(data)
+                if message.get("type") == "pong":
+                    websocket_manager.handle_pong(connection_id)
+                    continue
                 await handle_client_message(websocket, message, station_code)
             except json.JSONDecodeError:
                 await websocket.send_text(json.dumps({
@@ -85,6 +88,9 @@ async def websocket_alerts(
             data = await websocket.receive_text()
             try:
                 message = json.loads(data)
+                if message.get("type") == "pong":
+                    websocket_manager.handle_pong(connection_id)
+                    continue
                 if message.get("action") == "acknowledge":
                     await handle_acknowledgement(websocket, message, station_code)
                 elif message.get("action") == "subscribe":
@@ -122,7 +128,14 @@ async def websocket_health(
         
         while True:
             # Keep connection alive
-            await websocket.receive_text()
+            data = await websocket.receive_text()
+            try:
+                message = json.loads(data)
+                if message.get("type") == "pong":
+                    websocket_manager.handle_pong(connection_id)
+                    continue
+            except json.JSONDecodeError:
+                pass
                 
     except WebSocketDisconnect:
         websocket_manager.disconnect(websocket)
