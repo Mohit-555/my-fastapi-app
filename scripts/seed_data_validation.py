@@ -10,7 +10,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import SessionLocal, settings
 from app.models.models import AssetTypeMaster, Asset, AlertCauseMaster
-from app.models.database_models import ParameterConfig
 from app.constants import ASSET_TYPE_MAP
 import logging
 logger = logging.getLogger("seed_validation")
@@ -36,8 +35,8 @@ def validate_seed_data():
         
         # 2. Check parameter configurations
         logger.info("Checking parameter configurations...")
-        param_configs = db.query(ParameterConfig).all()
-        param_para_ids = {p.para_id.upper() for p in param_configs}
+        from app.services.parameter_config_service import param_config_service
+        param_para_ids = {p.para_id.upper() for p in param_config_service.config_cache.values()}
         
         expected_params = {
             "0001000C", "0001000D", "0001120A", "0001120B",  # Point Machine
@@ -80,7 +79,7 @@ def validate_seed_data():
         logger.info("Seed Data Validation Summary")
         logger.info("=" * 50)
         logger.info(f"Asset Types: {len(db_types)} found, {len(expected_types)} expected")
-        logger.info(f"Parameter Configs: {len(param_configs)} found")
+        logger.info(f"Parameter Configs: {len(param_para_ids)} found")
         logger.info(f"Active Assets: {len(assets)}")
         logger.info(f"Alert Causes: {cause_count}")
         
@@ -112,7 +111,7 @@ def seed_missing_data():
     try:
         # Seed asset types if missing
         from app.constants import ASSET_TYPE_MAP
-        for hex_id, (code, name, _) in ASSET_TYPE_MAP.items():
+        for hex_id, (code, name) in ASSET_TYPE_MAP.items():
             existing = db.query(AssetTypeMaster).filter(
                 AssetTypeMaster.asset_type_id == hex_id
             ).first()
