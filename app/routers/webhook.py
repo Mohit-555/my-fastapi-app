@@ -2,6 +2,7 @@ import re
 import json
 import math
 import logging
+import asyncio
 from datetime import datetime, timezone
 from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Security
@@ -14,6 +15,8 @@ from app.database import get_db, settings
 from app.models.models import Gateway, Telemetry, AssetParameter, Asset, AlertEvent
 from app.routers.gateway import _resolve_station_from_stngw_id, _offset_event_timestamp
 from app.services.parameter_config_service import param_config_service
+from app.services.redis_service import redis_service
+from app.services.websocket_manager import websocket_manager
 
 router = APIRouter(prefix="/webhook", tags=["Webhook Ingestion"])
 logger = logging.getLogger("webhook")
@@ -283,6 +286,18 @@ def receive_fixed_parameters(
 
             # Pre-resolve existing keys & known parameters
             candidate_para_ids = {p.para_id.upper() for p in payload.parameters if p.para_id}
+            
+            # Query parameter ID to asset number code mapping
+            asset_mappings = {}
+            if candidate_para_ids:
+                rows = (
+                    db.query(AssetParameter.para_id, Asset.asset_number_code)
+                    .join(Asset, Asset.id == AssetParameter.asset_id)
+                    .filter(AssetParameter.para_id.in_(candidate_para_ids))
+                    .all()
+                )
+                asset_mappings = {r.para_id.upper(): r.asset_number_code for r in rows}
+
             existing_keys = set()
             if candidate_para_ids:
                 existing_rows = (
@@ -356,6 +371,24 @@ def receive_fixed_parameters(
             if records_to_insert:
                 _batch_insert(records_to_insert, db)
             db.commit()
+
+            # Broadcast to WebSocket
+            station_code = gateway.station.station_code if (gateway and gateway.station) else None
+            if station_code and records_to_insert:
+                for param in payload.parameters:
+                    if param.prv:
+                        para_id_upper = param.para_id.upper()
+                        asset_number_code = asset_mappings.get(para_id_upper)
+                        asyncio.create_task(
+                            websocket_manager.broadcast_parameter_update(
+                                stngw_id=stngw_id,
+                                station_code=station_code,
+                                para_id=para_id_upper,
+                                value=param.prv[-1],
+                                timestamp=param.prt[-1],
+                                asset_number_code=asset_number_code
+                            )
+                        )
             
             status_msg = "success"
             if errors:
@@ -397,6 +430,18 @@ def receive_event_parameters(
             gateway = _get_or_create_gateway_with_station(stngw_id, db)
 
             candidate_para_ids = {p.para_id.upper() for p in payload.parameters if p.para_id}
+
+            # Query parameter ID to asset number code mapping
+            asset_mappings = {}
+            if candidate_para_ids:
+                rows = (
+                    db.query(AssetParameter.para_id, Asset.asset_number_code)
+                    .join(Asset, Asset.id == AssetParameter.asset_id)
+                    .filter(AssetParameter.para_id.in_(candidate_para_ids))
+                    .all()
+                )
+                asset_mappings = {r.para_id.upper(): r.asset_number_code for r in rows}
+
             existing_keys = set()
             if candidate_para_ids:
                 existing_rows = (
@@ -461,6 +506,24 @@ def receive_event_parameters(
             if records_to_insert:
                 _batch_insert(records_to_insert, db)
             db.commit()
+
+            # Broadcast to WebSocket
+            station_code = gateway.station.station_code if (gateway and gateway.station) else None
+            if station_code and records_to_insert:
+                for param in payload.parameters:
+                    if param.prv:
+                        para_id_upper = param.para_id.upper()
+                        asset_number_code = asset_mappings.get(para_id_upper)
+                        asyncio.create_task(
+                            websocket_manager.broadcast_parameter_update(
+                                stngw_id=stngw_id,
+                                station_code=station_code,
+                                para_id=para_id_upper,
+                                value=param.prv[-1],
+                                timestamp=param.prt,
+                                asset_number_code=asset_number_code
+                            )
+                        )
             
             status_msg = "success"
             if errors:
@@ -507,6 +570,23 @@ def receive_health_data(
             # Gateway health check
             if payload.stngw_health:
                 is_healthy = (payload.stngw_health.stngwh_id == "00")
+                
+                # Update health in cache
+                asyncio.create_task(redis_service.store_gateway_health(stngw_id, is_healthy, payload.stngw_health.stngwh_t))
+                
+                # Broadcast gateway health update
+                station_code = gateway.station.station_code if (gateway and gateway.station) else None
+                if station_code:
+                    asyncio.create_task(
+                        websocket_manager.broadcast_health_update(
+                            station_code=station_code,
+                            device_type="gateway",
+                            device_id=stngw_id,
+                            status="healthy" if is_healthy else "faulty",
+                            timestamp=payload.stngw_health.stngwh_t
+                        )
+                    )
+
                 if is_healthy:
                     # Clear active GATEWAY_FAULTY alert for this station
                     existing_alerts = db.query(AlertEvent).filter(
@@ -555,6 +635,22 @@ def receive_health_data(
             if payload.sensor_health:
                 for sensor in payload.sensor_health:
                     is_healthy = (sensor.sh_id == "00")
+                    
+                    # Store health in cache
+                    asyncio.create_task(redis_service.store_sensor_health(stngw_id, sensor.para_id, is_healthy, sensor.sh_t))
+                    
+                    # Broadcast sensor health update
+                    station_code = gateway.station.station_code if (gateway and gateway.station) else None
+                    if station_code:
+                        asyncio.create_task(
+                            websocket_manager.broadcast_health_update(
+                                station_code=station_code,
+                                device_type="sensor",
+                                device_id=sensor.para_id.upper(),
+                                status="healthy" if is_healthy else "faulty",
+                                timestamp=sensor.sh_t
+                            )
+                        )
                     
                     ap = db.query(AssetParameter).filter(AssetParameter.para_id == sensor.para_id.upper()).first()
                     asset_id = ap.asset_id if ap else None

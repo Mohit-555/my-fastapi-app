@@ -1,5 +1,6 @@
 import csv
 import io
+import asyncio
 from datetime import date, datetime, time
 from typing import List, Optional
 
@@ -7,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
+
+from app.services.websocket_manager import websocket_manager
 
 from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP, PARAMETER_TYPE_MAP
 from app.database import get_db
@@ -1234,6 +1237,27 @@ def list_alert_events(
     )
 
 
+def _broadcast_alert_update(record: AlertEvent):
+    station_code = record.station.station_code if (record and record.station) else None
+    if station_code:
+        alert_data = {
+            "id": record.id,
+            "alert_type": record.alert_type,
+            "asset_no": record.asset_no,
+            "cause": record.cause,
+            "cause_detail": record.remark or "",
+            "time": record.alert_time.isoformat() if record.alert_time else datetime.utcnow().isoformat(),
+            "alert_status": record.alert_status,
+            "acknowledged": record.acknowledged
+        }
+        asyncio.create_task(
+            websocket_manager.broadcast_alert(
+                alert=alert_data,
+                station_code=station_code
+            )
+        )
+
+
 @router.post("/events", response_model=AlertEventResponse, status_code=status.HTTP_201_CREATED)
 def create_alert_event(payload: AlertEventCreate, db: Session = Depends(get_db)):
     """Create an alert event that appears in Alert Summary."""
@@ -1298,6 +1322,7 @@ def create_alert_event(payload: AlertEventCreate, db: Session = Depends(get_db))
         "timestamp": record.alert_time
     }
 
+    _broadcast_alert_update(record)
     return record
 
 
@@ -1328,6 +1353,7 @@ def update_alert_feedback(event_id: int, payload: AlertFeedbackUpdate, db: Sessi
 
     db.commit()
     db.refresh(record)
+    _broadcast_alert_update(record)
     return record
 
 
@@ -1341,6 +1367,7 @@ def update_alert_remark(event_id: int, payload: AlertRemarkUpdate, db: Session =
     record.remark = payload.remark
     db.commit()
     db.refresh(record)
+    _broadcast_alert_update(record)
     return record
 
 
@@ -1356,6 +1383,7 @@ def acknowledge_alert(event_id: int, db: Session = Depends(get_db)):
         record.alert_status = "Acknowledged"
     db.commit()
     db.refresh(record)
+    _broadcast_alert_update(record)
     return record
 
 
@@ -1388,6 +1416,7 @@ def update_alert_rectification(
 
     db.commit()
     db.refresh(record)
+    _broadcast_alert_update(record)
     return record
 
 
@@ -1453,5 +1482,6 @@ def escalate_alert(
     record.escalated_at = datetime.utcnow()
     db.commit()
     db.refresh(record)
+    _broadcast_alert_update(record)
     return record
 

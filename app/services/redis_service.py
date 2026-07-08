@@ -311,5 +311,109 @@ class RedisService:
             return record["data"]
         return None
 
+    async def get_sensor_health_summary(self, stngw_id: str) -> Dict[str, Any]:
+        """Get summary of sensor health for a gateway"""
+        stngw_id = stngw_id.upper()
+        total = 0
+        healthy = 0
+        
+        if not self.is_fallback:
+            try:
+                pattern = f"health:sensor:{stngw_id}:*"
+                for key in self.client.scan_iter(pattern):
+                    total += 1
+                    data = self.client.hgetall(key)
+                    if data and data.get("status") == "healthy":
+                        healthy += 1
+                return {
+                    "total": total,
+                    "healthy": healthy,
+                    "faulty": total - healthy
+                }
+            except Exception as e:
+                logger.error(f"Error getting sensor health summary: {e}")
+        
+        # Fallback to in-memory
+        prefix = f"health:sensor:{stngw_id}:"
+        now = datetime.now().timestamp()
+        for key, record in list(self._in_memory_db.items()):
+            if key.startswith(prefix):
+                # Check expiry
+                if now > record.get("expiry", 0):
+                    del self._in_memory_db[key]
+                    continue
+                total += 1
+                data = record.get("data", {})
+                if data.get("status") == "healthy":
+                    healthy += 1
+        
+        return {
+            "total": total,
+            "healthy": healthy,
+            "faulty": total - healthy
+        }
+
+    async def get_sensor_health(self, stngw_id: str, para_id: str) -> Optional[Dict[str, Any]]:
+        """Get health status for a specific sensor"""
+        stngw_id = stngw_id.upper()
+        para_id = para_id.upper()
+        key = f"health:sensor:{stngw_id}:{para_id}"
+        
+        if not self.is_fallback:
+            try:
+                data = self.client.hgetall(key)
+                return data if data else None
+            except Exception as e:
+                logger.error(f"Error getting sensor health: {e}")
+                return None
+        
+        record = self._in_memory_db.get(key)
+        if record:
+            if datetime.now().timestamp() > record.get("expiry", 0):
+                del self._in_memory_db[key]
+                return None
+            return record.get("data")
+        return None
+
+    async def get_iot_health_summary(self, stngw_id: str) -> Dict[str, Any]:
+        """Get summary of IoT health for a gateway"""
+        stngw_id = stngw_id.upper()
+        total = 0
+        healthy = 0
+        
+        if not self.is_fallback:
+            try:
+                pattern = f"health:iot:{stngw_id}:*"
+                for key in self.client.scan_iter(pattern):
+                    total += 1
+                    data = self.client.hgetall(key)
+                    if data and data.get("status") == "healthy":
+                        healthy += 1
+                return {
+                    "total": total,
+                    "healthy": healthy,
+                    "faulty": total - healthy
+                }
+            except Exception as e:
+                logger.error(f"Error getting IoT health summary: {e}")
+        
+        prefix = f"health:iot:{stngw_id}:"
+        now = datetime.now().timestamp()
+        for key, record in list(self._in_memory_db.items()):
+            if key.startswith(prefix):
+                if now > record.get("expiry", 0):
+                    del self._in_memory_db[key]
+                    continue
+                total += 1
+                data = record.get("data", {})
+                if data.get("status") == "healthy":
+                    healthy += 1
+        
+        return {
+            "total": total,
+            "healthy": healthy,
+            "faulty": total - healthy
+        }
+
 # Singleton instance
 redis_service = RedisService()
