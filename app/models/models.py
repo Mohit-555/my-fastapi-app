@@ -195,6 +195,8 @@ class AlertEvent(Base):
     mobile = Column(String(20), nullable=True)
     escalation_level = Column(String(20), nullable=True)
     escalated_at = Column(DateTime, nullable=True)
+    escalated_to = Column(String(100), nullable=True)
+    vendor_code = Column(String(20), default="XYZ", nullable=True)
     created_at = Column(DateTime, default=datetime.now(UTC))
     updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
 
@@ -486,6 +488,8 @@ class Asset(Base):
     attr2 = Column(String(100))
     location = Column(String(200))
     is_active = Column(Boolean, default=True)
+    vendor_code = Column(String(20), default="XYZ", nullable=True)
+    last_sync = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now(UTC))
     updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
 

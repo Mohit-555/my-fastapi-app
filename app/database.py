@@ -12,6 +12,10 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
     API_KEY: str = "your-secret-api-key-here-change-in-production"
+    SMMS_BASE_URL: str = "https://smms.indianrailways.gov.in/api"
+    SMMS_API_KEY: str = "your-secret-api-key-here-change-in-production"
+    VENDOR_CODE: str = "XYZ"
+    VENDOR_NAME: str = "XYZ Signalling Ltd"
 
     @property
     def database_url(self) -> str:
