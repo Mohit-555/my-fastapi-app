@@ -42,6 +42,12 @@ class TaskScheduler:
         self.tasks.append(
             asyncio.create_task(self._asset_sync_task())
         )
+
+        # Maintenance-mode reminder alerts (Annexure D §5.7) — must fire
+        # automatically, not only when someone calls the endpoint by hand.
+        self.tasks.append(
+            asyncio.create_task(self._maintenance_reminder_task())
+        )
     
     async def stop(self):
         """Stop all background tasks"""
@@ -134,6 +140,32 @@ class TaskScheduler:
                 logger.error(f"Error in asset sync task: {e}")
                 await asyncio.sleep(300)  # Retry after 5 minutes on error
     
+    async def _maintenance_reminder_task(self):
+        """
+        Annexure D §5.7: if a maintainer forgets to clear maintenance mode,
+        RDPMS must keep generating a regular alert every standard interval
+        (60 min Track Circuit/Point Machine, 45 min Signal) advising staff
+        that maintenance mode is still active. Runs the same check every
+        60 seconds so no active maintenance window can silently overrun.
+        """
+        from app.routers.maintenance import check_maintenance_reminders
+
+        while self.is_running:
+            try:
+                await asyncio.sleep(60)
+                db = SessionLocal()
+                try:
+                    generated = check_maintenance_reminders(db=db)
+                    if generated:
+                        logger.info(f"Maintenance-mode reminder alerts generated: {len(generated)}")
+                finally:
+                    db.close()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in maintenance reminder task: {e}")
+                await asyncio.sleep(60)
+
     async def _perform_asset_sync(self):
         """Perform asset synchronization for all active stations"""
         logger.info("Starting scheduled asset sync from SMMS")

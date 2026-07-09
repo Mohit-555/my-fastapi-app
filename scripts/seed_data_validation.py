@@ -39,10 +39,10 @@ def validate_seed_data():
         param_para_ids = {p.para_id.upper() for p in param_config_service.config_cache.values()}
         
         expected_params = {
-            "0001000C", "0001000D", "0001120A", "0001120B",  # Point Machine
-            "DCT00201", "DCT00202", "DCT00203",  # Track Circuit
-            "SIG00301", "SIG00302",  # Signal
-            "RR000101", "RR000102",  # Relay Room
+            "0001000C", "0001000D", "0001200A",  # Point Machine
+            "20012001", "20012002",              # Track Circuit
+            "10013001",                          # Signal
+            "F0015001", "F0015102",              # Relay Room
         }
         
         missing_params = expected_params - param_para_ids

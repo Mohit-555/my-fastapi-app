@@ -50,10 +50,56 @@ ASSET_TYPE_DISPLAY_GROUPS = {
     "Battery":          ["60"],
 }
 
-# Parameter type lookup from RDSO/SPN/257/2025 Annexure B
-# Maps parameter_type_id hex → (param_code, param_name, unit)
-# Bytes 5–6 of para_id
-PARAMETER_TYPE_MAP = {
+# ═══════════════════════════════════════════════════════════════════════════
+# NOTE ON parameter_type_id vs parameter_representation_id (Annexure A §3(l)/(m))
+#
+# Per spec, byte 3 of para_id (parameter_type_id) is a GENERIC measurement-type
+# code shared by every asset (Current DC=00, Voltage DC=20, Digital=40,
+# Temperature=50, Vibration=60, ... — see GENERIC_PARAMETER_TYPE_MAP below).
+# Byte 4 (parameter_representation_id) is what actually varies per asset and
+# carries the specific parameter's identity (e.g. IPS repr 0x00 = "IPS 110 DC
+# O/P Voltage"; DC Track Circuit repr 0x00 means something else entirely).
+#
+# ASSET_PARAMETER_CATALOG below (previously misnamed PARAMETER_TYPE_MAP) is
+# kept ONLY as a flat, best-effort, asset-agnostic lookup for quick decode/
+# display convenience — it is NOT spec-compliant, because representation_id
+# is asset-type-scoped, not global (two different assets can legitimately
+# reuse the same representation byte for different parameters). Do not use
+# this table to drive alert logic. For anything logic/alert-related, resolve
+# the full 4-byte para_id through
+# app.services.parameter_config_service.param_config_service, which is keyed
+# correctly by (asset_type_id, asset_number_id, parameter_type_id,
+# parameter_representation_id) together.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Generic parameter_type_id map — Annexure A §3(l). Same meaning for every asset.
+GENERIC_PARAMETER_TYPE_MAP = {
+    "00": ("CUR_DC_A",  "Current DC", "A"),
+    "01": ("CUR_DC_MA", "Current DC", "mA"),
+    "10": ("CUR_AC_A",  "Current AC", "A"),
+    "11": ("CUR_AC_MA", "Current AC", "mA"),
+    "20": ("VOLT_DC_V", "Voltage DC", "V"),
+    "21": ("VOLT_DC_MV","Voltage DC", "mV"),
+    "30": ("VOLT_AC_V", "Voltage AC", "V"),
+    "31": ("VOLT_AC_MV","Voltage AC", "mV"),
+    "40": ("DIGITAL",   "Digital",    ""),
+    "50": ("TEMP_C",    "Temperature","°C"),
+    "51": ("HUMIDITY",  "Humidity",   "%"),
+    "60": ("VIBRATION", "Vibration",  ""),
+    "70": ("FREQ_KHZ",  "Frequency",  "kHz"),
+    "71": ("FREQ_HZ",   "Frequency",  "Hz"),
+    "80": ("RES_OHM",   "Resistance", "Ohm"),
+    "81": ("RES_KOHM",  "Resistance", "KOhm"),
+    "90": ("TIME_S",    "Time",       "seconds"),
+    "91": ("TIME_MS",   "Time",       "milliseconds"),
+    "A0": ("STRING",    "String",     ""),
+}
+
+# Asset-specific parameter catalogue — NOT the spec's parameter_type_id.
+# (kept under its old name PARAMETER_TYPE_MAP as an alias below for
+# backwards compatibility with existing imports; new code should prefer
+# ASSET_PARAMETER_CATALOG / GENERIC_PARAMETER_TYPE_MAP / param_config_service.)
+ASSET_PARAMETER_CATALOG = {
     # ── Point Machine (asset 00) ──────────────────────────────────────────────
     "01": ("AVG_CUR",   "Avg Current",          "A"),
     "02": ("PEAK_CUR",  "Peak Current",          "A"),
@@ -111,6 +157,11 @@ PARAMETER_TYPE_MAP = {
     "F2": ("VIBRATION", "Vibration",              "g"),
     "FF": ("RAW",       "Raw Value",              ""),
 }
+
+# Backwards-compat alias — existing imports of PARAMETER_TYPE_MAP keep working.
+# See the note above: this is really the asset-specific catalogue, not the
+# spec's generic parameter_type_id map (that's GENERIC_PARAMETER_TYPE_MAP).
+PARAMETER_TYPE_MAP = ASSET_PARAMETER_CATALOG
 
 # Parameter representation lookup
 # Byte 8 of para_id — how the value is encoded / aggregated
