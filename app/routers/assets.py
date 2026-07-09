@@ -67,6 +67,25 @@ def _resolve_asset_types_to_hex(db: Session, asset_type: Optional[str]) -> Optio
         return None
 
     parts = [p.strip() for p in asset_type.split(",") if p.strip()]
+    
+    # Prioritize resolving parts as hex codes or display group names.
+    group_map = {k.lower(): v for k, v in ASSET_TYPE_DISPLAY_GROUPS.items()}
+    hex_list = []
+    has_resolved = False
+    for part in parts:
+        part_upper = part.upper()
+        part_lower = part.lower()
+        if part_upper in ASSET_TYPE_MAP:
+            hex_list.append(part_upper)
+            has_resolved = True
+        elif part_lower in group_map:
+            hex_list.extend(group_map[part_lower])
+            has_resolved = True
+            
+    if has_resolved:
+        return ",".join(hex_list) if hex_list else "IMPOSSIBLE_HEX"
+
+    # Fallback to database IDs if not matched by hex/group name and all parts are digits
     if all(p.isdigit() for p in parts):
         ids = [int(p) for p in parts]
         db_types = db.query(AssetTypeMaster).filter(AssetTypeMaster.id.in_(ids)).all()
@@ -75,16 +94,6 @@ def _resolve_asset_types_to_hex(db: Session, asset_type: Optional[str]) -> Optio
             return "IMPOSSIBLE_HEX"
         return ",".join(hexes)
 
-    hex_list = []
-    for part in parts:
-        if part.upper() in ASSET_TYPE_MAP:
-            hex_list.append(part.upper())
-        else:
-            group_hexes = ASSET_TYPE_DISPLAY_GROUPS.get(part)
-            if group_hexes:
-                hex_list.extend(group_hexes)
-    if hex_list:
-        return ",".join(hex_list)
     return None
 
 
@@ -475,30 +484,45 @@ def get_asset_filters(db: Session = Depends(get_db)):
 
     flat_asset_types = []
     member_id = 1
+    seen_combinations = set()
+
     for group_label, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
+        # Find all available combinations matching any hex in this display group
+        group_combs = []
         for h in hexes:
             t = db_types_map.get(h.upper())
             if t:
                 for comb in available_combinations:
                     comb_hex = comb[0]
                     if comb_hex.upper() == h.upper():
-                        flat_asset_types.append(AssetTypeOption(
-                            id=member_id,
-                            hex_id=h,
-                            code=t.asset_type_code,
-                            label=t.asset_type_name,
-                            group_label=group_label,
-                            zone_id=comb[1],
-                            zone_code=comb[2],
-                            zone_name=comb[3],
-                            division_id=comb[4],
-                            division_code=comb[5],
-                            division_name=comb[6],
-                            station_id=comb[7],
-                            station_code=comb[8],
-                            station_name=comb[9],
-                        ))
-                        member_id += 1
+                        group_combs.append((t, comb))
+
+        # De-duplicate by (group_label, zone_id, division_id, station_id)
+        for t, comb in group_combs:
+            comb_key = (group_label, comb[1], comb[4], comb[7])
+            if comb_key not in seen_combinations:
+                seen_combinations.add(comb_key)
+                
+                # hex_id represents all hex codes in this group, separated by commas
+                group_hex_str = ",".join(hexes)
+                
+                flat_asset_types.append(AssetTypeOption(
+                    id=member_id,
+                    hex_id=group_hex_str,
+                    code=t.asset_type_code,
+                    label=group_label,
+                    group_label=group_label,
+                    zone_id=comb[1],
+                    zone_code=comb[2],
+                    zone_name=comb[3],
+                    division_id=comb[4],
+                    division_code=comb[5],
+                    division_name=comb[6],
+                    station_id=comb[7],
+                    station_code=comb[8],
+                    station_name=comb[9],
+                ))
+                member_id += 1
 
     zones_by_id = {z.id: z for z in zones}
     divisions_by_id = {d.id: d for d in divisions}
