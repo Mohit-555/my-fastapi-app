@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from app.limiter import limiter
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 
@@ -43,7 +44,8 @@ def _issue_tokens(user: User, db: Session, remember_me: bool = False) -> TokenRe
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)
-def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def register(request: Request, payload: UserRegisterRequest, db: Session = Depends(get_db)):
     if payload.password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
@@ -72,7 +74,8 @@ def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(payload: UserLoginRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def login(request: Request, payload: UserLoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.employee_id == payload.employee_id).first()
 
     if not user or not verify_password(payload.password, user.hashed_password):
@@ -105,7 +108,8 @@ def login(payload: UserLoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-def refresh(payload: RefreshTokenRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def refresh(request: Request, payload: RefreshTokenRequest, db: Session = Depends(get_db)):
     token_hash = hash_refresh_token(payload.refresh_token)
     refresh_token = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
 
@@ -158,7 +162,9 @@ def get_me(
 
 
 @router.post("/change-password")
+@limiter.limit("5/minute")
 def change_my_password(
+    request: Request,
     payload: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

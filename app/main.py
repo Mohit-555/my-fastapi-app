@@ -21,6 +21,8 @@ from app.services.scheduler import scheduler
 from app.services.redis_service import redis_service
 from app.services.database_service import db_service
 from app.services.alert_processor import alert_processor
+from app.limiter import limiter
+from slowapi.errors import RateLimitExceeded
 from contextlib import asynccontextmanager
 import asyncio
 import logging
@@ -96,6 +98,14 @@ app = FastAPI(
     version="1.1.0",
     lifespan=lifespan,
 )
+app.state.limiter = limiter
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request, exc):
+    return JSONResponse(
+        status_code=429,
+        content={"status": False, "message": f"Rate limit exceeded: {exc.detail}"},
+    )
 
 
 @app.exception_handler(StarletteHTTPException)
