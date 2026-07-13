@@ -36,6 +36,28 @@ ASSET_TYPE_MAP = {
     "60": ("ELD",  "Earth Leakage Detector"),
 }
 
+# Equipment Room Type table — Annexure A §3(j). eqpmntroom_type_id occupies the
+# SAME byte position as asset_type_id in para_id, for parameters that belong to
+# a room (temperature/humidity/relay-room-open-close) rather than a signalling
+# asset. Previously missing entirely, which meant every Relay/IPS/Battery/
+# Maintainer/Generator Room + Outdoor + Location Box reading resolved to
+# asset_type_name=None / asset_type_code=None everywhere (decode.py, alerts.py,
+# assets.py, maintenance.py, telemetry.py all call ASSET_TYPE_MAP.get(...)).
+EQUIPMENT_ROOM_TYPE_MAP = {
+    "F0": ("RR",      "Relay Room"),
+    "F1": ("IPSR",     "IPS Room"),
+    "F2": ("BATT",    "Battery Room"),
+    "F3": ("MAIN",    "Maintainer Room"),
+    "F4": ("GEN",     "Generator Room"),
+    "F5": ("OUTDOOR", "Outdoor"),
+    "F6": ("LOC",     "Location Box"),
+}
+
+# Merge so every existing ASSET_TYPE_MAP.get(asset_type_hex) call site
+# (decode.py, alerts.py, assets.py, maintenance.py, telemetry.py) resolves
+# equipment-room parameters correctly without needing to touch each file.
+ASSET_TYPE_MAP.update(EQUIPMENT_ROOM_TYPE_MAP)
+
 # Dashboard display groups — maps friendly label to asset_type_hex values
 # Used for the "Asset Type" dropdown in the UI
 ASSET_TYPE_DISPLAY_GROUPS = {

@@ -1274,12 +1274,15 @@ def _broadcast_alert_update(record: AlertEvent):
             "alert_status": record.alert_status,
             "acknowledged": record.acknowledged
         }
-        asyncio.create_task(
-            websocket_manager.broadcast_alert(
-                alert=alert_data,
-                station_code=station_code
+        try:
+            asyncio.create_task(
+                websocket_manager.broadcast_alert(
+                    alert=alert_data,
+                    station_code=station_code
+                )
             )
-        )
+        except RuntimeError:
+            pass
 
 
 @router.post("/events", response_model=AlertEventResponse, status_code=status.HTTP_201_CREATED)

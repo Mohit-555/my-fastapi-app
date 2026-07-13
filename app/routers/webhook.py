@@ -21,6 +21,18 @@ from app.services.websocket_manager import websocket_manager
 router = APIRouter(prefix="/webhook", tags=["Webhook Ingestion"])
 logger = logging.getLogger("webhook")
 
+
+def safe_create_task(coro):
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(coro)
+    except RuntimeError:
+        try:
+            import anyio
+            anyio.from_thread.run(lambda: coro)
+        except Exception:
+            coro.close()
+
 # ============ Metrics Collection ============
 
 webhook_requests = Counter(
@@ -379,7 +391,7 @@ def receive_fixed_parameters(
                     if param.prv:
                         para_id_upper = param.para_id.upper()
                         asset_number_code = asset_mappings.get(para_id_upper)
-                        asyncio.create_task(
+                        safe_create_task(
                             websocket_manager.broadcast_parameter_update(
                                 stngw_id=stngw_id,
                                 station_code=station_code,
@@ -514,7 +526,7 @@ def receive_event_parameters(
                     if param.prv:
                         para_id_upper = param.para_id.upper()
                         asset_number_code = asset_mappings.get(para_id_upper)
-                        asyncio.create_task(
+                        safe_create_task(
                             websocket_manager.broadcast_parameter_update(
                                 stngw_id=stngw_id,
                                 station_code=station_code,
@@ -572,12 +584,12 @@ def receive_health_data(
                 is_healthy = (payload.stngw_health.stngwh_id == "00")
                 
                 # Update health in cache
-                asyncio.create_task(redis_service.store_gateway_health(stngw_id, is_healthy, payload.stngw_health.stngwh_t))
+                safe_create_task(redis_service.store_gateway_health(stngw_id, is_healthy, payload.stngw_health.stngwh_t))
                 
                 # Broadcast gateway health update
                 station_code = gateway.station.station_code if (gateway and gateway.station) else None
                 if station_code:
-                    asyncio.create_task(
+                    safe_create_task(
                         websocket_manager.broadcast_health_update(
                             station_code=station_code,
                             device_type="gateway",
@@ -637,12 +649,12 @@ def receive_health_data(
                     is_healthy = (sensor.sh_id == "00")
                     
                     # Store health in cache
-                    asyncio.create_task(redis_service.store_sensor_health(stngw_id, sensor.para_id, is_healthy, sensor.sh_t))
+                    safe_create_task(redis_service.store_sensor_health(stngw_id, sensor.para_id, is_healthy, sensor.sh_t))
                     
                     # Broadcast sensor health update
                     station_code = gateway.station.station_code if (gateway and gateway.station) else None
                     if station_code:
-                        asyncio.create_task(
+                        safe_create_task(
                             websocket_manager.broadcast_health_update(
                                 station_code=station_code,
                                 device_type="sensor",

@@ -816,7 +816,11 @@ def ensure_default_asset_types(db: Session) -> None:
     """
     Ensure the asset_type_master table contains all types from ASSET_TYPE_MAP.
     """
-    equipment_room_hexes = {"50", "51", "60"}
+    # F0-F6 are eqpmntroom_type_id (Annexure A §3(j)) — Relay/IPS/Battery/
+    # Maintainer/Generator Room, Outdoor, Location Box. 50/51/60 (IPS unit,
+    # SPD, Earth Leakage Detector) are real signalling assets, not rooms —
+    # they were mistakenly flagged as equipment rooms before this fix.
+    equipment_room_hexes = {"F0", "F1", "F2", "F3", "F4", "F5", "F6"}
     for hex_id, (code, name) in ASSET_TYPE_MAP.items():
         exists = db.query(AssetTypeMaster).filter(AssetTypeMaster.asset_type_id == hex_id).first()
         if not exists:

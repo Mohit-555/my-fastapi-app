@@ -16,71 +16,11 @@ class ParameterConfigService:
     
     def _load_default_config(self):
         """Load default parameter configurations from Annexure A"""
-        # ── Point Machine Parameters (Annexure A, asset_type_id=00) ──────────
-        self.register_parameter({
-            "asset_type_id": "00", "asset_number_id": "01",
-            "parameter_type_id": "00",  # DC Current
-            "parameter_representation_id": "0C",
-            "parameter_representation_code": "IPT N",
-            "parameter_representation_name": "Point Machine Current Normal",
-            "unit": "A", "standard_value": 1.5,
-            "min_safe": 0.8, "max_safe": 2.5, "min_fail": 0.3,
-            "sampling_interval_ms": 20, "is_event_based": True
-        })
+        self._load_point_machine_config()
 
-        self.register_parameter({
-            "asset_type_id": "00", "asset_number_id": "01",
-            "parameter_type_id": "00",
-            "parameter_representation_id": "0D",
-            "parameter_representation_code": "IPT R",
-            "parameter_representation_name": "Point Machine Current Reverse",
-            "unit": "A", "standard_value": 1.5,
-            "min_safe": 0.8, "max_safe": 2.5, "min_fail": 0.3,
-            "sampling_interval_ms": 20, "is_event_based": True
-        })
+        self._load_track_circuit_config()
 
-        self.register_parameter({
-            "asset_type_id": "00", "asset_number_id": "01",
-            "parameter_type_id": "20",  # DC Voltage
-            "parameter_representation_id": "0A",
-            "parameter_representation_code": "VPT 110 DC LOC N",
-            "parameter_representation_name": "110 DC at Loc box for Normal",
-            "unit": "V", "standard_value": 110,
-            "min_safe": 90, "max_safe": 120, "min_fail": 80,
-            "sampling_interval_ms": 20, "is_event_based": True
-        })
-
-        # ── DC Track Circuit Parameters (asset_type_id=20) ───────────────────
-        self.register_parameter({
-            "asset_type_id": "20", "asset_number_id": "01",
-            "parameter_type_id": "20",
-            "parameter_representation_id": "01",
-            "parameter_representation_code": "VTC TFC IP",
-            "parameter_representation_name": "Track Feed Charger Input Voltage",
-            "unit": "V", "standard_value": 110,
-            "min_safe": 90, "max_safe": 120, "min_fail": 80
-        })
-
-        self.register_parameter({
-            "asset_type_id": "20", "asset_number_id": "01",
-            "parameter_type_id": "20",
-            "parameter_representation_id": "02",
-            "parameter_representation_code": "VTC TFC O/P",
-            "parameter_representation_name": "Track Feed Charger Output Voltage",
-            "unit": "V", "standard_value": 10,
-            "min_safe": 8, "max_safe": 12, "min_fail": 6
-        })
-
-        # ── Main Signal Parameters (asset_type_id=10) ────────────────────────
-        self.register_parameter({
-            "asset_type_id": "10", "asset_number_id": "01",
-            "parameter_type_id": "30",  # AC Voltage
-            "parameter_representation_id": "01",
-            "parameter_representation_code": "VSIG DG",
-            "parameter_representation_name": "Green Aspect Voltage",
-            "unit": "V", "standard_value": 110,
-            "min_safe": 90, "max_safe": 120, "min_fail": 80
-        })
+        self._load_main_signal_config()
 
         # ── Relay Room Parameters (eqpmntroom_type_id=F0, used as asset_type_id) ──
         self.register_parameter({
@@ -104,6 +44,131 @@ class ParameterConfigService:
         })
 
         self._load_ips_config()
+
+    def _load_main_signal_config(self):
+        """
+        Main Signal parameters — Annexure A §3(n), "Nomenclature of
+        Parameters of Main Signal" (18 rows). asset_type_id is always "10".
+
+        Voltage/current codes (VSIG DG/HG/HHG/RG, ISIG DG/HG/HHG/RG) match
+        the substring checks in app/services/logics/signal.py exactly.
+        """
+        # (repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail)
+        sig_params = [
+            ("00", "40", "HECR",       "Digital status of HECR (Yellow lit)",       None, None, None, None),
+            ("01", "40", "RECR",       "Digital status of RECR (Red lit)",          None, None, None, None),
+            ("02", "40", "DECR",       "Digital status of DECR (Green lit)",        None, None, None, None),
+            ("03", "40", "HHECR",      "Digital status of HHECR (Double Yellow lit)", None, None, None, None),
+            ("10", "40", "DR",         "Digital status of DR (Green feed extended)", None, None, None, None),
+            ("11", "40", "HR",         "Digital status of HR (Yellow feed extended)", None, None, None, None),
+            ("12", "40", "HHR",        "Digital status of HHR (Double Yellow feed extended)", None, None, None, None),
+            ("20", "20", "VSIG DPR",   "DPR Voltage",                 "V", 18, 21, None),
+            ("21", "20", "VSIG HPR",   "HPR Voltage",                 "V", 18, 21, None),
+            ("22", "20", "VSIG HHPR",  "HHPR Voltage",                "V", 18, 21, None),
+            ("30", "30", "VSIG DG",    "Green Aspect Voltage",        "V", 82, 90, None),
+            ("31", "30", "VSIG HG",    "Yellow Aspect Voltage",       "V", 82, 90, None),
+            ("32", "30", "VSIG HHG",   "Double Yellow Aspect Voltage","V", 82, 90, None),
+            ("33", "30", "VSIG RG",    "Red Aspect Voltage",          "V", 82, 90, None),
+            ("40", "11", "ISIG DG",    "Green Aspect Current",        "mA", 110, 150, 90),
+            ("41", "11", "ISIG HG",    "Yellow Aspect Current",       "mA", 110, 150, 90),
+            ("42", "11", "ISIG HHG",   "Double Yellow Aspect Current","mA", 110, 150, 90),
+            ("43", "11", "ISIG RG",    "Red Aspect Current",          "mA", 110, 150, 90),
+        ]
+        for repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail in sig_params:
+            self.register_parameter({
+                "asset_type_id": "10", "asset_number_id": "01",
+                "parameter_type_id": type_id,
+                "parameter_representation_id": repr_id,
+                "parameter_representation_code": code,
+                "parameter_representation_name": name,
+                "unit": unit,
+                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail,
+            })
+
+    def _load_point_machine_config(self):
+        """
+        Point Machine parameters — Annexure A §3(n), "Nomenclature of
+        Parameter of Point Machine" (15 rows). asset_type_id is always "00".
+
+        Rows 14-15 (TPT N / TPT R, derived operation time) drive the
+        obstruction-detection cause codes PT_N_OBS/PT_R_OBS in
+        app/services/logics/point_machine.py — without these registered,
+        that logic can never fire.
+
+        min_safe/min_fail marked "*" or "__" in spec are left None/omitted
+        here — configure per site (operation-time max-safe in particular
+        should be ~1.5s less than the WJR timer time, per the spec's own
+        note, not a generic default).
+        """
+        # (repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail)
+        pm_params = [
+            ("00", "20", "VPT NWKR N",       "24VDC at RR from Loc — NWKR Normal",        "V", 18, 21, None),
+            ("01", "20", "VPT RWKR R",       "24VDC at RR from Loc — RWKR Reverse",       "V", 18, 21, None),
+            ("10", "40", "NWKR",             "Digital status of NWKR",                     None, None, None, None),
+            ("11", "40", "RWKR",             "Digital status of RWKR",                     None, None, None, None),
+            ("12", "40", "NWCR",             "Digital status of NWCR",                     None, None, None, None),
+            ("13", "40", "RWCR",             "Digital status of RWCR",                     None, None, None, None),
+            ("20", "20", "VPT 110 DC LOC N", "110 DC at Loc box for Normal",               "V", 82, 90, None),
+            ("21", "20", "VPT110 DC LOC R",  "110 DC at Loc box for Reverse",              "V", 82, 90, None),
+            ("30", "00", "IPT N",            "Point Machine Current Normal",               "A", None, None, None),
+            ("31", "00", "IPT R",            "Point Machine Current Reverse",              "A", None, None, None),
+            ("40", "20", "VPT 24 DC LOC N",  "24V DC to Relay Room after detection — Normal", "V", None, None, None),
+            ("41", "20", "VPT 24 DC LOC R",  "24V DC to Relay Room after detection — Reverse", "V", None, None, None),
+            ("50", "60", "XPT",              "Vibration (Optional)",                       None, None, None, None),
+            ("60", "90", "TPT N",            "Normal Operation Time (derived, obstruction check)", "sec", None, None, 8),
+            ("61", "90", "TPT R",            "Reverse Operation Time (derived, obstruction check)", "sec", None, None, 8),
+        ]
+        for repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail in pm_params:
+            self.register_parameter({
+                "asset_type_id": "00", "asset_number_id": "01",
+                "parameter_type_id": type_id,
+                "parameter_representation_id": repr_id,
+                "parameter_representation_code": code,
+                "parameter_representation_name": name,
+                "unit": unit,
+                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail,
+                "sampling_interval_ms": 20, "is_event_based": True,
+            })
+
+    def _load_track_circuit_config(self):
+        """
+        DC Track Circuit parameters — Annexure A §3(n), "Nomenclature of
+        Parameters of DC Track Circuit" (17 rows). asset_type_id is always "20".
+
+        Codes match the cause_map in app/services/logics/track_circuit.py
+        exactly (VTC TFC IP, VTC TFC O/P, ITC BATT CHARG, VTC TR,
+        RTC CH FEED END, ITC RELAY END) so that logic engine actually fires.
+        """
+        # (repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail)
+        tc_params = [
+            ("00", "20", "VTC 24 DC TPR IP",  "24V DC TPR Input at Relay Room",     "V", 18, 21, None),
+            ("10", "40", "TPR",               "Digital status of TPR (Repeater Relay)", None, None, None, None),
+            ("20", "30", "VTC TFC IP",        "Track Feed Charger Input Voltage",   "V", None, None, None),
+            ("21", "20", "VTC TFC O/P",       "Track Feed Charger Output Voltage (on load)", "V", None, None, None),
+            ("22", "01", "ITC TFC O/P",       "Track Feed Charger Output Current",  "mA", None, None, None),
+            ("23", "20", "VTC CH FEED END",   "Voltage drop at feed end choke",     "V", None, None, None),
+            ("24", "20", "VTC FEED END",      "Track Feed end voltage (going to Rails)", "V", None, None, None),
+            ("25", "01", "ITC FEED END",      "Track Feed Current",                 "mA", None, None, None),
+            ("26", "01", "ITC BATT CHARG",    "Battery Charging Current (derived)", "mA", None, None, None),
+            ("27", "20", "VTC VAR RES",       "Voltage at Variable Track Resistance (derived)", "V", None, None, None),
+            ("28", "80", "RTC CH FEED END",   "Feed end choke resistance (derived)", "Ohm", None, None, None),
+            ("29", "80", "RTC VAR RES",       "Variable resistance (derived)",      "Ohm", None, None, None),
+            ("41", "01", "ITC RELAY END",     "Track Relay end Current",            "mA", 100, 210, None),
+            ("42", "20", "VTC TR",            "Track Relay Voltage (derived, QTA2 ref 1.4V)", "V", 2.1, 4.2, None),
+            ("44", "20", "VTC 24 DC LOC",     "24V DC to TPR after TR pick-up contact", "V", None, None, None),
+            ("60", "01", "IBALST",            "Ballast/Sleeper Current (derived)",   "mA", None, None, None),
+            ("61", "80", "RRAIL",             "Rail Resistance (derived)",           "Ohm", None, None, None),
+        ]
+        for repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail in tc_params:
+            self.register_parameter({
+                "asset_type_id": "20", "asset_number_id": "01",
+                "parameter_type_id": type_id,
+                "parameter_representation_id": repr_id,
+                "parameter_representation_code": code,
+                "parameter_representation_name": name,
+                "unit": unit,
+                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail,
+            })
 
     def _load_ips_config(self):
         """
