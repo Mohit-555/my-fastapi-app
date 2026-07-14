@@ -1,0 +1,74 @@
+# nginx-mtls.conf.example
+#
+# Example reverse-proxy config implementing Annexure B §6 (mTLS between
+# Station Gateway / Intermediate Service Platform and RDPMS).
+#
+# This terminates TLS *and* verifies the client's certificate against your
+# Vendor CA before forwarding anything to the RDPMS app (uvicorn/gunicorn,
+# assumed here to be listening on 127.0.0.1:8000, plain HTTP, behind nginx).
+#
+# Copy this to /etc/nginx/sites-available/rdpms.conf, adjust paths, then:
+#   sudo ln -s /etc/nginx/sites-available/rdpms.conf /etc/nginx/sites-enabled/
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# Once this is live, set REQUIRE_MTLS=true in RDPMS's environment/.env —
+# app/routers/webhook.py's verify_client_cert() will then reject any request
+# that didn't come through this proxy with a verified client cert.
+
+server {
+    listen 443 ssl;
+    server_name rdpms.yourdomain.example;
+
+    # ── Server's own certificate (proves to the gateway that IT is talking
+    #    to the real RDPMS server — the "mutual" half of mutual TLS) ──────
+    ssl_certificate     /etc/nginx/certs/rdpms-server.crt;
+    ssl_certificate_key /etc/nginx/certs/rdpms-server.key;
+
+    # ── Client certificate verification (the gateway proves ITS identity) ─
+    ssl_client_certificate /etc/nginx/certs/vendor-ca.crt;   # your Vendor CA's public cert
+    ssl_verify_client on;                                     # reject the TLS handshake itself if no valid client cert
+    ssl_verify_depth 2;
+
+    # Cipher suites — replace with whatever your organisation's approved
+    # list is per ITSAR001962411 (NCCS). This is a placeholder; do not ship
+    # this exact list without checking against the current standard.
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location /webhook/ {
+        # These are what app/routers/webhook.py's verify_client_cert()
+        # actually checks. $ssl_client_verify is "SUCCESS" only if the
+        # client cert was valid, signed by the CA above, not expired, and
+        # not revoked (see ssl_crl / OCSP note below).
+        proxy_set_header X-SSL-Client-Verify $ssl_client_verify;
+        proxy_set_header X-SSL-Client-CN     $ssl_client_s_dn_cn;
+
+        # Strip any client-supplied copies of these headers first, so a
+        # gateway can't just set them itself and skip the handshake:
+        proxy_set_header X-SSL-Client-Verify "";
+        proxy_set_header X-SSL-Client-CN "";
+        # (nginx evaluates proxy_set_header top-to-bottom per-context; keep
+        # the real ssl_client_verify/ssl_client_s_dn_cn lines ABOVE these
+        # blanking lines removed — this ordering note is here because
+        # copy-pasting order matters. In practice: only set the header once,
+        # from the $ssl_ variable, and never take it from the incoming
+        # request.)
+
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+
+# ── Certificate revocation ───────────────────────────────────────────────
+# Annexure B §6 requires checking revocation (CRL or OCSP), not just
+# expiry/signature. Add one of:
+#   ssl_crl /etc/nginx/certs/vendor-ca.crl;     # requires regenerating/reloading on every revocation
+# or configure OCSP stapling against your CA's responder if it has one.
+# Neither is included above — pick based on how your Vendor CA is run.

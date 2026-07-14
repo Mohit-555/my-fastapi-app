@@ -73,6 +73,11 @@ class Gateway(Base):
     stngw_id = Column(String(8), unique=True, nullable=False, index=True)
     imei = Column(String(20), nullable=True)
     station_id = Column(Integer, ForeignKey("stations.id"), nullable=True)
+    # Certificate Common Name this gateway's client cert must present, when
+    # settings.REQUIRE_MTLS is True (Annexure B §6). NULL means "not yet
+    # bound to a specific certificate" — set this once the gateway's cert
+    # is issued, so a leaked API key alone can't impersonate this gateway.
+    mtls_cn = Column(String(200), nullable=True)
     created_at = Column(DateTime, default=datetime.now(UTC))
 
     station = relationship("Station", back_populates="gateways")

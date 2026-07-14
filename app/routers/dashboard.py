@@ -1,7 +1,9 @@
 # app/routers/dashboard.py
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
+from pydantic import BaseModel
+import json
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_, case
 
@@ -14,6 +16,73 @@ import logging
 logger = logging.getLogger("dashboard")
 
 router = APIRouter(prefix="/api/dashboard", tags=["Common Dashboard"])
+
+
+# ============ Annexure F §1(a) JSON-envelope request format ============
+# Spec mandates: {"start_date":.., "start_time":.., "end_date":.., "end_time":..,
+#   "request": {"zone":[...], "division":[...], "station":[...],
+#   "alert_type":[...], "asset_type":[...],
+#   "asset_number":[{"sc":.., "asset_number_code":..}, ...],
+#   "cause":[...], "page_number":.., "page_size":..}}
+# All 5 endpoints below accept this as an OPTIONAL JSON body in addition to
+# the flat query params they already supported — body values win when
+# present, so existing query-param callers are unaffected.
+
+class AssetNumberFilter(BaseModel):
+    """Station-keyed asset number, since the same asset_number_code can repeat across stations (Annexure F §1(a))."""
+    sc: str
+    asset_number_code: str
+
+class DashboardRequestFilters(BaseModel):
+    zone: Optional[List[str]] = None
+    division: Optional[List[str]] = None
+    station: Optional[List[str]] = None
+    alert_type: Optional[List[str]] = None
+    asset_type: Optional[List[str]] = None
+    asset_number: Optional[List[AssetNumberFilter]] = None
+    cause: Optional[List[str]] = None
+    feedback: Optional[List[str]] = None
+    alert_status: Optional[List[str]] = None
+    page_number: Optional[int] = None
+    page_size: Optional[int] = None
+
+class DashboardEnvelopeBody(BaseModel):
+    start_date: Optional[str] = None
+    start_time: Optional[str] = None
+    end_date: Optional[str] = None
+    end_time: Optional[str] = None
+    request: Optional[DashboardRequestFilters] = None
+
+def _merge_envelope(body: Optional[DashboardEnvelopeBody], **query_values) -> dict:
+    """
+    Overlay JSON-envelope body values (if provided) onto the existing
+    flat query-param values. Any field not set in the body falls back to
+    whatever came in via query params, so this is purely additive.
+    """
+    merged = dict(query_values)
+    if body is None:
+        return merged
+
+    if body.start_date is not None:
+        merged['start_date'] = body.start_date
+    if body.start_time is not None:
+        merged['start_time'] = body.start_time
+    if body.end_date is not None:
+        merged['end_date'] = body.end_date
+    if body.end_time is not None:
+        merged['end_time'] = body.end_time
+
+    req = body.request
+    if req is not None:
+        for field in ('zone', 'division', 'station', 'alert_type', 'asset_type',
+                       'cause', 'feedback', 'alert_status', 'page_number', 'page_size'):
+            val = getattr(req, field, None)
+            if val is not None:
+                merged[field] = val
+        if req.asset_number is not None:
+            merged['asset_number'] = req.asset_number
+
+    return merged
 
 
 # ============ Helper Functions ============
@@ -73,7 +142,7 @@ def _resolve_location_ids(
 
 @router.post("/alert_summary")
 async def get_alert_summary_report(
-    start_date: str = Query(..., description="Start date DD/MM/YYYY"),
+    start_date: Optional[str] = Query(None, description="Start date DD/MM/YYYY (or use JSON body)"),
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
     end_date: Optional[str] = Query(None, description="End date DD/MM/YYYY"),
     end_time: Optional[str] = Query(None, description="End time HH:MM:SS"),
@@ -85,6 +154,7 @@ async def get_alert_summary_report(
     cause: Optional[List[str]] = Query(None, description="Cause codes"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
+    body: Optional[DashboardEnvelopeBody] = Body(None, description="Annexure F §1(a) JSON envelope — overrides query params when provided"),
     api_key: bool = Depends(verify_api_key),
     db: Session = Depends(get_db)
 ):
@@ -92,7 +162,23 @@ async def get_alert_summary_report(
     Alert Summary Report - Annexure F §1
     
     Returns summarized alert counts grouped by Zone, Division, Station, Alert Type, Asset Type, Asset Number, and Cause.
+    
+    Accepts filters either as flat query params, or as the spec's JSON body
+    envelope: {"start_date":.., "request": {"zone": [...], "cause": [...], ...}}.
     """
+    m = _merge_envelope(body, start_date=start_date, start_time=start_time,
+                         end_date=end_date, end_time=end_time, zone=zone,
+                         division=division, station=station, alert_type=alert_type,
+                         asset_type=asset_type, cause=cause,
+                         page_number=page_number, page_size=page_size)
+    start_date, start_time, end_date, end_time = m['start_date'], m['start_time'], m['end_date'], m['end_time']
+    zone, division, station = m['zone'], m['division'], m['station']
+    alert_type, asset_type, cause = m['alert_type'], m['asset_type'], m['cause']
+    page_number, page_size = m['page_number'] or 1, m['page_size'] or 50
+
+    if not start_date:
+        raise HTTPException(status_code=422, detail="start_date is required (as a query param or in the JSON body)")
+
     # Parse dates
     start_dt, end_dt = _parse_date_range(start_date, start_time, end_date, end_time)
     
@@ -203,7 +289,7 @@ async def get_alert_summary_report(
 
 @router.post("/alert_history")
 async def get_alert_history_report(
-    start_date: str = Query(..., description="Start date DD/MM/YYYY"),
+    start_date: Optional[str] = Query(None, description="Start date DD/MM/YYYY (or use JSON body)"),
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
     end_date: Optional[str] = Query(None, description="End date DD/MM/YYYY"),
     end_time: Optional[str] = Query(None, description="End time HH:MM:SS"),
@@ -217,14 +303,30 @@ async def get_alert_history_report(
     alert_status: Optional[List[str]] = Query(None, description="Alert status"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
+    body: Optional[DashboardEnvelopeBody] = Body(None, description="Annexure F JSON envelope — overrides query params when provided"),
     api_key: bool = Depends(verify_api_key),
     db: Session = Depends(get_db)
 ):
     """
     Alert History Report - Annexure F §2
     
-    Returns detailed alert records with all fields.
+    Returns detailed alert records with all fields. Accepts filters either as
+    flat query params or the spec's JSON body envelope (see alert_summary).
     """
+    m = _merge_envelope(body, start_date=start_date, start_time=start_time,
+                         end_date=end_date, end_time=end_time, zone=zone,
+                         division=division, station=station, alert_type=alert_type,
+                         asset_type=asset_type, cause=cause, feedback=feedback,
+                         alert_status=alert_status, page_number=page_number, page_size=page_size)
+    start_date, start_time, end_date, end_time = m['start_date'], m['start_time'], m['end_date'], m['end_time']
+    zone, division, station = m['zone'], m['division'], m['station']
+    alert_type, asset_type, cause = m['alert_type'], m['asset_type'], m['cause']
+    feedback, alert_status = m['feedback'], m['alert_status']
+    page_number, page_size = m['page_number'] or 1, m['page_size'] or 50
+
+    if not start_date:
+        raise HTTPException(status_code=422, detail="start_date is required (as a query param or in the JSON body)")
+
     # Parse dates
     start_dt, end_dt = _parse_date_range(start_date, start_time, end_date, end_time)
     
@@ -336,7 +438,7 @@ async def get_alert_history_report(
 
 @router.post("/telemetry_history")
 async def get_telemetry_history_report(
-    start_date: str = Query(..., description="Start date DD/MM/YYYY"),
+    start_date: Optional[str] = Query(None, description="Start date DD/MM/YYYY (or use JSON body)"),
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
     end_date: Optional[str] = Query(None, description="End date DD/MM/YYYY"),
     end_time: Optional[str] = Query(None, description="End time HH:MM:SS"),
@@ -347,14 +449,33 @@ async def get_telemetry_history_report(
     asset_number: Optional[str] = Query(None, description="JSON string list of asset numbers with station codes: '[{\"sc\": \"STN\", \"asset_number_code\": \"PT-101\"}]'"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
+    body: Optional[DashboardEnvelopeBody] = Body(None, description="Annexure F JSON envelope — overrides query params when provided. asset_number here is a proper array of {sc, asset_number_code} objects, not a JSON string."),
     api_key: bool = Depends(verify_api_key),
     db: Session = Depends(get_db)
 ):
     """
     Telemetry History Report - Annexure F §3
     
-    Returns historical telemetry data for assets.
+    Returns historical telemetry data for assets. Accepts filters either as
+    flat query params or the spec's JSON body envelope (see alert_summary).
     """
+    m = _merge_envelope(body, start_date=start_date, start_time=start_time,
+                         end_date=end_date, end_time=end_time, zone=zone,
+                         division=division, station=station, asset_type=asset_type,
+                         page_number=page_number, page_size=page_size)
+    start_date, start_time, end_date, end_time = m['start_date'], m['start_time'], m['end_date'], m['end_time']
+    zone, division, station, asset_type = m['zone'], m['division'], m['station'], m['asset_type']
+    page_number, page_size = m['page_number'] or 1, m['page_size'] or 50
+
+    # asset_number from the JSON body comes as a list of AssetNumberFilter
+    # objects; convert to the same JSON-string shape the existing downstream
+    # code already parses, so nothing else needs to change.
+    if body is not None and body.request is not None and body.request.asset_number is not None:
+        asset_number = json.dumps([a.model_dump() for a in body.request.asset_number])
+
+    if not start_date:
+        raise HTTPException(status_code=422, detail="start_date is required (as a query param or in the JSON body)")
+
     # Parse dates
     start_dt, end_dt = _parse_date_range(start_date, start_time, end_date, end_time)
     
@@ -392,7 +513,6 @@ async def get_telemetry_history_report(
     
     # Apply asset number filter
     if asset_number:
-        import json
         try:
             asset_number_list = json.loads(asset_number)
         except Exception:
@@ -471,6 +591,7 @@ async def get_asset_detail_report(
     asset_type: Optional[List[str]] = Query(None, description="Asset type codes"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
+    body: Optional[DashboardEnvelopeBody] = Body(None, description="Annexure F JSON envelope — overrides query params when provided"),
     api_key: bool = Depends(verify_api_key),
     db: Session = Depends(get_db)
 ):
@@ -478,7 +599,14 @@ async def get_asset_detail_report(
     Asset Detail Report - Annexure F §4
     
     Returns asset counts grouped by Zone, Division, Station, Asset Type, and Make.
+    Accepts filters either as flat query params or the spec's JSON body
+    envelope (see alert_summary). This report has no date range.
     """
+    m = _merge_envelope(body, zone=zone, division=division, station=station,
+                         asset_type=asset_type, page_number=page_number, page_size=page_size)
+    zone, division, station, asset_type = m['zone'], m['division'], m['station'], m['asset_type']
+    page_number, page_size = m['page_number'] or 1, m['page_size'] or 50
+
     # Resolve location IDs
     zone_ids, division_ids, station_ids = _resolve_location_ids(db, zone, division, station)
     
@@ -557,7 +685,7 @@ async def get_asset_detail_report(
 
 @router.post("/performance")
 async def get_performance_report(
-    start_date: str = Query(..., description="Start date DD/MM/YYYY"),
+    start_date: Optional[str] = Query(None, description="Start date DD/MM/YYYY (or use JSON body)"),
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
     end_date: Optional[str] = Query(None, description="End date DD/MM/YYYY"),
     end_time: Optional[str] = Query(None, description="End time HH:MM:SS"),
@@ -566,14 +694,27 @@ async def get_performance_report(
     station: Optional[List[str]] = Query(None, description="Station codes"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
+    body: Optional[DashboardEnvelopeBody] = Body(None, description="Annexure F JSON envelope — overrides query params when provided"),
     api_key: bool = Depends(verify_api_key),
     db: Session = Depends(get_db)
 ):
     """
     Performance Report - Annexure F §5
     
-    Returns performance metrics for each station.
+    Returns performance metrics for each station. Accepts filters either as
+    flat query params or the spec's JSON body envelope (see alert_summary).
     """
+    m = _merge_envelope(body, start_date=start_date, start_time=start_time,
+                         end_date=end_date, end_time=end_time, zone=zone,
+                         division=division, station=station,
+                         page_number=page_number, page_size=page_size)
+    start_date, start_time, end_date, end_time = m['start_date'], m['start_time'], m['end_date'], m['end_time']
+    zone, division, station = m['zone'], m['division'], m['station']
+    page_number, page_size = m['page_number'] or 1, m['page_size'] or 50
+
+    if not start_date:
+        raise HTTPException(status_code=422, detail="start_date is required (as a query param or in the JSON body)")
+
     # Parse dates
     start_dt, end_dt = _parse_date_range(start_date, start_time, end_date, end_time)
     

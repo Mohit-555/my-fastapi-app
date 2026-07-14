@@ -21,8 +21,20 @@ class ParameterConfigService:
         self._load_track_circuit_config()
 
         self._load_main_signal_config()
+        self._load_calling_on_signal_config()
+        self._load_route_signal_config()
+        self._load_shunt_signal_config()
 
-        # ── Relay Room Parameters (eqpmntroom_type_id=F0, used as asset_type_id) ──
+        # ── Equipment Room Parameters (Annexure A §3(n), Relay/IPS/Battery/
+        #    Maintainer/Generator Room, Outdoor, Location Box) ────────────────
+        # Relay Room (F0) — includes Door Open/Close, which was previously missing.
+        self.register_parameter({
+            "asset_type_id": "F0", "asset_number_id": "01",
+            "parameter_type_id": "40",  # Digital
+            "parameter_representation_id": "00",
+            "parameter_representation_code": "DOORRR",
+            "parameter_representation_name": "Relay Room Door Open/Close",
+        })
         self.register_parameter({
             "asset_type_id": "F0", "asset_number_id": "01",
             "parameter_type_id": "50",  # Temperature
@@ -32,7 +44,6 @@ class ParameterConfigService:
             "unit": "°C",
             "min_safe": 15, "max_safe": 40, "min_fail": 5, "max_fail": 50
         })
-
         self.register_parameter({
             "asset_type_id": "F0", "asset_number_id": "01",
             "parameter_type_id": "51",  # Humidity
@@ -42,6 +53,33 @@ class ParameterConfigService:
             "unit": "%",
             "min_safe": 30, "max_safe": 70, "min_fail": 10, "max_fail": 90
         })
+
+        # IPS Room (F1), Battery Room (F2), Maintainer Room (F3),
+        # Generator Room (F4), Outdoor (F5), Location Box (F6) — every one of
+        # these was completely unregistered before this fix. Each has the same
+        # two parameters: Temperature (repr 01, type 50) and Humidity (repr 02,
+        # type 51). Thresholds are site-decided in the spec; left as sensible
+        # generic defaults matching Relay Room — adjust per site/room type.
+        for room_hex, room_code in [("F1", "IPS"), ("F2", "BATT"), ("F3", "MAIN"),
+                                     ("F4", "GEN"), ("F5", "OUTDOOR"), ("F6", "LOC")]:
+            self.register_parameter({
+                "asset_type_id": room_hex, "asset_number_id": "01",
+                "parameter_type_id": "50",
+                "parameter_representation_id": "01",
+                "parameter_representation_code": f"TEMP{room_code}",
+                "parameter_representation_name": f"Temperature of {room_code} Room",
+                "unit": "°C",
+                "min_safe": 15, "max_safe": 40, "min_fail": 5, "max_fail": 50
+            })
+            self.register_parameter({
+                "asset_type_id": room_hex, "asset_number_id": "01",
+                "parameter_type_id": "51",
+                "parameter_representation_id": "02",
+                "parameter_representation_code": f"HUMD{room_code}",
+                "parameter_representation_name": f"Humidity of {room_code} Room",
+                "unit": "%",
+                "min_safe": 30, "max_safe": 70, "min_fail": 10, "max_fail": 90
+            })
 
         self._load_ips_config()
 
@@ -82,6 +120,90 @@ class ParameterConfigService:
                 "parameter_representation_code": code,
                 "parameter_representation_name": name,
                 "unit": unit,
+                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail,
+            })
+
+    def _load_calling_on_signal_config(self):
+        """
+        Calling ON Signal parameters — Annexure A §3(n), page 24 (asset_type_id="12").
+
+        NOTE: "Calling ON Aspect Voltage/Current" both carry Max Safe=58 /
+        Min Safe=52 / Min Fail=90 in the source document. The same exact
+        trio also appears for Shunt ON Aspect Voltage/Current (page 27) —
+        5 rows across 2 signal types sharing identical numbers. Applied here
+        as transcribed from the spec (page-cited), but worth one final
+        sanity-check against the actual hardware spec before go-live, since
+        that much repetition across unrelated readings is unusual.
+        """
+        # (repr_id, type_id, code, name, min_safe, max_safe, min_fail)
+        co_params = [
+            ("00", "40", "CO-HECR",   "Digital status of Calling ON HECR", None, None, None),
+            ("10", "40", "CO-HR",     "Digital status of Calling ON HR",   None, None, None),
+            ("20", "20", "COSIG HPR", "Calling ON HPR Voltage",            21,   None, 18),
+            ("30", "30", "COSIG",     "Calling ON Aspect Voltage",         52,   58,   90),
+            ("40", "11", "ICOSIG",    "Calling ON Aspect Current",         52,   58,   90),
+        ]
+        for repr_id, type_id, code, name, min_safe, max_safe, min_fail in co_params:
+            self.register_parameter({
+                "asset_type_id": "12", "asset_number_id": "01",
+                "parameter_type_id": type_id,
+                "parameter_representation_id": repr_id,
+                "parameter_representation_code": code,
+                "parameter_representation_name": name,
+                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail,
+            })
+
+    def _load_route_signal_config(self):
+        """
+        Route Signal parameters — Annexure A §3(n), page 26 (asset_type_id="13").
+        All thresholds here are internally consistent (min_fail < min_safe
+        [< max_safe]).
+        """
+        # (repr_id, type_id, code, name, min_safe, max_safe, min_fail)
+        ro_params = [
+            ("00", "40", "UECR",      "Digital status of UECR",  None, None, None),
+            ("10", "40", "UHR",       "Digital status of UHR",   None, None, None),
+            ("20", "20", "ROSIG HPR", "Route HPR Voltage",       21,   None, 18),
+            ("30", "30", "ROSIG",     "Route Aspect Voltage",    119,  131,  90),
+            ("40", "11", "IROSIG",    "Route Aspect Current",    93,   None, 87),
+        ]
+        for repr_id, type_id, code, name, min_safe, max_safe, min_fail in ro_params:
+            self.register_parameter({
+                "asset_type_id": "13", "asset_number_id": "01",
+                "parameter_type_id": type_id,
+                "parameter_representation_id": repr_id,
+                "parameter_representation_code": code,
+                "parameter_representation_name": name,
+                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail,
+            })
+
+    def _load_shunt_signal_config(self):
+        """
+        Shunt Signal parameters — Annexure A §3(n), page 27 (asset_type_id="11").
+        ON Aspect Voltage/Current carry the same 58/52/90 trio flagged in
+        _load_calling_on_signal_config — applied as transcribed, worth a
+        final sanity-check. OFF Aspect Current has no Min Fail given in the
+        source (only Max Safe=58/Min Safe=52), so that field stays None.
+        """
+        # (repr_id, type_id, code, name, min_safe, max_safe, min_fail)
+        sh_params = [
+            ("00", "40", "SH-ECR OFF",   "Digital status of Shunt ECR (OFF)", None, None, None),
+            ("01", "40", "SH-ECR ON",    "Digital status of Shunt ECR (ON)",  None, None, None),
+            ("10", "40", "SH-HR",        "Digital status of Shunt HR",        None, None, None),
+            ("20", "20", "SHSIG HPR",    "Shunt HPR Voltage",                 21,   None, 18),
+            ("30", "30", "SHSIG ON",     "Shunt ON Aspect Voltage",           52,   58,   90),
+            ("31", "30", "SHSIG OFF",    "Shunt OFF Aspect Voltage",          93,   None, 87),
+            ("40", "11", "ISHSIG ON",    "Shunt ON Aspect Current",           52,   58,   90),
+            ("41", "11", "ISHSIG OFF",   "Shunt OFF Aspect Current",          52,   58,   None),
+            ("42", "11", "ISHSIG PILOT", "Shunt PILOT Aspect Current",        93,   None, 87),
+        ]
+        for repr_id, type_id, code, name, min_safe, max_safe, min_fail in sh_params:
+            self.register_parameter({
+                "asset_type_id": "11", "asset_number_id": "01",
+                "parameter_type_id": type_id,
+                "parameter_representation_id": repr_id,
+                "parameter_representation_code": code,
+                "parameter_representation_name": name,
                 "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail,
             })
 
@@ -184,7 +306,7 @@ class ParameterConfigService:
         Representation codes are prefixed V/I to match the cause_map keys
         already used in app/services/logics/ips.py.
         """
-        # (repr_id, type_id, spec_code, unit) — asset_type_id is always "50" (IPS)
+        # (repr_id, type_id, spec_code, kind) — asset_type_id is always "50" (IPS)
         ips_params = [
             ("00", "20", "IPS 110 DC",           "V"),  # 1
             ("10", "30", "IPS SIG-1 110 AC",      "V"),  # 2

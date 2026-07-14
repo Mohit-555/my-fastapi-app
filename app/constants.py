@@ -45,7 +45,7 @@ ASSET_TYPE_MAP = {
 # assets.py, maintenance.py, telemetry.py all call ASSET_TYPE_MAP.get(...)).
 EQUIPMENT_ROOM_TYPE_MAP = {
     "F0": ("RR",      "Relay Room"),
-    "F1": ("IPSR",     "IPS Room"),
+    "F1": ("IPS",      "IPS Room"),
     "F2": ("BATT",    "Battery Room"),
     "F3": ("MAIN",    "Maintainer Room"),
     "F4": ("GEN",     "Generator Room"),

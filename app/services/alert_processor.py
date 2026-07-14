@@ -123,6 +123,17 @@ class AlertProcessor:
                         )
                         if alert:
                             alert_count += 1
+                            # Push to any dashboard subscribed via
+                            # ws://.../ws/alerts/{station_code}. Previously
+                            # only manual actions (acknowledge/feedback/
+                            # clear) broadcast; newly-generated alerts from
+                            # this background loop never reached connected
+                            # clients until they reconnected or polled.
+                            try:
+                                from app.routers.alerts import _broadcast_alert_update
+                                _broadcast_alert_update(alert)
+                            except Exception as e:
+                                logger.error(f"Error broadcasting alert {alert.id}: {e}")
                     
                     # Mark as processed
                     telemetry.is_processed = True
