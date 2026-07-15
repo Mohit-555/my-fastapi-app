@@ -285,6 +285,7 @@ def ensure_default_stations(db: Session) -> None:
         "UMB": [1, 2, 3],
     }
     stations = db.query(Station).all()
+    equipment_room_ids = [35, 36, 37, 38, 39, 40, 41]
     for s in stations:
         st_name = s.station_name.title()
         if not s.category:
@@ -295,9 +296,12 @@ def ensure_default_stations(db: Session) -> None:
             s.description = f"{st_name} Railway Station"
         if not s.status:
             s.status = "Active"
-        if not s.asset_types:
-            s.asset_types = station_asset_types_map.get(s.station_code, [1, 2, 3])
+        
+        base_types = station_asset_types_map.get(s.station_code, [1, 2, 3])
+        current_types = s.asset_types or base_types
+        s.asset_types = list(set(current_types + equipment_room_ids))
     db.commit()
+
 
 
 def ensure_default_menus(db: Session) -> None:
@@ -479,7 +483,7 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
                 address=f"{div.division_name.title()} Division Station",
                 description=f"Auto-generated station for {div.division_name} division",
                 status="Active",
-                asset_types=[1, 2, 3]
+                asset_types=[1, 2, 3, 35, 36, 37, 38, 39, 40, 41]
             )
             db.add(station)
             db.flush()
