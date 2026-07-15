@@ -285,7 +285,10 @@ def ensure_default_stations(db: Session) -> None:
         "UMB": [1, 2, 3],
     }
     stations = db.query(Station).all()
-    equipment_room_ids = [35, 36, 37, 38, 39, 40, 41]
+    equipment_rooms = db.query(AssetTypeMaster).filter(
+        AssetTypeMaster.asset_type_id.in_(["F0", "F1", "F2", "F3", "F4", "F5", "F6"])
+    ).all()
+    equipment_room_ids = [t.id for t in equipment_rooms]
     for s in stations:
         st_name = s.station_name.title()
         if not s.category:
@@ -464,6 +467,10 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
 
     # 4b. Ensure EVERY division in the database has at least one station
     all_divisions = db.query(Division).all()
+    equipment_rooms = db.query(AssetTypeMaster).filter(
+        AssetTypeMaster.asset_type_id.in_(["F0", "F1", "F2", "F3", "F4", "F5", "F6"])
+    ).all()
+    equipment_room_ids = [t.id for t in equipment_rooms]
     for div in all_divisions:
         station_count = db.query(Station).filter(Station.division_id == div.id).count()
         if station_count == 0:
@@ -483,7 +490,7 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
                 address=f"{div.division_name.title()} Division Station",
                 description=f"Auto-generated station for {div.division_name} division",
                 status="Active",
-                asset_types=[1, 2, 3, 35, 36, 37, 38, 39, 40, 41]
+                asset_types=[1, 2, 3] + equipment_room_ids
             )
             db.add(station)
             db.flush()
