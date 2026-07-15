@@ -70,7 +70,15 @@ ASSET_TYPE_DISPLAY_GROUPS = {
     "BPAC":             ["30", "31"],
     "IPS":              ["50", "51"],
     "Battery":          ["60"],
+    "Relay Room":       ["F0"],
+    "IPS Room":         ["F1"],
+    "Battery Room":     ["F2"],
+    "Maintainer Room":  ["F3"],
+    "Generator Room":   ["F4"],
+    "Outdoor":          ["F5"],
+    "Location Box":     ["F6"],
 }
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # NOTE ON parameter_type_id vs parameter_representation_id (Annexure A §3(l)/(m))
