@@ -833,14 +833,24 @@ def ensure_default_asset_types(db: Session) -> None:
     # they were mistakenly flagged as equipment rooms before this fix.
     equipment_room_hexes = {"F0", "F1", "F2", "F3", "F4", "F5", "F6"}
     for hex_id, (code, name) in ASSET_TYPE_MAP.items():
-        exists = db.query(AssetTypeMaster).filter(AssetTypeMaster.asset_type_id == hex_id).first()
-        if not exists:
-            db.add(AssetTypeMaster(
-                asset_type_id=hex_id,
-                asset_type_code=code,
-                asset_type_name=name,
-                is_equipment_room=(hex_id in equipment_room_hexes),
-            ))
+        asset = db.query(AssetTypeMaster).filter(AssetTypeMaster.asset_type_id == hex_id).first()
+        if asset:
+            asset.asset_type_code = code
+            asset.asset_type_name = name
+            asset.is_equipment_room = (hex_id in equipment_room_hexes)
+            continue
+
+        existing_code = db.query(AssetTypeMaster).filter(AssetTypeMaster.asset_type_code == code).first()
+        if existing_code:
+            # Skip if the code already exists under a different ID to prevent UniqueViolation
+            continue
+
+        db.add(AssetTypeMaster(
+            asset_type_id=hex_id,
+            asset_type_code=code,
+            asset_type_name=name,
+            is_equipment_room=(hex_id in equipment_room_hexes),
+        ))
     db.commit()
 
 
