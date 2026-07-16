@@ -16,7 +16,6 @@ from app.auth_utils import get_current_user
 from app.models.models import Base
 from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin, equipment_room, maintenance, webhook, config, statistics, websocket, sse, realtime, smms_telemetry, dashboard, monitoring
 from app.routers import auth
-from app.rbac_defaults import ensure_default_menus, ensure_default_roles_users_and_permissions, ensure_default_zones, ensure_default_divisions, ensure_default_stations, ensure_default_asset_types, ensure_default_alert_causes, ensure_default_assets
 from app.services.scheduler import scheduler
 from app.services.redis_service import redis_service
 from app.services.database_service import db_service
@@ -29,10 +28,7 @@ import logging
 
 logger = logging.getLogger("main")
 
-try:
-    from seed import seed as seed_zones_and_divisions
-except ImportError:
-    seed_zones_and_divisions = None
+# Seeding is now run manually via seed.py and disabled on startup
 
 
 def run_database_migrations() -> None:
@@ -47,21 +43,6 @@ def run_database_migrations() -> None:
 
 run_database_migrations()
 Base.metadata.create_all(bind=engine)
-if seed_zones_and_divisions:
-    try:
-        seed_zones_and_divisions()
-    except Exception as e:
-        print(f"Startup seeding warning: {e}")
-
-with SessionLocal() as db:
-    ensure_default_zones(db)
-    ensure_default_divisions(db)
-    ensure_default_stations(db)
-    ensure_default_menus(db)
-    ensure_default_roles_users_and_permissions(db)
-    ensure_default_asset_types(db)
-    ensure_default_alert_causes(db)
-    ensure_default_assets(db)
 
 
 @asynccontextmanager
@@ -69,14 +50,10 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Validating seed data...")
     try:
-        from scripts.seed_data_validation import validate_seed_data, seed_missing_data
+        from scripts.seed_data_validation import validate_seed_data
         validation_results = validate_seed_data()
         if validation_results.get("errors"):
-            logger.warning("Seed data validation found errors. Attempting to seed missing data...")
-            seed_missing_data()
-            validation_results = validate_seed_data()
-            if validation_results.get("errors"):
-                logger.error(f"Seed data still has errors after seeding: {validation_results['errors']}")
+            logger.warning(f"Seed data validation failed: {validation_results['errors']}. Please run database seeding manually (python seed.py).")
     except Exception as e:
         logger.error(f"Failed to run seed data validation: {e}")
 

@@ -37,3 +37,8 @@ auth.md
 thresholds.md
 PROJECT_STRUCTURE.md
 FRONTEND_API_MAPPING.md
+
+# AI agent / docs (local only, not for repo)
+AGENTS.md
+README.md
+docs/
