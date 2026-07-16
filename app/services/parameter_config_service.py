@@ -60,7 +60,7 @@ class ParameterConfigService:
         # two parameters: Temperature (repr 01, type 50) and Humidity (repr 02,
         # type 51). Thresholds are site-decided in the spec; left as sensible
         # generic defaults matching Relay Room — adjust per site/room type.
-        for room_hex, room_code in [("F1", "IPS"), ("F2", "BATT"), ("F3", "MAIN"),
+        for room_hex, room_code in [("F1", "IPSR"), ("F2", "BATT"), ("F3", "MAIN"),
                                      ("F4", "GEN"), ("F5", "OUTDOOR"), ("F6", "LOC")]:
             self.register_parameter({
                 "asset_type_id": room_hex, "asset_number_id": "01",
