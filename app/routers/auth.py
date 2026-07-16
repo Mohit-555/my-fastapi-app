@@ -102,9 +102,16 @@ def login(request: Request, payload: UserLoginRequest, db: Session = Depends(get
                 "division_id": user.division_id,
                 "mobile_number": user.mobile_number,
                 "reporting_officer_id": user.reporting_officer_id,
+                "zone_name": user.zone.zone_name if user.zone else None,
+                "zone_code": user.zone.zone_code if user.zone else None,
+                "division_name": user.division.division_name if user.division else None,
+                "division_code": user.division.division_code if user.division else None,
+                "role_name": user.role.name if user.role else None,
+                "role_display_name": user.role.display_name if user.role else None,
             },
         },
     }
+
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -158,7 +165,14 @@ def get_me(
         "reporting_officer_id": current_user.reporting_officer_id,
         "is_active": current_user.is_active,
         "created_at": current_user.created_at,
+        "zone_name": current_user.zone.zone_name if current_user.zone else None,
+        "zone_code": current_user.zone.zone_code if current_user.zone else None,
+        "division_name": current_user.division.division_name if current_user.division else None,
+        "division_code": current_user.division.division_code if current_user.division else None,
+        "role_name": current_user.role.name if current_user.role else None,
+        "role_display_name": current_user.role.display_name if current_user.role else None,
     }
+
 
 
 @router.post("/change-password")

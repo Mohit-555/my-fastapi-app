@@ -3,6 +3,8 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, AliasChoices, model_validator
 from typing import List, Optional, Union
 from datetime import datetime
+from enum import Enum as PyEnum
+
 
 
 # ─── Zone ─────────────────────────────────────────────────────────────────────
@@ -977,6 +979,12 @@ class LoginUserResponse(BaseModel):
     division_id: Optional[int] = None
     mobile_number: Optional[str] = None
     reporting_officer_id: Optional[int] = None
+    zone_name: Optional[str] = None
+    zone_code: Optional[str] = None
+    division_name: Optional[str] = None
+    division_code: Optional[str] = None
+    role_name: Optional[str] = None
+    role_display_name: Optional[str] = None
 
 class LoginDataResponse(BaseModel):
     token: str
@@ -1010,6 +1018,12 @@ class UserResponse(BaseModel):
     reporting_officer_id: Optional[int] = None
     is_active: bool
     created_at: datetime
+    zone_name: Optional[str] = None
+    zone_code: Optional[str] = None
+    division_name: Optional[str] = None
+    division_code: Optional[str] = None
+    role_name: Optional[str] = None
+    role_display_name: Optional[str] = None
     class Config:
         from_attributes = True
 # ─── RBAC ─────────────────────────────────────────────────────────────────────
@@ -1256,8 +1270,6 @@ class MaintenanceModeListResponse(BaseModel):
     total_pages: int
     rows: List[MaintenanceModeResponse]
 
-
-from enum import Enum as PyEnum
 
 class AlertCategoryEnum(str, PyEnum):
     FAILURE = "FAILURE"
