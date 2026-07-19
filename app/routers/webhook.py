@@ -167,7 +167,7 @@ def _batch_insert(records: List[Telemetry], db: Session):
 # ============ Schemas ============
 
 class BaseWebhookPayload(BaseModel):
-    rqi: str = Field(..., description="Unique request ID")
+    rqi: Optional[str] = Field(None, description="Unique request ID")
     stngw_id: str = Field(..., description="4 Byte hexadecimal station gateway ID")
     
     @field_validator('stngw_id')
@@ -422,7 +422,7 @@ class ImageWebhookPayload(BaseModel):
 
 @router.post("/parameters/fixed", status_code=200)
 def receive_fixed_parameters(
-    payload: FixedParameterWebhookPayload,
+    payload: Union[List[FixedParameterWebhookPayload], FixedParameterWebhookPayload],
     db: Session = Depends(get_db),
     api_key: bool = Depends(verify_api_key),
     mtls_cn: Optional[str] = Depends(verify_client_cert)
@@ -430,6 +430,14 @@ def receive_fixed_parameters(
     """
     Receive fixed-interval parameter data (every 5 sec). Supports batch processing and partial success responses.
     """
+    if isinstance(payload, list):
+        if not payload:
+            raise HTTPException(status_code=400, detail="Empty payload array")
+        payload = payload[0]
+    
+    if not payload.rqi:
+        payload.rqi = f"RQI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
+
     logger.info(f"RQI: {payload.rqi} | GW: {payload.stngw_id} | Fixed parameters ingestion start.")
     with webhook_latency.labels('fixed').time():
         try:
@@ -568,7 +576,7 @@ def receive_fixed_parameters(
 
 @router.post("/parameters/event", status_code=200)
 def receive_event_parameters(
-    payload: EventParameterWebhookPayload,
+    payload: Union[List[EventParameterWebhookPayload], EventParameterWebhookPayload],
     db: Session = Depends(get_db),
     api_key: bool = Depends(verify_api_key),
     mtls_cn: Optional[str] = Depends(verify_client_cert)
@@ -576,6 +584,14 @@ def receive_event_parameters(
     """
     Receive event-based parameter data (Point machine/ELB current sampled every 20ms). Supports batching and partial success.
     """
+    if isinstance(payload, list):
+        if not payload:
+            raise HTTPException(status_code=400, detail="Empty payload array")
+        payload = payload[0]
+
+    if not payload.rqi:
+        payload.rqi = f"RQI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
+
     logger.info(f"RQI: {payload.rqi} | GW: {payload.stngw_id} | Event parameters ingestion start.")
     with webhook_latency.labels('event').time():
         try:
@@ -704,7 +720,7 @@ def receive_event_parameters(
 
 @router.post("/health", status_code=200)
 def receive_health_data(
-    payload: HealthWebhookPayload,
+    payload: Union[List[HealthWebhookPayload], HealthWebhookPayload],
     db: Session = Depends(get_db),
     api_key: bool = Depends(verify_api_key),
     mtls_cn: Optional[str] = Depends(verify_client_cert)
@@ -712,6 +728,14 @@ def receive_health_data(
     """
     Receive health status of sensors and gateway. Raises alerts if faulty, resolves alerts when healthy.
     """
+    if isinstance(payload, list):
+        if not payload:
+            raise HTTPException(status_code=400, detail="Empty payload array")
+        payload = payload[0]
+
+    if not payload.rqi:
+        payload.rqi = f"RQI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
+
     logger.info(f"RQI: {payload.rqi} | GW: {payload.stngw_id} | Health diagnostic ingestion start.")
     with webhook_latency.labels('health').time():
         try:
@@ -879,7 +903,7 @@ def receive_health_data(
 
 @router.post("/discovery", status_code=200)
 def receive_discovery(
-    payload: DiscoveryWebhookPayload,
+    payload: Union[List[DiscoveryWebhookPayload], DiscoveryWebhookPayload],
     db: Session = Depends(get_db),
     api_key: bool = Depends(verify_api_key),
     mtls_cn: Optional[str] = Depends(verify_client_cert)
@@ -887,6 +911,14 @@ def receive_discovery(
     """
     Receive gateway discovery on startup/reboot.
     """
+    if isinstance(payload, list):
+        if not payload:
+            raise HTTPException(status_code=400, detail="Empty payload array")
+        payload = payload[0]
+
+    if not payload.rqi:
+        payload.rqi = f"RQI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
+
     logger.info(f"RQI: {payload.rqi} | GW: {payload.stngw_id} | Gateway discovery start.")
     with webhook_latency.labels('discovery').time():
         try:
@@ -919,13 +951,21 @@ def receive_discovery(
 
 @router.post("/time_sync_confirm", status_code=200)
 def receive_time_sync_confirm(
-    payload: TimeSyncWebhookPayload,
+    payload: Union[List[TimeSyncWebhookPayload], TimeSyncWebhookPayload],
     api_key: bool = Depends(verify_api_key),
     mtls_cn: Optional[str] = Depends(verify_client_cert)
 ):
     """
     Receive time sync confirmation.
     """
+    if isinstance(payload, list):
+        if not payload:
+            raise HTTPException(status_code=400, detail="Empty payload array")
+        payload = payload[0]
+
+    if not payload.rqi:
+        payload.rqi = f"RQI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
+
     logger.info(f"RQI: {payload.rqi} | GW: {payload.stngw_id} | Time sync confirmation received.")
     with webhook_latency.labels('time_sync_confirm').time():
         webhook_requests.labels('time_sync_confirm', 'success').inc()
@@ -937,13 +977,21 @@ def receive_time_sync_confirm(
 
 @router.post("/config_confirm", status_code=200)
 def receive_config_confirm(
-    payload: ConfigWebhookPayload,
+    payload: Union[List[ConfigWebhookPayload], ConfigWebhookPayload],
     api_key: bool = Depends(verify_api_key),
     mtls_cn: Optional[str] = Depends(verify_client_cert)
 ):
     """
     Receive configuration confirmation.
     """
+    if isinstance(payload, list):
+        if not payload:
+            raise HTTPException(status_code=400, detail="Empty payload array")
+        payload = payload[0]
+
+    if not payload.rqi:
+        payload.rqi = f"RQI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
+
     logger.info(f"RQI: {payload.rqi} | GW: {payload.stngw_id} | Config confirmation received. Items count={len(payload.config)}")
     with webhook_latency.labels('config_confirm').time():
         webhook_requests.labels('config_confirm', 'success').inc()
