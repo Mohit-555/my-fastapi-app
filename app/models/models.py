@@ -80,9 +80,45 @@ class Gateway(Base):
     mtls_cn = Column(String(200), nullable=True)
     created_at = Column(DateTime, default=datetime.now(UTC))
 
+    slave_cards = relationship("SlaveCard", back_populates="gateway")
     station = relationship("Station", back_populates="gateways")
     telemetry = relationship("Telemetry", back_populates="gateway", cascade="all, delete-orphan")
     assets = relationship("Asset", back_populates="gateway", cascade="all, delete-orphan", primaryjoin="Gateway.stngw_id == Asset.station_gateway_id")
+
+
+class SlaveCard(Base):
+    """
+    Slave Card — physical I/O card wired under a Master Card (= Gateway).
+
+    Confirmed by senior (RDPMS Architecture Discussion):
+      - Each Master Card is its own independent Gateway (own stngw_id) —
+        no separate "MasterCard" table needed; Gateway IS the Master Card.
+      - Each Gateway/Master Card has multiple separate Slave Cards.
+      - Hierarchy: Gateway (Master Card) -> Slave Cards -> Channels -> para_id.
+
+    Matches the "Configure Slave" sheet: Card No. / Address (hex) / Type
+    (Voltage, Analog, DI, ...) / CH1..CH12 -> para_id.
+    """
+    __tablename__ = "slave_cards"
+
+    id = Column(Integer, primary_key=True, index=True)
+    gateway_id = Column(Integer, ForeignKey("gateways.id"), nullable=False, index=True)
+    card_address = Column(String(2), nullable=False)  # 1-byte hex, e.g. "81"
+    card_type = Column(String(20), nullable=True)      # e.g. "Voltage", "Analog", "DI"
+    created_at = Column(DateTime, default=datetime.now(UTC))
+
+    gateway = relationship("Gateway", back_populates="slave_cards")
+    channels = relationship("AssetParameter", back_populates="slave_card")
+
+    __table_args__ = (
+        # Two slave cards under the same gateway can share an address only
+        # if their type differs (per the "Configure Slave" example where
+        # Card 1 = Address 81/Voltage and Card 2 = Address 81/Analog) —
+        # confirm this assumption with your senior if it matters; adjust to
+        # (gateway_id, card_address) alone if addresses must be unique
+        # regardless of type.
+        UniqueConstraint('gateway_id', 'card_address', 'card_type', name='uq_slave_card_gw_addr_type'),
+    )
 
 
 class Telemetry(Base):
@@ -98,6 +134,38 @@ class Telemetry(Base):
     is_processed = Column(Boolean, default=False, nullable=False, server_default="false", index=True)
 
     gateway = relationship("Gateway", back_populates="telemetry")
+
+
+class TelemetryWaveform(Base):
+    """
+    Full raw waveform samples captured alongside a parameter event — e.g.
+    the complete current/vibration curve during one point machine
+    operation ("Data Format (Point)" in the vendor's flow-diagram sheet:
+    a `raw` array of ~230 samples in addition to the usual prv/prt).
+
+    Confirmed needed by senior for diagnostics, waveform/signature
+    analysis, and predictive maintenance. Stored in its own table (not as
+    a column on Telemetry) since only some readings carry this — most
+    telemetry rows are a single float, this is a large array only present
+    for asset types/events where a full waveform makes sense (chiefly
+    Point Machine operations for now).
+
+    Retention policy: not yet decided (open question from the
+    architecture discussion) — nothing here enforces automatic deletion
+    yet. Add a cleanup/archival job once that's settled, since these rows
+    are large compared to normal Telemetry rows.
+    """
+    __tablename__ = "telemetry_waveforms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    para_id = Column(String(8), nullable=False, index=True)
+    prt = Column(String(30), nullable=True)  # timestamp this waveform corresponds to
+    raw = Column(JSON, nullable=False)        # the full array of samples, e.g. [0.0, 9.9, 4.7, ...]
+    received_at = Column(DateTime, default=datetime.now(UTC))
+
+    __table_args__ = (
+        Index('idx_telemetry_waveform_lookup', 'para_id', 'prt'),
+    )
 
 
 class AssetInventory(Base):
@@ -544,10 +612,19 @@ class AssetParameter(Base):
     asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True, index=True)
     prloc = Column(String(50), nullable=True)  # e.g. "LB-01"
     is_assigned = Column(Boolean, default=False, nullable=False)  # True once asset_id+prloc set via admin
+
+    # Hardware origin of this para_id (Gateway -> Slave Card -> Channel),
+    # confirmed by senior. NULL until an installer/admin configures the
+    # channel — telemetry ingestion is never blocked waiting on this,
+    # same as asset_id/prloc above.
+    slave_card_id = Column(Integer, ForeignKey("slave_cards.id"), nullable=True, index=True)
+    channel_number = Column(String(10), nullable=True)  # e.g. "CH1".."CH12"
+
     created_at = Column(DateTime, default=datetime.now(UTC))
     updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
 
     asset = relationship("Asset", back_populates="parameters")
+    slave_card = relationship("SlaveCard", back_populates="channels")
 
     __table_args__ = (
         Index('idx_asset_params_lookup', 'asset_id', 'para_id'),

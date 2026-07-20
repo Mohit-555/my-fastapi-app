@@ -45,7 +45,7 @@ ASSET_TYPE_MAP = {
 # assets.py, maintenance.py, telemetry.py all call ASSET_TYPE_MAP.get(...)).
 EQUIPMENT_ROOM_TYPE_MAP = {
     "F0": ("RR",      "Relay Room"),
-    "F1": ("IPSR",     "IPS Room"),
+    "F1": ("IPSR",    "IPS Room"),
     "F2": ("BATT",    "Battery Room"),
     "F3": ("MAIN",    "Maintainer Room"),
     "F4": ("GEN",     "Generator Room"),
@@ -70,15 +70,7 @@ ASSET_TYPE_DISPLAY_GROUPS = {
     "BPAC":             ["30", "31"],
     "IPS":              ["50", "51"],
     "Battery":          ["60"],
-    "Relay Room":       ["F0"],
-    "IPS Room":         ["F1"],
-    "Battery Room":     ["F2"],
-    "Maintainer Room":  ["F3"],
-    "Generator Room":   ["F4"],
-    "Outdoor":          ["F5"],
-    "Location Box":     ["F6"],
 }
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # NOTE ON parameter_type_id vs parameter_representation_id (Annexure A §3(l)/(m))

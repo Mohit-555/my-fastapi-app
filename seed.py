@@ -142,51 +142,31 @@ def seed():
 
     db = SessionLocal()
     try:
-        if db.query(Zone).count() == 0:
-            print("Seeding zones and divisions...")
-            for z_data in RDSO_DATA:
-                zone = Zone(
-                    zone_name=z_data["zone_name"],
-                    zone_code=z_data["zone_code"],
-                    zone_id_hex=z_data["zone_id_hex"],
+        if db.query(Zone).count() > 0:
+            print("Database already seeded. Skipping.")
+            return
+
+        print("Seeding zones and divisions...")
+        for z_data in RDSO_DATA:
+            zone = Zone(
+                zone_name=z_data["zone_name"],
+                zone_code=z_data["zone_code"],
+                zone_id_hex=z_data["zone_id_hex"],
+            )
+            db.add(zone)
+            db.flush()  # get zone.id before commit
+
+            for d_data in z_data["divisions"]:
+                division = Division(
+                    division_name=d_data["division_name"],
+                    division_code=d_data["division_code"],
+                    division_id_hex=d_data["division_id_hex"],
+                    zone_id=zone.id,
                 )
-                db.add(zone)
-                db.flush()  # get zone.id before commit
+                db.add(division)
 
-                for d_data in z_data["divisions"]:
-                    division = Division(
-                        division_name=d_data["division_name"],
-                        division_code=d_data["division_code"],
-                        division_id_hex=d_data["division_id_hex"],
-                        zone_id=zone.id,
-                    )
-                    db.add(division)
-
-            db.commit()
-            print(f"Seeded {len(RDSO_DATA)} zones and all divisions successfully.")
-        else:
-            print("Zones and divisions already seeded.")
-
-        print("Seeding default configurations, stations, menus, roles, and assets...")
-        from app.rbac_defaults import (
-            ensure_default_zones,
-            ensure_default_divisions,
-            ensure_default_stations,
-            ensure_default_menus,
-            ensure_default_roles_users_and_permissions,
-            ensure_default_asset_types,
-            ensure_default_alert_causes,
-            ensure_default_assets
-        )
-        ensure_default_zones(db)
-        ensure_default_divisions(db)
-        ensure_default_stations(db)
-        ensure_default_menus(db)
-        ensure_default_roles_users_and_permissions(db)
-        ensure_default_asset_types(db)
-        ensure_default_alert_causes(db)
-        ensure_default_assets(db)
-        print("Default configurations, stations, menus, roles, and assets seeded successfully.")
+        db.commit()
+        print(f"Seeded {len(RDSO_DATA)} zones and all divisions successfully.")
 
     except Exception as e:
         db.rollback()

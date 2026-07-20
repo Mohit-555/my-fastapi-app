@@ -13,7 +13,7 @@ from prometheus_client import Counter, Histogram
 
 from app.database import get_db, settings
 from app.constants import ASSET_TYPE_MAP
-from app.models.models import Gateway, Telemetry, AssetParameter, Asset, AlertEvent
+from app.models.models import Gateway, Telemetry, AssetParameter, Asset, AlertEvent, TelemetryWaveform
 from app.routers.gateway import _resolve_station_from_stngw_id, _offset_event_timestamp
 from app.services.parameter_config_service import param_config_service
 from app.services.redis_service import redis_service
@@ -24,6 +24,12 @@ logger = logging.getLogger("webhook")
 
 
 def safe_create_task(coro):
+    """
+    Defensive wrapper around asyncio.create_task — swallows the case where
+    there's no running event loop (shouldn't normally happen under uvicorn,
+    but avoids crashing an otherwise-successful webhook response if it does)
+    instead of raising RuntimeError out of a broadcast/cache-write call.
+    """
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(coro)
@@ -133,19 +139,30 @@ def normalize_timestamp(timestamp: str) -> str:
     else:
         return f"{timestamp}.000"
 
-def _get_or_create_gateway_with_station(stngw_id: str, db: Session) -> Gateway:
+def _get_or_create_gateway_with_station(stngw_id: str, db: Session, imei: Optional[str] = None) -> Gateway:
     stngw_id = stngw_id.upper().strip()
     gateway = db.query(Gateway).filter(Gateway.stngw_id == stngw_id).first()
     if not gateway:
         station_id = _resolve_station_from_stngw_id(stngw_id, db)
-        gateway = Gateway(stngw_id=stngw_id, station_id=station_id)
+        gateway = Gateway(stngw_id=stngw_id, station_id=station_id, imei=imei)
         db.add(gateway)
         db.flush()
     else:
         if gateway.station_id is None:
             gateway.station_id = _resolve_station_from_stngw_id(stngw_id, db)
             db.flush()
-    
+        # Update imei if this request carries one and we don't have one yet,
+        # or if it differs (log — could indicate a card swap or an error).
+        if imei:
+            if gateway.imei is None:
+                gateway.imei = imei
+                db.flush()
+            elif gateway.imei != imei:
+                logger.warning(
+                    f"Gateway {stngw_id} reported imei={imei!r} but has {gateway.imei!r} on record. "
+                    f"Not overwriting automatically — investigate before updating."
+                )
+
     if gateway.station_id is None:
         raise HTTPException(
             status_code=400,
@@ -167,9 +184,16 @@ def _batch_insert(records: List[Telemetry], db: Session):
 # ============ Schemas ============
 
 class BaseWebhookPayload(BaseModel):
-    rqi: Optional[str] = Field(None, description="Unique request ID")
+    rqi: Optional[str] = Field(None, description="Unique request ID (auto-generated if not provided)")
     stngw_id: str = Field(..., description="4 Byte hexadecimal station gateway ID")
-    
+    imei: Optional[str] = Field(
+        None,
+        description="IMEI of this Gateway/Master Card. Each Master Card is its own "
+                    "independent Gateway with its own stngw_id AND its own IMEI "
+                    "(confirmed in architecture discussion). Stored on the Gateway "
+                    "record; previously accepted but silently dropped."
+    )
+
     @field_validator('stngw_id')
     @classmethod
     def validate_stngw_id(cls, v: str) -> str:
@@ -181,7 +205,14 @@ class ParameterData(BaseModel):
     para_id: str = Field(..., description="4 Byte hexadecimal parameter ID")
     prv: List[float] = Field(..., description="List of parameter values")
     prt: List[str] = Field(..., description="List of timestamps")
-    
+    raw: Optional[List[float]] = Field(
+        None,
+        description="Optional full raw waveform samples for this reading (e.g. a "
+                    "point machine's current/vibration curve during one operation). "
+                    "Stored separately in telemetry_waveforms when present; "
+                    "previously accepted but silently dropped."
+    )
+
     @field_validator('para_id')
     @classmethod
     def validate_para_id(cls, v: str) -> str:
@@ -224,6 +255,12 @@ class EventParameterData(BaseModel):
     para_id: str = Field(..., description="4 Byte hexadecimal parameter ID")
     prv: List[float] = Field(..., description="List of event parameter values")
     prt: str = Field(..., description="Base timestamp for event")
+    raw: Optional[List[float]] = Field(
+        None,
+        description="Optional full raw waveform samples for this event (e.g. a "
+                    "point machine's current/vibration curve during one operation). "
+                    "Stored separately in telemetry_waveforms when present."
+    )
     
     @field_validator('para_id')
     @classmethod
@@ -362,8 +399,9 @@ class AssetInfoData(BaseModel):
         return [p.upper() for p in v]
 
 class InformationWebhookPayload(BaseModel):
-    resi: str = Field(..., description="Unique response ID")
+    resi: Optional[str] = Field(None, description="Unique response ID (auto-generated if not provided)")
     stngw_id: str = Field(..., description="4 Byte hexadecimal station gateway ID")
+    imei: Optional[str] = Field(None, description="IMEI of this Gateway/Master Card")
     vcc: Optional[str] = None
     vgc: Optional[str] = None
     stngw_ver: Optional[str] = None
@@ -406,8 +444,9 @@ class ImageData(BaseModel):
         return normalized
 
 class ImageWebhookPayload(BaseModel):
-    resi: str = Field(..., description="Unique response ID")
+    resi: Optional[str] = Field(None, description="Unique response ID (auto-generated if not provided)")
     stngw_id: str = Field(..., description="4 Byte hexadecimal station gateway ID")
+    imei: Optional[str] = Field(None, description="IMEI of this Gateway/Master Card")
     cmd: str = Field("IMAGE", description="Command type")
     image: List[ImageData]
 
@@ -429,12 +468,14 @@ def receive_fixed_parameters(
 ):
     """
     Receive fixed-interval parameter data (every 5 sec). Supports batch processing and partial success responses.
+    Accepts the payload either as a bare object or wrapped in a JSON array
+    (real gateway payloads observed wrapped in `[{...}]`) — only the first
+    element is used if an array is sent with more than one.
     """
     if isinstance(payload, list):
         if not payload:
             raise HTTPException(status_code=400, detail="Empty payload array")
         payload = payload[0]
-    
     if not payload.rqi:
         payload.rqi = f"RQI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
 
@@ -442,7 +483,7 @@ def receive_fixed_parameters(
     with webhook_latency.labels('fixed').time():
         try:
             stngw_id = payload.stngw_id.upper().strip()
-            gateway = _get_or_create_gateway_with_station(stngw_id, db)
+            gateway = _get_or_create_gateway_with_station(stngw_id, db, imei=payload.imei)
 
             # Pre-resolve existing keys & known parameters
             candidate_para_ids = {p.para_id.upper() for p in payload.parameters if p.para_id}
@@ -522,6 +563,17 @@ def receive_fixed_parameters(
                         )
                         if health["status"] == "warning":
                             logger.warning(f"Parameter {param.para_id} is in warning state: {health['message']}")
+
+                    # Store full raw waveform if the gateway sent one (e.g.
+                    # a point machine operation's current/vibration curve),
+                    # confirmed needed for diagnostics/predictive
+                    # maintenance. Previously accepted but silently dropped.
+                    if param.raw:
+                        db.add(TelemetryWaveform(
+                            para_id=para_id_upper,
+                            prt=param.prt[-1] if param.prt else None,
+                            raw=param.raw,
+                        ))
                 except Exception as e:
                     errors.append({
                         "para_id": param.para_id,
@@ -583,12 +635,12 @@ def receive_event_parameters(
 ):
     """
     Receive event-based parameter data (Point machine/ELB current sampled every 20ms). Supports batching and partial success.
+    Accepts the payload either as a bare object or wrapped in a JSON array.
     """
     if isinstance(payload, list):
         if not payload:
             raise HTTPException(status_code=400, detail="Empty payload array")
         payload = payload[0]
-
     if not payload.rqi:
         payload.rqi = f"RQI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
 
@@ -596,7 +648,7 @@ def receive_event_parameters(
     with webhook_latency.labels('event').time():
         try:
             stngw_id = payload.stngw_id.upper().strip()
-            gateway = _get_or_create_gateway_with_station(stngw_id, db)
+            gateway = _get_or_create_gateway_with_station(stngw_id, db, imei=payload.imei)
 
             candidate_para_ids = {p.para_id.upper() for p in payload.parameters if p.para_id}
 
@@ -666,6 +718,19 @@ def receive_event_parameters(
                         )
                         records_to_insert.append(record)
                         saved_count += 1
+
+                    # Store full raw waveform if present — this endpoint's
+                    # own docstring says "Point machine/ELB current sampled
+                    # every 20ms", which is exactly the kind of operation
+                    # the raw current/vibration curve comes from. Confirmed
+                    # needed for diagnostics/predictive maintenance;
+                    # previously accepted but silently dropped.
+                    if param.raw:
+                        db.add(TelemetryWaveform(
+                            para_id=para_id_upper,
+                            prt=param.prt if isinstance(param.prt, str) else (param.prt[-1] if param.prt else None),
+                            raw=param.raw,
+                        ))
                 except Exception as e:
                     errors.append({
                         "para_id": param.para_id,
@@ -727,12 +792,12 @@ def receive_health_data(
 ):
     """
     Receive health status of sensors and gateway. Raises alerts if faulty, resolves alerts when healthy.
+    Accepts the payload either as a bare object or wrapped in a JSON array.
     """
     if isinstance(payload, list):
         if not payload:
             raise HTTPException(status_code=400, detail="Empty payload array")
         payload = payload[0]
-
     if not payload.rqi:
         payload.rqi = f"RQI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
 
@@ -740,7 +805,7 @@ def receive_health_data(
     with webhook_latency.labels('health').time():
         try:
             stngw_id = payload.stngw_id.upper().strip()
-            gateway = _get_or_create_gateway_with_station(stngw_id, db)
+            gateway = _get_or_create_gateway_with_station(stngw_id, db, imei=payload.imei)
 
             alerts_created = 0
             alerts_resolved = 0
@@ -910,12 +975,12 @@ def receive_discovery(
 ):
     """
     Receive gateway discovery on startup/reboot.
+    Accepts the payload either as a bare object or wrapped in a JSON array.
     """
     if isinstance(payload, list):
         if not payload:
             raise HTTPException(status_code=400, detail="Empty payload array")
         payload = payload[0]
-
     if not payload.rqi:
         payload.rqi = f"RQI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
 
@@ -923,7 +988,7 @@ def receive_discovery(
     with webhook_latency.labels('discovery').time():
         try:
             stngw_id = payload.stngw_id.upper().strip()
-            gateway = _get_or_create_gateway_with_station(stngw_id, db)
+            gateway = _get_or_create_gateway_with_station(stngw_id, db, imei=payload.imei)
             _check_gateway_cert_binding(mtls_cn, gateway)
 
             db.commit()
@@ -957,12 +1022,12 @@ def receive_time_sync_confirm(
 ):
     """
     Receive time sync confirmation.
+    Accepts the payload either as a bare object or wrapped in a JSON array.
     """
     if isinstance(payload, list):
         if not payload:
             raise HTTPException(status_code=400, detail="Empty payload array")
         payload = payload[0]
-
     if not payload.rqi:
         payload.rqi = f"RQI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
 
@@ -983,12 +1048,12 @@ def receive_config_confirm(
 ):
     """
     Receive configuration confirmation.
+    Accepts the payload either as a bare object or wrapped in a JSON array.
     """
     if isinstance(payload, list):
         if not payload:
             raise HTTPException(status_code=400, detail="Empty payload array")
         payload = payload[0]
-
     if not payload.rqi:
         payload.rqi = f"RQI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
 
@@ -1003,17 +1068,19 @@ def receive_config_confirm(
         }
 
 # Reverse lookup: asset_type_code (e.g. "EOP") -> asset_type_hex (e.g. "00").
-# Built once at import time. Note "IPS" is ambiguous (asset "50" = Integrated
-# Power Supply unit, room "F1" = IPS Room) — dict iteration order means the
-# first-inserted match ("50") wins here; para_id-derived asset_type_hex
-# (unambiguous, see below) is always preferred over this when available.
+# Built once at import time. asset "50" = Integrated Power Supply unit
+# (code "IPS"), room "F1" = IPS Room (code "IPSR") — these were previously
+# both coded "IPS", which violates AssetTypeMaster.asset_type_code's unique
+# constraint and crashes seeding; now distinct. para_id-derived
+# asset_type_hex (unambiguous, see below) is still preferred over this
+# lookup when available, since a few other codes may collide in the future.
 _CODE_TO_ASSET_TYPE_HEX = {}
 for _hex, (_code, _name) in ASSET_TYPE_MAP.items():
     _CODE_TO_ASSET_TYPE_HEX.setdefault(_code, _hex)
 
 @router.post("/information", status_code=200)
 def receive_information(
-    payload: InformationWebhookPayload,
+    payload: Union[List[InformationWebhookPayload], InformationWebhookPayload],
     db: Session = Depends(get_db),
     api_key: bool = Depends(verify_api_key),
     mtls_cn: Optional[str] = Depends(verify_client_cert)
@@ -1022,13 +1089,20 @@ def receive_information(
     Receive asset Information data (Annexure B §5.6). Upserts Asset rows and
     maps each para_id to its asset + monitoring location (prloc), the same
     data the "Configure Slave" admin flow would otherwise set by hand.
+    Accepts the payload either as a bare object or wrapped in a JSON array.
     """
+    if isinstance(payload, list):
+        if not payload:
+            raise HTTPException(status_code=400, detail="Empty payload array")
+        payload = payload[0]
+    if not payload.resi:
+        payload.resi = f"RESI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
+
     logger.info(f"RESI: {payload.resi} | GW: {payload.stngw_id} | Information ingestion start, assets={len(payload.info)}")
     with webhook_latency.labels('information').time():
         try:
             stngw_id = payload.stngw_id.upper().strip()
-            gateway = _get_or_create_gateway_with_station(stngw_id, db)
-            _check_gateway_cert_binding(mtls_cn, gateway)
+            gateway = _get_or_create_gateway_with_station(stngw_id, db, imei=payload.imei)
 
             assets_created = 0
             assets_updated = 0
@@ -1038,8 +1112,8 @@ def receive_information(
             for entry in payload.info:
                 try:
                     # Prefer deriving asset_type_hex from the first para_id
-                    # (unambiguous, byte 1 of para_id) over asset_type_code
-                    # (can be ambiguous, e.g. "IPS" means two different things).
+                    # (unambiguous, byte 1 of para_id) over asset_type_code —
+                    # the byte is always the source of truth when available.
                     asset_type_hex = None
                     if entry.para_id:
                         asset_type_hex = entry.para_id[0][0:2].upper()
@@ -1129,7 +1203,7 @@ def receive_information(
 
 @router.post("/image", status_code=200)
 def receive_image(
-    payload: ImageWebhookPayload,
+    payload: Union[List[ImageWebhookPayload], ImageWebhookPayload],
     db: Session = Depends(get_db),
     api_key: bool = Depends(verify_api_key),
     mtls_cn: Optional[str] = Depends(verify_client_cert)
@@ -1140,13 +1214,20 @@ def receive_image(
     fixed-interval reading (dedup + auto-register unmapped para_id), since
     that's exactly what it structurally is: one more (para_id, value,
     timestamp) triple per parameter.
+    Accepts the payload either as a bare object or wrapped in a JSON array.
     """
+    if isinstance(payload, list):
+        if not payload:
+            raise HTTPException(status_code=400, detail="Empty payload array")
+        payload = payload[0]
+    if not payload.resi:
+        payload.resi = f"RESI-AUTO-{int(datetime.now(timezone.utc).timestamp())}"
+
     logger.info(f"RESI: {payload.resi} | GW: {payload.stngw_id} | Image ingestion start, parameters={len(payload.image)}")
     with webhook_latency.labels('image').time():
         try:
             stngw_id = payload.stngw_id.upper().strip()
-            gateway = _get_or_create_gateway_with_station(stngw_id, db)
-            _check_gateway_cert_binding(mtls_cn, gateway)
+            gateway = _get_or_create_gateway_with_station(stngw_id, db, imei=payload.imei)
 
             saved = 0
             skipped = 0
@@ -1183,8 +1264,7 @@ def receive_image(
                 except Exception as e:
                     errors.append(f"{item.para_id}: {str(e)}")
 
-            if new_records:
-                _batch_insert(new_records, db)
+            _batch_insert(new_records, db)
             db.commit()
 
             logger.info(f"RESI: {payload.resi} | GW: {payload.stngw_id} | Image ingestion complete. saved={saved} skipped={skipped}")

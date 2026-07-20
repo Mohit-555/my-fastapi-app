@@ -306,7 +306,7 @@ class ParameterConfigService:
         Representation codes are prefixed V/I to match the cause_map keys
         already used in app/services/logics/ips.py.
         """
-        # (repr_id, type_id, spec_code, kind) — asset_type_id is always "50" (IPS)
+        # (repr_id, type_id, spec_code, unit) — asset_type_id is always "50" (IPS)
         ips_params = [
             ("00", "20", "IPS 110 DC",           "V"),  # 1
             ("10", "30", "IPS SIG-1 110 AC",      "V"),  # 2

@@ -1,9 +1,9 @@
 # app/routers/dashboard.py
+import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from pydantic import BaseModel
-import json
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_, case
 
@@ -160,9 +160,9 @@ async def get_alert_summary_report(
 ):
     """
     Alert Summary Report - Annexure F §1
-    
+
     Returns summarized alert counts grouped by Zone, Division, Station, Alert Type, Asset Type, Asset Number, and Cause.
-    
+
     Accepts filters either as flat query params, or as the spec's JSON body
     envelope: {"start_date":.., "request": {"zone": [...], "cause": [...], ...}}.
     """
@@ -513,6 +513,7 @@ async def get_telemetry_history_report(
     
     # Apply asset number filter
     if asset_number:
+        import json
         try:
             asset_number_list = json.loads(asset_number)
         except Exception:
