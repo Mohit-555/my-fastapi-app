@@ -782,29 +782,43 @@ async def get_performance_report(
 
 @router.get("/overview")
 async def get_dashboard_overview(
+    zone_code: Optional[str] = Query(None, description="Optional Zone Code filter"),
+    division_code: Optional[str] = Query(None, description="Optional Division Code filter"),
+    station_code: Optional[str] = Query(None, description="Optional Station Code filter"),
     db: Session = Depends(get_db)
 ):
     """
     Get executive analytics overview for the main visual dashboard.
-    Returns real DB calculations for all 15 widgets:
-    - Top KPI cards (Total Assets, Failures, System Health %, Gateway Health %, Prediction Accuracy %, MTTR)
-    - Alert Trend (Failure vs Predictive over 14 days)
-    - Alert Severity breakdown
-    - Division Health scores
-    - Failure Frequency by Asset Category
-    - Maintenance Metrics (MTTR / MTBF)
-    - Prediction Accuracy Trend
-    - Gateway Health Score
-    - Failure Root Causes
-    - Recent Critical Activities
+    Supports filtering by Zone, Division, and Station via GET query params.
     """
     try:
+        # Determine station_ids filter if zone, division, or station is selected
+        station_ids = None
+        if station_code:
+            stn = db.query(Station).filter(Station.station_code == station_code).first()
+            station_ids = [stn.id] if stn else []
+        elif division_code:
+            div = db.query(Division).filter(Division.division_code == division_code).first()
+            station_ids = [s.id for s in div.stations] if div else []
+        elif zone_code:
+            zn = db.query(Zone).filter(Zone.zone_code == zone_code).first()
+            if zn:
+                station_ids = [s.id for div in zn.divisions for s in div.stations]
+            else:
+                station_ids = []
+
         # 1. Total Assets & Failures
-        total_assets = db.query(func.count(Asset.id)).scalar() or 0
-        active_failures = db.query(func.count(AlertEvent.id)).filter(
+        asset_query = db.query(func.count(Asset.id))
+        alert_query = db.query(func.count(AlertEvent.id)).filter(
             AlertEvent.alert_type == 'Failure',
             or_(AlertEvent.alert_status == 'Active', AlertEvent.alert_status == 'Pending')
-        ).scalar() or 0
+        )
+        if station_ids is not None:
+            asset_query = asset_query.filter(Asset.station_id.in_(station_ids))
+            alert_query = alert_query.filter(AlertEvent.station_id.in_(station_ids))
+
+        total_assets = asset_query.scalar() or 0
+        active_failures = alert_query.scalar() or 0
         
         system_health = round(((total_assets - active_failures) / total_assets) * 100, 1) if total_assets > 0 else 94.0
 
