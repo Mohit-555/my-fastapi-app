@@ -53,15 +53,18 @@ if seed_zones_and_divisions:
     except Exception as e:
         print(f"Startup seeding warning: {e}")
 
-with SessionLocal() as db:
-    ensure_default_zones(db)
-    ensure_default_divisions(db)
-    ensure_default_stations(db)
-    ensure_default_menus(db)
-    ensure_default_roles_users_and_permissions(db)
-    ensure_default_asset_types(db)
-    ensure_default_alert_causes(db)
-    ensure_default_assets(db)
+try:
+    with SessionLocal() as db:
+        ensure_default_zones(db)
+        ensure_default_divisions(db)
+        ensure_default_stations(db)
+        ensure_default_menus(db)
+        ensure_default_roles_users_and_permissions(db)
+        ensure_default_asset_types(db)
+        ensure_default_alert_causes(db)
+        ensure_default_assets(db)
+except Exception as e:
+    logger.warning(f"Startup default seeding warning (handled): {e}")
 
 
 @asynccontextmanager

@@ -349,12 +349,9 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
         db.rollback()
 
     # 2. Ensure Menu Access Permissions (RoleMenu)
-    # Clear existing permissions to avoid conflicts and match Imran's map exactly
-    db.query(RoleMenu).delete()
-    db.commit()
-
     menus_by_slug = {m.slug: m for m in db.query(Menu).all()}
     roles_by_id = {r.id: r for r in db.query(Role).all()}
+    existing_role_menus = {(rm.role_id, rm.menu_id): rm for rm in db.query(RoleMenu).all()}
 
     for slug, role_ids in ROLE_MAP.items():
         menu = menus_by_slug.get(slug)
@@ -364,8 +361,18 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
             role = roles_by_id.get(role_id)
             if not role:
                 continue
-            db.add(RoleMenu(role_id=role_id, menu_id=menu.id, permission="full" if role_id == 1 else "view"))
-    db.commit()
+            target_perm = "full" if role_id == 1 else "view"
+            existing_rm = existing_role_menus.get((role_id, menu.id))
+            if existing_rm:
+                existing_rm.permission = target_perm
+            else:
+                db.add(RoleMenu(role_id=role_id, menu_id=menu.id, permission=target_perm))
+                existing_role_menus[(role_id, menu.id)] = True
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"RoleMenu seeding warning (handled): {e}")
 
     # 3. Ensure Users
     default_password_hash = hash_password("admin123")
