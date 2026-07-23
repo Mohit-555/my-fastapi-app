@@ -820,25 +820,36 @@ async def get_dashboard_overview(
         total_assets = asset_query.scalar() or 0
         active_failures = alert_query.scalar() or 0
         
-        system_health = round(((total_assets - active_failures) / total_assets) * 100, 1) if total_assets > 0 else 94.0
+        system_health = max(0.0, min(100.0, round(((total_assets - active_failures) / total_assets) * 100, 1))) if total_assets > 0 else 94.0
 
         # 2. Gateway Health %
-        total_gateways = db.query(func.count(Gateway.id)).scalar() or 0
+        gateway_query = db.query(func.count(Gateway.id))
+        if station_ids is not None:
+            gateway_query = gateway_query.filter(Gateway.station_id.in_(station_ids))
+        total_gateways = gateway_query.scalar() or 0
         gateway_health = 96.0 if total_gateways > 0 else 96.0
 
         # 3. Prediction Accuracy %
-        pred_total = db.query(func.count(AlertEvent.id)).filter(AlertEvent.alert_type == 'Predictive').scalar() or 0
-        pred_true = db.query(func.count(AlertEvent.id)).filter(
+        pred_total_query = db.query(func.count(AlertEvent.id)).filter(AlertEvent.alert_type == 'Predictive')
+        pred_true_query = db.query(func.count(AlertEvent.id)).filter(
             AlertEvent.alert_type == 'Predictive',
             AlertEvent.feedback.in_(['T', 'PT'])
-        ).scalar() or 0
+        )
+        if station_ids is not None:
+            pred_total_query = pred_total_query.filter(AlertEvent.station_id.in_(station_ids))
+            pred_true_query = pred_true_query.filter(AlertEvent.station_id.in_(station_ids))
+        pred_total = pred_total_query.scalar() or 0
+        pred_true = pred_true_query.scalar() or 0
         prediction_accuracy = round((pred_true / pred_total) * 100, 1) if pred_total > 0 else 91.0
 
         # 4. MTTR (Mean Time to Rectify in hours)
-        rectified_alerts = db.query(AlertEvent.alert_time, AlertEvent.rectification_time).filter(
+        rectified_alerts_query = db.query(AlertEvent.alert_time, AlertEvent.rectification_time).filter(
             AlertEvent.rectification_time.isnot(None),
             AlertEvent.alert_time.isnot(None)
-        ).all()
+        )
+        if station_ids is not None:
+            rectified_alerts_query = rectified_alerts_query.filter(AlertEvent.station_id.in_(station_ids))
+        rectified_alerts = rectified_alerts_query.all()
         if rectified_alerts:
             durations = [(r[1] - r[0]).total_seconds() / 3600.0 for r in rectified_alerts if r[1] > r[0]]
             mttr_hours = round(sum(durations) / len(durations), 1) if durations else 4.2
@@ -853,17 +864,22 @@ async def get_dashboard_overview(
             day_start = datetime.combine(day_date, datetime.min.time())
             day_end = datetime.combine(day_date, datetime.max.time())
 
-            fail_cnt = db.query(func.count(AlertEvent.id)).filter(
+            fail_q = db.query(func.count(AlertEvent.id)).filter(
                 AlertEvent.alert_type == 'Failure',
                 AlertEvent.alert_time >= day_start,
                 AlertEvent.alert_time <= day_end
-            ).scalar() or 0
-
-            pred_cnt = db.query(func.count(AlertEvent.id)).filter(
+            )
+            pred_q = db.query(func.count(AlertEvent.id)).filter(
                 AlertEvent.alert_type == 'Predictive',
                 AlertEvent.alert_time >= day_start,
                 AlertEvent.alert_time <= day_end
-            ).scalar() or 0
+            )
+            if station_ids is not None:
+                fail_q = fail_q.filter(AlertEvent.station_id.in_(station_ids))
+                pred_q = pred_q.filter(AlertEvent.station_id.in_(station_ids))
+
+            fail_cnt = fail_q.scalar() or 0
+            pred_cnt = pred_q.scalar() or 0
 
             alert_trend.append({
                 "date": day_date.strftime("%d %b"),
@@ -872,8 +888,13 @@ async def get_dashboard_overview(
             })
 
         # 6. Alert Severity
-        fail_active = db.query(func.count(AlertEvent.id)).filter(AlertEvent.alert_type == 'Failure').scalar() or 0
-        pred_active = db.query(func.count(AlertEvent.id)).filter(AlertEvent.alert_type == 'Predictive').scalar() or 0
+        fail_active_q = db.query(func.count(AlertEvent.id)).filter(AlertEvent.alert_type == 'Failure')
+        pred_active_q = db.query(func.count(AlertEvent.id)).filter(AlertEvent.alert_type == 'Predictive')
+        if station_ids is not None:
+            fail_active_q = fail_active_q.filter(AlertEvent.station_id.in_(station_ids))
+            pred_active_q = pred_active_q.filter(AlertEvent.station_id.in_(station_ids))
+        fail_active = fail_active_q.scalar() or 0
+        pred_active = pred_active_q.scalar() or 0
         
         if fail_active + pred_active == 0:
             alert_severity = {"Critical": 12, "High": 8, "Medium": 45, "Low": 35}
@@ -918,7 +939,10 @@ async def get_dashboard_overview(
             "Axle Counter": 0,
             "Signal": 0
         }
-        failure_alerts = db.query(AlertEvent.asset_type_hex).filter(AlertEvent.alert_type == 'Failure').all()
+        fa_query = db.query(AlertEvent.asset_type_hex).filter(AlertEvent.alert_type == 'Failure')
+        if station_ids is not None:
+            fa_query = fa_query.filter(AlertEvent.station_id.in_(station_ids))
+        failure_alerts = fa_query.all()
         for fa in failure_alerts:
             hex_code = fa.asset_type_hex
             if hex_code == "00":
@@ -941,9 +965,12 @@ async def get_dashboard_overview(
             failure_frequency = [{"name": k, "value": v} for k, v in category_counts.items()]
 
         # 9. Failure Root Causes
-        cause_rows = db.query(AlertEvent.cause, func.count(AlertEvent.id)).filter(
+        cause_query = db.query(AlertEvent.cause, func.count(AlertEvent.id)).filter(
             AlertEvent.cause.isnot(None)
-        ).group_by(AlertEvent.cause).order_by(func.count(AlertEvent.id).desc()).limit(5).all()
+        )
+        if station_ids is not None:
+            cause_query = cause_query.filter(AlertEvent.station_id.in_(station_ids))
+        cause_rows = cause_query.group_by(AlertEvent.cause).order_by(func.count(AlertEvent.id).desc()).limit(5).all()
 
         if cause_rows:
             root_causes = [{"cause": r[0] or "Unknown", "count": r[1]} for r in cause_rows]
@@ -955,7 +982,10 @@ async def get_dashboard_overview(
             ]
 
         # 10. Recent Critical Activities
-        recent_events = db.query(AlertEvent).order_by(AlertEvent.alert_time.desc()).limit(5).all()
+        recent_query = db.query(AlertEvent)
+        if station_ids is not None:
+            recent_query = recent_query.filter(AlertEvent.station_id.in_(station_ids))
+        recent_events = recent_query.order_by(AlertEvent.alert_time.desc()).limit(5).all()
         recent_activities = []
         for ev in recent_events:
             time_str = ev.alert_time.strftime("%H:%M") if ev.alert_time else "10:24"
