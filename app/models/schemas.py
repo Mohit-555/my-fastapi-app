@@ -1318,3 +1318,46 @@ class AlertCauseListResponse(BaseModel):
     rows: List[AlertCauseResponse]
 
 
+# ─── Slave Card ─────────────────────────────────────────────────────────────
+
+class SlaveCardBase(BaseModel):
+    gateway_id: int = Field(..., validation_alias=AliasChoices('gateway_id', 'gatewayId'))
+    card_address: str = Field(..., max_length=2, validation_alias=AliasChoices('card_address', 'cardAddress'), description="1-byte hex card address, e.g. '81'")
+    card_type: Optional[str] = Field(None, max_length=20, validation_alias=AliasChoices('card_type', 'cardType'), description="e.g. 'Voltage', 'Analog', 'DI'")
+
+class SlaveCardCreate(SlaveCardBase):
+    pass
+
+class SlaveCardUpdate(BaseModel):
+    gateway_id: Optional[int] = Field(None, validation_alias=AliasChoices('gateway_id', 'gatewayId'))
+    card_address: Optional[str] = Field(None, max_length=2, validation_alias=AliasChoices('card_address', 'cardAddress'))
+    card_type: Optional[str] = Field(None, max_length=20, validation_alias=AliasChoices('card_type', 'cardType'))
+
+class SlaveCardResponse(SlaveCardBase):
+    id: int
+    created_at: datetime
+
+    gatewayId: int = 0
+    cardAddress: str = ""
+    cardType: Optional[str] = None
+
+    @model_validator(mode="after")
+    def populate_aliases(self) -> "SlaveCardResponse":
+        self.gatewayId = self.gateway_id
+        self.cardAddress = self.card_address
+        self.cardType = self.card_type
+        return self
+
+    class Config:
+        from_attributes = True
+
+
+class SlaveCardListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    rows: List[SlaveCardResponse]
+
+
+
