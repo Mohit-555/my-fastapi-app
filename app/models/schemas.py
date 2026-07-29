@@ -920,8 +920,10 @@ class AssetParameterUpdate(BaseModel):
     Matches the vendor flow: 'After initial save of channel config: Add
     asset_number_code, Add prloc, Save'.
     """
-    asset_id: Optional[int] = None
+    asset_id: Optional[int] = Field(None, validation_alias=AliasChoices('asset_id', 'assetId'))
     prloc: Optional[str] = Field(default=None, max_length=50, description="Location box, e.g. 'LB-01'")
+    slave_card_id: Optional[int] = Field(None, validation_alias=AliasChoices('slave_card_id', 'slaveCardId'))
+    channel_number: Optional[str] = Field(None, max_length=10, validation_alias=AliasChoices('channel_number', 'channelNumber'))
 
 
 class AssetParameterResponse(BaseModel):
@@ -936,8 +938,33 @@ class AssetParameterResponse(BaseModel):
     is_assigned: bool
     station_id: Optional[int] = None          # resolved via asset, if assigned
     station_code: Optional[str] = None        # resolved via asset, if assigned
+    slave_card_id: Optional[int] = None
+    channel_number: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+    slaveCardId: Optional[int] = None
+    channelNumber: Optional[str] = None
+    assetId: Optional[int] = None
+    assetNumberCode: Optional[str] = None
+    assetTypeHex: Optional[str] = None
+    parameterTypeHex: Optional[str] = None
+    parameterName: Optional[str] = None
+    stationId: Optional[int] = None
+    stationCode: Optional[str] = None
+
+    @model_validator(mode="after")
+    def populate_aliases(self) -> "AssetParameterResponse":
+        self.slaveCardId = self.slave_card_id
+        self.channelNumber = self.channel_number
+        self.assetId = self.asset_id
+        self.assetNumberCode = self.asset_number_code
+        self.assetTypeHex = self.asset_type_hex
+        self.parameterTypeHex = self.parameter_type_hex
+        self.parameterName = self.parameter_name
+        self.stationId = self.station_id
+        self.stationCode = self.station_code
+        return self
 
     class Config:
         from_attributes = True

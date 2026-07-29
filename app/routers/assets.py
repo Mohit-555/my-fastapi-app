@@ -1194,6 +1194,8 @@ def _build_asset_parameter_response(ap: AssetParameter) -> AssetParameterRespons
         is_assigned=ap.is_assigned,
         station_id=asset.station_id if asset else None,
         station_code=asset.station.station_code if asset and asset.station else None,
+        slave_card_id=ap.slave_card_id,
+        channel_number=ap.channel_number,
         created_at=ap.created_at,
         updated_at=ap.updated_at,
     )
@@ -1207,7 +1209,7 @@ def list_asset_parameters(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
-):
+ ):
     """
     List discovered para_id → asset/prloc mappings for the 'Configure Slave'
     admin screen. Rows are created automatically by gateway.py on first sight
@@ -1261,9 +1263,8 @@ def assign_asset_parameter(
     an engineer links the channel's para_id to the asset_number_code and
     records the location box (prloc) — e.g. {"asset_id": 5, "prloc": "LB-01"}.
 
-    A row is considered fully assigned (is_assigned=True) once both asset_id
-    and prloc are set. Either field can be set independently first if the
-    engineer only has one piece of information at the time.
+    A row is considered fully assigned (is_assigned=True) once asset_id, prloc,
+    slave_card_id, and channel_number are all set.
     """
     ap = db.query(AssetParameter).filter(AssetParameter.id == asset_parameter_id).first()
     if not ap:
@@ -1276,10 +1277,16 @@ def assign_asset_parameter(
         if not asset:
             raise HTTPException(status_code=404, detail=f"Asset {data['asset_id']} not found")
 
+    if "slave_card_id" in data and data["slave_card_id"] is not None:
+        from app.models.models import SlaveCard
+        slave_card = db.query(SlaveCard).filter(SlaveCard.id == data["slave_card_id"]).first()
+        if not slave_card:
+            raise HTTPException(status_code=404, detail=f"SlaveCard {data['slave_card_id']} not found")
+
     for field, value in data.items():
         setattr(ap, field, value)
 
-    ap.is_assigned = ap.asset_id is not None and bool(ap.prloc)
+    ap.is_assigned = ap.asset_id is not None and bool(ap.prloc) and ap.slave_card_id is not None and bool(ap.channel_number)
 
     db.commit()
     db.refresh(ap)
