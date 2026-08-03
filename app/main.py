@@ -45,7 +45,7 @@ def run_database_migrations() -> None:
     command.upgrade(alembic_cfg, "head")
 
 
-if os.getenv("SKIP_STARTUP_SEEDING") != "1":
+if os.getenv("RUN_STARTUP_SEEDING") == "1":
     run_database_migrations()
     Base.metadata.create_all(bind=engine)
     if seed_zones_and_divisions:
@@ -71,18 +71,19 @@ if os.getenv("SKIP_STARTUP_SEEDING") != "1":
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("Validating seed data...")
-    try:
-        from scripts.seed_data_validation import validate_seed_data, seed_missing_data
-        validation_results = validate_seed_data()
-        if validation_results.get("errors"):
-            logger.warning("Seed data validation found errors. Attempting to seed missing data...")
-            seed_missing_data()
+    if os.getenv("RUN_STARTUP_SEEDING") == "1":
+        logger.info("Validating seed data...")
+        try:
+            from scripts.seed_data_validation import validate_seed_data, seed_missing_data
             validation_results = validate_seed_data()
             if validation_results.get("errors"):
-                logger.error(f"Seed data still has errors after seeding: {validation_results['errors']}")
-    except Exception as e:
-        logger.error(f"Failed to run seed data validation: {e}")
+                logger.warning("Seed data validation found errors. Attempting to seed missing data...")
+                seed_missing_data()
+                validation_results = validate_seed_data()
+                if validation_results.get("errors"):
+                    logger.error(f"Seed data still has errors after seeding: {validation_results['errors']}")
+        except Exception as e:
+            logger.error(f"Failed to run seed data validation: {e}")
 
     await db_service.initialize()
     scheduler.start()
