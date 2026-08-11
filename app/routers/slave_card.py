@@ -101,22 +101,6 @@ def list_slave_cards(
     )
 
 
-@router.get("/filters")
-def get_slave_card_filters(db: Session = Depends(get_db)):
-    """Return filter options for Slave Cards (distinct card types, gateways, stations)."""
-    card_types = [
-        row[0] for row in db.query(SlaveCard.card_type).distinct().order_by(SlaveCard.card_type).all()
-        if row[0]
-    ]
-    gateways = [
-        {"id": g.id, "stngw_id": g.stngw_id, "station_id": g.station_id}
-        for g in db.query(Gateway).order_by(Gateway.stngw_id).all()
-    ]
-    return {
-        "card_types": card_types,
-        "gateways": gateways,
-    }
-
 @router.get("/{slave_card_id}", response_model=SlaveCardResponse)
 def get_slave_card(slave_card_id: int, db: Session = Depends(get_db)):
     """Retrieve details of a single Slave Card."""
