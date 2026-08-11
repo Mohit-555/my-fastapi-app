@@ -1,11 +1,12 @@
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
-from app.models.models import SlaveCard, Gateway, AssetParameter
+from app.models.models import SlaveCard, Gateway, Station, Division, Zone, AssetParameter
 from app.models.schemas import SlaveCardCreate, SlaveCardUpdate, SlaveCardResponse, SlaveCardListResponse
 
 router = APIRouter(prefix="/slave-cards", tags=["Slave Card Management"])
@@ -13,27 +14,108 @@ router = APIRouter(prefix="/slave-cards", tags=["Slave Card Management"])
 @router.get("", response_model=SlaveCardListResponse)
 def list_slave_cards(
     gateway_id: Optional[int] = Query(None, description="Filter by Gateway ID"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=500),
+    stngw_id: Optional[str] = Query(None, description="Filter by Gateway Code (stngw_id)"),
+    card_address: Optional[str] = Query(None, description="Filter by Card Address (e.g. '81')"),
+    card_type: Optional[str] = Query(None, description="Filter by Card Type (e.g. 'Voltage', 'Analog', 'DI')"),
+    station_id: Optional[int] = Query(None, description="Filter by Station ID"),
+    division_id: Optional[int] = Query(None, description="Filter by Division ID"),
+    zone_id: Optional[int] = Query(None, description="Filter by Zone ID"),
+    search: Optional[str] = Query(None, description="Search term across card address, card type, gateway code, or station name"),
+    q: Optional[str] = Query(None, description="Alias for search term"),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    page_size: int = Query(50, ge=1, le=500, description="Items per page"),
+    limit: Optional[int] = Query(None, ge=1, le=500, description="Alias for page_size"),
+    offset: Optional[int] = Query(None, ge=0, description="Row offset for pagination"),
     db: Session = Depends(get_db),
 ):
-    """List all configured Slave Cards with optional Gateway filtering."""
-    q = db.query(SlaveCard)
+    """List all configured Slave Cards with comprehensive filtering and pagination."""
+    q_db = db.query(SlaveCard)
+
+    search_term = search or q
+
+    # Determine if joins are needed
+    need_gateway_join = (
+        stngw_id is not None or
+        station_id is not None or
+        division_id is not None or
+        zone_id is not None or
+        search_term is not None
+    )
+
+    if need_gateway_join:
+        q_db = q_db.join(Gateway, SlaveCard.gateway_id == Gateway.id)
+
     if gateway_id is not None:
-        q = q.filter(SlaveCard.gateway_id == gateway_id)
-        
-    total = q.count()
-    total_pages = (total + page_size - 1) // page_size if total else 0
-    offset = (page - 1) * page_size
-    rows = q.order_by(SlaveCard.id).offset(offset).limit(page_size).all()
-    
+        q_db = q_db.filter(SlaveCard.gateway_id == gateway_id)
+
+    if stngw_id:
+        q_db = q_db.filter(Gateway.stngw_id.ilike(f"%{stngw_id.strip()}%"))
+
+    if card_address:
+        q_db = q_db.filter(SlaveCard.card_address.ilike(f"%{card_address.strip()}%"))
+
+    if card_type:
+        q_db = q_db.filter(SlaveCard.card_type.ilike(f"%{card_type.strip()}%"))
+
+    if station_id is not None:
+        q_db = q_db.filter(Gateway.station_id == station_id)
+
+    if division_id is not None or zone_id is not None:
+        q_db = q_db.join(Station, Gateway.station_id == Station.id)
+        if division_id is not None:
+            q_db = q_db.filter(Station.division_id == division_id)
+        if zone_id is not None:
+            q_db = q_db.join(Division, Station.division_id == Division.id)
+            q_db = q_db.filter(Division.zone_id == zone_id)
+
+    if search_term:
+        term = f"%{search_term.strip()}%"
+        q_db = q_db.filter(
+            or_(
+                SlaveCard.card_address.ilike(term),
+                SlaveCard.card_type.ilike(term),
+                Gateway.stngw_id.ilike(term),
+            )
+        )
+
+    total = q_db.count()
+
+    effective_page_size = limit if limit is not None else page_size
+    if offset is not None:
+        calc_offset = offset
+        calc_page = (offset // effective_page_size) + 1
+    else:
+        calc_page = page
+        calc_offset = (page - 1) * effective_page_size
+
+    total_pages = (total + effective_page_size - 1) // effective_page_size if total else 0
+
+    rows = q_db.order_by(SlaveCard.id).offset(calc_offset).limit(effective_page_size).all()
+
     return SlaveCardListResponse(
         total=total,
-        page=page,
-        page_size=page_size,
+        page=calc_page,
+        page_size=effective_page_size,
         total_pages=total_pages,
         rows=rows,
     )
+
+
+@router.get("/filters")
+def get_slave_card_filters(db: Session = Depends(get_db)):
+    """Return filter options for Slave Cards (distinct card types, gateways, stations)."""
+    card_types = [
+        row[0] for row in db.query(SlaveCard.card_type).distinct().order_by(SlaveCard.card_type).all()
+        if row[0]
+    ]
+    gateways = [
+        {"id": g.id, "stngw_id": g.stngw_id, "station_id": g.station_id}
+        for g in db.query(Gateway).order_by(Gateway.stngw_id).all()
+    ]
+    return {
+        "card_types": card_types,
+        "gateways": gateways,
+    }
 
 @router.get("/{slave_card_id}", response_model=SlaveCardResponse)
 def get_slave_card(slave_card_id: int, db: Session = Depends(get_db)):

@@ -1368,11 +1368,21 @@ class SlaveCardResponse(SlaveCardBase):
     cardAddress: str = ""
     cardType: Optional[str] = None
 
+    stngw_id: Optional[str] = None
+    stngwId: Optional[str] = None
+    station_id: Optional[int] = None
+    stationId: Optional[int] = None
+    station_name: Optional[str] = None
+    stationName: Optional[str] = None
+
     @model_validator(mode="after")
     def populate_aliases(self) -> "SlaveCardResponse":
         self.gatewayId = self.gateway_id
         self.cardAddress = self.card_address
         self.cardType = self.card_type
+        self.stngwId = self.stngw_id
+        self.stationId = self.station_id
+        self.stationName = self.station_name
         return self
 
     class Config:

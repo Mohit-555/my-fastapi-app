@@ -110,6 +110,18 @@ class SlaveCard(Base):
     gateway = relationship("Gateway", back_populates="slave_cards")
     channels = relationship("AssetParameter", back_populates="slave_card")
 
+    @property
+    def stngw_id(self) -> Optional[str]:
+        return self.gateway.stngw_id if self.gateway else None
+
+    @property
+    def station_id(self) -> Optional[int]:
+        return self.gateway.station_id if self.gateway else None
+
+    @property
+    def station_name(self) -> Optional[str]:
+        return self.gateway.station.station_name if (self.gateway and self.gateway.station) else None
+
     __table_args__ = (
         # Two slave cards under the same gateway can share an address only
         # if their type differs (per the "Configure Slave" example where
