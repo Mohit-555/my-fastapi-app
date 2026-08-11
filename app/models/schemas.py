@@ -776,6 +776,8 @@ class AlertFiltersResponse(BaseModel):
     poll_intervals: List[AlertFilterOption] = []
     parameter_type_hexes: List[AlertFilterOption] = []
     roles: List[AlertFilterOption] = []
+    card_types: List[AlertFilterOption] = []
+    gateways: List[DropdownOption] = []
 
 
 # ─── Thresholds ───────────────────────────────────────────────────────────────

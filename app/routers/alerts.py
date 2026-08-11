@@ -13,7 +13,7 @@ from app.services.websocket_manager import websocket_manager
 
 from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP, PARAMETER_TYPE_MAP
 from app.database import get_db
-from app.models.models import AlertEvent, Asset, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster, AssetInventory, MaintenanceMode, Role
+from app.models.models import AlertEvent, Asset, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster, AssetInventory, MaintenanceMode, Role, SlaveCard, Gateway
 from app.models.schemas import (
     AlertEventCreate,
     AlertEventResponse,
@@ -1203,6 +1203,41 @@ def get_alert_filters(db: Session = Depends(get_db)):
         for r in roles
     ]
 
+    slave_card_types = [
+        row[0] for row in db.query(SlaveCard.card_type).distinct().order_by(SlaveCard.card_type).all()
+        if row[0]
+    ]
+    if not slave_card_types:
+        slave_card_types = ["Voltage", "Analog", "DI"]
+
+    card_types_list = [
+        AlertFilterOption(id=idx, label=ct, value=ct)
+        for idx, ct in enumerate(slave_card_types, start=1)
+    ]
+
+    gateways_db = db.query(Gateway).order_by(Gateway.stngw_id).all()
+    gateways_list = []
+    for g in gateways_db:
+        s = stations_by_id.get(g.station_id) if g.station_id else None
+        d = divisions_by_id.get(s.division_id) if s else None
+        z = zones_by_id.get(d.zone_id) if d else None
+        gateways_list.append(DropdownOption(
+            id=g.id,
+            label=g.stngw_id,
+            code=g.stngw_id,
+            hex_id=g.stngw_id,
+            value=g.stngw_id,
+            station_id=g.station_id,
+            station_code=s.station_code if s else None,
+            station_name=s.station_name if s else None,
+            division_id=d.id if d else None,
+            division_code=d.division_code if d else None,
+            division_name=d.division_name if d else None,
+            zone_id=z.id if z else None,
+            zone_code=z.zone_code if z else None,
+            zone_name=z.zone_name if z else None,
+        ))
+
     return AlertFiltersResponse(
         zones=zones_list,
         divisions=divisions_list,
@@ -1217,6 +1252,8 @@ def get_alert_filters(db: Session = Depends(get_db)):
         poll_intervals=poll_intervals_list,
         parameter_type_hexes=parameter_type_hexes_list,
         roles=roles_list,
+        card_types=card_types_list,
+        gateways=gateways_list,
     )
 
 
