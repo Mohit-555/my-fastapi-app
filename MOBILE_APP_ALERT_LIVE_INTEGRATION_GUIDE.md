@@ -122,31 +122,34 @@ Fetch live counters for the top summary cards.
 
 * **HTTP Method**: `GET`
 * **Endpoint**: `/alerts/live`
-* **Response Payload (`200 OK`)**:
+* **Response Payload (`200 OK` — Real Backend Schema `AlertLiveResponse`)**:
   ```json
   {
+    "summary": {
+      "predictive": 10,
+      "failure": 5,
+      "total": 15
+    },
     "alerts": [
       {
         "id": 4812,
-        "station_name": "PRYG",
-        "asset_code": "AST-04812",
+        "zone_id": 1,
+        "zone": "NR",
+        "division_id": 5,
+        "division": "LKO",
+        "station_id": 23,
+        "station": "PRYG",
+        "title": "PRYG · AST-04812",
         "alert_type": "Failure",
+        "asset_type_hex": "00",
+        "asset_type": "Point Machine",
+        "asset_no": "AST-04812",
         "alert_status": "Active",
-        "time": "02-12-2022 · 19:34",
         "cause": "over-current on track relay circuit",
         "feedback": null,
-        "remark": null
-      },
-      {
-        "id": 3310,
-        "station_name": "PRYG",
-        "asset_code": "AST-03310",
-        "alert_type": "Predictive",
-        "alert_status": "Active",
-        "time": "02-12-2023 · 18:36",
-        "cause": "vibration trend exceeding baseline",
-        "feedback": null,
-        "remark": null
+        "acknowledged": false,
+        "incidence_date_time": "2026-08-18T13:34:00Z",
+        "remarks": null
       }
     ]
   }
