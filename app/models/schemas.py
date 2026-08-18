@@ -1400,4 +1400,31 @@ class SlaveCardListResponse(BaseModel):
     rows: List[SlaveCardResponse]
 
 
+class SystemHealthItem(BaseModel):
+    total: int
+    faulty: int
+
+
+class SystemHealthTotalsResponse(BaseModel):
+    sensors: SystemHealthItem
+    iot_devices: SystemHealthItem
+    network: SystemHealthItem
+    station_gateway: SystemHealthItem
+
+
+class FaultyByStationItem(BaseModel):
+    station_code: str
+    asset_code: str
+    sensor_faulty: int
+    iot_faulty: int
+    net_faulty: int
+    gw_faulty: int
+
+
+class FaultyByStationResponse(BaseModel):
+    total: int
+    rows: List[FaultyByStationItem]
+
+
+
 
