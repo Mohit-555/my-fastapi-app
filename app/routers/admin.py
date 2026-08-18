@@ -575,3 +575,15 @@ def delete_cause(cause_code: str, db: Session = Depends(get_db)):
     db.delete(cause)
     db.commit()
 
+
+@router.post("/seed-db")
+def seed_database():
+    """Trigger seed() execution manually."""
+    from seed import seed
+    try:
+        seed()
+        return {"status": True, "message": "Database seeded successfully!"}
+    except Exception as e:
+        return {"status": False, "message": f"Seeding failed: {str(e)}"}
+
+
