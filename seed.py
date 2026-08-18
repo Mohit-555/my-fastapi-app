@@ -142,6 +142,34 @@ def seed():
 
     db = SessionLocal()
     try:
+        print("Seeding RDSO Zones and Divisions...")
+        for zone_data in RDSO_DATA:
+            z = db.query(Zone).filter(Zone.zone_code == zone_data["zone_code"]).first()
+            if not z:
+                z = Zone(
+                    zone_name=zone_data["zone_name"],
+                    zone_code=zone_data["zone_code"],
+                    zone_id_hex=zone_data["zone_id_hex"],
+                    status="Active"
+                )
+                db.add(z)
+                db.flush()
+
+            for div_data in zone_data["divisions"]:
+                d = db.query(Division).filter(
+                    Division.zone_id == z.id,
+                    Division.division_code == div_data["division_code"]
+                ).first()
+                if not d:
+                    d = Division(
+                        division_name=div_data["division_name"],
+                        division_code=div_data["division_code"],
+                        division_id_hex=div_data["division_id_hex"],
+                        zone_id=z.id
+                    )
+                    db.add(d)
+        db.commit()
+
         from app.rbac_defaults import (
             ensure_default_zones,
             ensure_default_divisions,
@@ -152,7 +180,7 @@ def seed():
             ensure_default_alert_causes,
             ensure_default_assets
         )
-        print("Ensuring default roles, permissions, menus, and master data...")
+        print("Ensuring default roles, permissions, menus, stations, equipment rooms, and alerts...")
         ensure_default_zones(db)
         ensure_default_divisions(db)
         ensure_default_stations(db)
