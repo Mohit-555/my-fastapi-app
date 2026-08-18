@@ -196,6 +196,37 @@ Connect to the WebSocket endpoint to receive live updates in real time without p
 
 ---
 
+### 💡 Architectural Note: Why Component 3 (HTTP GET) & Component 4 (WebSocket) are Used Together
+
+Mobile developers often ask: *"Why call `GET /alerts/live` if we have a WebSocket connection?"*
+
+In enterprise mobile applications (Flutter / React Native / iOS / Android), combining both HTTP GET and WebSockets is the industry-standard **Hybrid Real-Time Pattern**.
+
+#### 1. Instant First Screen Render (No Blank Spinner Delay)
+* **HTTP `GET /alerts/live`** loads existing historical alerts **instantly (~50ms)** on page launch.
+* Establishing a **WebSocket connection** requires a handshake (DNS lookup $\rightarrow$ SSL handshake $\rightarrow$ HTTP Upgrade $\rightarrow$ WS Connect), which takes 500ms to 2 seconds on mobile networks (4G/5G).
+* **Result**: `GET /alerts/live` displays the alert cards immediately so the user never sees a blank screen while waiting for the WebSocket handshake to complete.
+
+#### 2. Mobile Signal Loss & Offline Recovery (4G / 5G / Train Tunnels)
+* Mobile devices frequently lose network signal (e.g., inside equipment rooms, elevators, tunnels).
+* When a WebSocket disconnects and reconnects:
+  1. The app calls **`GET /alerts/live`** to catch up on any alerts that occurred while offline.
+  2. Then the **WebSocket** resumes streaming new live incoming alerts.
+
+#### 3. Summary Comparison Matrix
+
+| Approach | Startup Speed | Real-Time Latency | Offline Recovery | Mobile User Experience |
+| :--- | :---: | :---: | :---: | :---: |
+| **HTTP Only** (`GET /alerts/live` + Pull-to-Refresh) | ⚡ Fast | 🐢 Delayed (Requires Refresh) | 🟢 Good | Basic |
+| **WebSocket Only** (`wss://...`) | 🐢 Slow (Blank Spinner) | ⚡ Instant (<10ms) | 🔴 Poor (Misses offline alerts) | Buggy |
+| **Both Combined (Recommended)** | ⚡ **Instant** | ⚡ **Instant** | 🟢 **Seamless** | ⭐ **Best Professional UX** |
+
+#### Recommended Implementation Workflow for Mobile Developers:
+1. **On Screen Launch**: Issue `GET /alerts/live` $\rightarrow$ Render alert cards instantly.
+2. **In Background**: Open `wss://.../ws/alerts/{station_code}` $\rightarrow$ Prepend new incoming cards dynamically as telemetry alerts trigger.
+
+---
+
 ### Component 5: Card Interactive Action Buttons (`Ack`, `T`, `PT`, `F`, `M`, `Remark`)
 
 #### Action 1: `Ack` (Acknowledge Alert)
