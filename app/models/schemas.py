@@ -1225,6 +1225,7 @@ class EquipmentRoomResponse(BaseModel):
     room_type: str
     temperature: Optional[float] = None
     humidity: Optional[float] = None
+    door_status: Optional[str] = "CLOSED"
     updated_at: datetime
 
     class Config:

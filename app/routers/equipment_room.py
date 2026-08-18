@@ -143,6 +143,8 @@ def get_live_equipment_rooms(
         division = station.division
         zone = division.zone
 
+        door = getattr(r, "door_status", None) or ("OPEN" if temp > 34.0 else "CLOSED")
+
         response_data.append({
             "id": r.id,
             "station_id": r.station_id,
@@ -157,6 +159,7 @@ def get_live_equipment_rooms(
             "room_type": r.room_type,
             "temperature": temp,
             "humidity": hum,
+            "door_status": door,
             "updated_at": r.updated_at,
         })
 
