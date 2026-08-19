@@ -1449,6 +1449,22 @@ class TelemetryLiveCardResponse(BaseModel):
     threshold_seconds: float
 
 
+class StationPerformanceItem(BaseModel):
+    station_code: str
+    station_name: str
+    failure_accuracy: float
+    predictive_accuracy: float
+    actual_detection_rate: float
+
+
+class PerformanceOverviewResponse(BaseModel):
+    confirmed_failure_percentage: float
+    confirmed_predictive_percentage: float
+    actual_failures_caught_percentage: float
+    by_station: List[StationPerformanceItem]
+
+
+
 
 
 

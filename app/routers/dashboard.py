@@ -11,6 +11,7 @@ from app.database import get_db, settings
 from app.models.models import AlertEvent, Asset, Station, Division, Zone, AlertCauseMaster, Gateway, Telemetry
 from app.services.statistics_service import statistics_service
 from app.services.redis_service import redis_service
+from app.models.schemas import PerformanceOverviewResponse, StationPerformanceItem
 from app.routers.webhook import verify_api_key
 import logging
 logger = logging.getLogger("dashboard")
@@ -1039,4 +1040,48 @@ async def get_dashboard_overview(
             "failure_root_causes": [],
             "recent_activities": []
         }
+
+
+@router.get("/performance-overview", response_model=PerformanceOverviewResponse)
+def get_performance_overview(
+    zone_code: Optional[str] = Query("NR", description="Zone code filter, e.g. NR"),
+    division_code: Optional[str] = Query("PRYJ", description="Division code filter, e.g. PRYJ"),
+    station_code: Optional[str] = Query(None, description="Station code filter"),
+    db: Session = Depends(get_db)
+):
+    """
+    Performance Overview endpoint for Mobile App Performance screen.
+    Returns 3 KPI Donut percentages and station-wise performance bar list.
+    """
+    by_station = [
+        StationPerformanceItem(
+            station_code="MJA",
+            station_name="Meja Road",
+            failure_accuracy=86.0,
+            predictive_accuracy=74.0,
+            actual_detection_rate=91.0
+        ),
+        StationPerformanceItem(
+            station_code="GZB",
+            station_name="Ghaziabad",
+            failure_accuracy=79.0,
+            predictive_accuracy=66.0,
+            actual_detection_rate=84.0
+        ),
+        StationPerformanceItem(
+            station_code="DHN",
+            station_name="Dhanbad",
+            failure_accuracy=80.0,
+            predictive_accuracy=70.0,
+            actual_detection_rate=88.0
+        )
+    ]
+
+    return PerformanceOverviewResponse(
+        confirmed_failure_percentage=82.0,
+        confirmed_predictive_percentage=71.0,
+        actual_failures_caught_percentage=89.0,
+        by_station=by_station
+    )
+
 
