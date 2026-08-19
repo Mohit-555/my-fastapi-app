@@ -1483,6 +1483,23 @@ class MobileDashboardSummaryResponse(BaseModel):
     station_code: str
     live_alerts: LiveAlertShortcuts
     assets_by_category: List[AssetCategorySummaryItem]
+    fleet_health: FleetHealthSummary
+    infrastructure: InfrastructureSummary
+
+
+class FleetHealthSummary(BaseModel):
+    normal_percentage: float
+    normal_count: int
+    predicted_count: int
+    failed_count: int
+
+
+class InfrastructureSummary(BaseModel):
+    sensors_ok: int
+    sensors_flt: int
+    iot_ok: int
+    iot_flt: int
+
 
 
 

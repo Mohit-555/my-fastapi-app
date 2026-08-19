@@ -39,7 +39,19 @@ This guide provides the complete technical specification for mobile application 
 │ │  🟡 Predicted     2  │      │  🟡 Predicted     5  │      │
 │ └──────────────────────┘      └──────────────────────┘      │
 │ ─────────────────────────────────────────────────────────── │
-│   [DASHBOARD]   [ALERT]   [TELEMETRY]   [HEALTH]  [EQUIP]   │  ◄── 5. Bottom Navigation (Dashboard Active)
+│ FLEET HEALTH · ALL CATEGORIES ────────────────────────────  │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │  ( 77% NORMAL )  🟢 Normal: 230  🟡 Predicted: 44       │ │  ◄── 5. Overall Fleet Health Donut & Totals
+│ │                  🔴 Failed: 26                          │ │
+│ └─────────────────────────────────────────────────────────┘ │
+│ ─────────────────────────────────────────────────────────── │
+│ INFRASTRUCTURE ───────────────────────────────────────────  │
+│ ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌──────────┐│
+│ │ 55 SENSORS │  │ 8 SENSORS  │  │ 55 IOT OK  │  │ 8 IOT    ││  ◄── 6. Infrastructure Status Cards
+│ │    OK      │  │   FLT      │  │            │  │   FLT    ││
+│ └────────────┘  └────────────┘  └────────────┘  └──────────┘│
+│ ─────────────────────────────────────────────────────────── │
+│   [DASHBOARD]   [ALERT]   [TELEMETRY]   [HEALTH]  [EQUIP]   │  ◄── 7. Bottom Navigation (Dashboard Active)
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -74,7 +86,7 @@ Populate filter options on page load.
 
 ### API 2: Dashboard Overview & Asset Category Summary (`GET /api/dashboard/mobile-summary`)
 
-Fetches live alert shortcut counters and the 6 asset category status breakdown cards.
+Fetches live alert shortcut counters, 6 asset category status breakdown cards, fleet health donut, and infrastructure KPI blocks.
 
 * **HTTP Method**: `GET`
 * **Endpoint**: `/api/dashboard/mobile-summary`
@@ -142,7 +154,19 @@ Fetches live alert shortcut counters and the 6 asset category status breakdown c
         "failed_count": 2,
         "predicted_count": 5
       }
-    ]
+    ],
+    "fleet_health": {
+      "normal_percentage": 77.0,
+      "normal_count": 230,
+      "predicted_count": 44,
+      "failed_count": 26
+    },
+    "infrastructure": {
+      "sensors_ok": 55,
+      "sensors_flt": 8,
+      "iot_ok": 55,
+      "iot_flt": 8
+    }
   }
   ```
 
@@ -153,6 +177,9 @@ Fetches live alert shortcut counters and the 6 asset category status breakdown c
     - 🟢 `normal_count` (Green)
     - 🔴 `failed_count` (Red)
     - 🟡 `predicted_count` (Yellow/Orange)
+  - `fleet_health` $\rightarrow$ Render **FLEET HEALTH · ALL CATEGORIES** Donut (`77% NORMAL`), `Normal: 230`, `Predicted: 44`, `Failed: 26`.
+  - `infrastructure` $\rightarrow$ Render **INFRASTRUCTURE** 4 KPI boxes (`55 SENSORS OK`, `8 SENSORS FLT`, `55 IOT OK`, `8 IOT FLT`).
+
 
 ---
 

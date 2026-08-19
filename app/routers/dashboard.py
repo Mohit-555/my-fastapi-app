@@ -16,7 +16,9 @@ from app.models.schemas import (
     StationPerformanceItem,
     MobileDashboardSummaryResponse,
     AssetCategorySummaryItem,
-    LiveAlertShortcuts
+    LiveAlertShortcuts,
+    FleetHealthSummary,
+    InfrastructureSummary
 )
 from app.routers.webhook import verify_api_key
 import logging
@@ -1160,7 +1162,19 @@ def get_mobile_dashboard_summary(
             alert_history_count=history_count,
             alert_live_count=live_count
         ),
-        assets_by_category=categories
+        assets_by_category=categories,
+        fleet_health=FleetHealthSummary(
+            normal_percentage=77.0,
+            normal_count=230,
+            predicted_count=44,
+            failed_count=26
+        ),
+        infrastructure=InfrastructureSummary(
+            sensors_ok=55,
+            sensors_flt=8,
+            iot_ok=55,
+            iot_flt=8
+        )
     )
 
 
