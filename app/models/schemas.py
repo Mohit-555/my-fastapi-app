@@ -1464,6 +1464,28 @@ class PerformanceOverviewResponse(BaseModel):
     by_station: List[StationPerformanceItem]
 
 
+class AssetCategorySummaryItem(BaseModel):
+    category_key: str
+    category_name: str
+    normal_count: int
+    failed_count: int
+    predicted_count: int
+
+
+class LiveAlertShortcuts(BaseModel):
+    alert_history_count: int
+    alert_live_count: int
+
+
+class MobileDashboardSummaryResponse(BaseModel):
+    zone_code: str
+    division_code: str
+    station_code: str
+    live_alerts: LiveAlertShortcuts
+    assets_by_category: List[AssetCategorySummaryItem]
+
+
+
 
 
 

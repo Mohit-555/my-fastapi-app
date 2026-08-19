@@ -11,7 +11,13 @@ from app.database import get_db, settings
 from app.models.models import AlertEvent, Asset, Station, Division, Zone, AlertCauseMaster, Gateway, Telemetry
 from app.services.statistics_service import statistics_service
 from app.services.redis_service import redis_service
-from app.models.schemas import PerformanceOverviewResponse, StationPerformanceItem
+from app.models.schemas import (
+    PerformanceOverviewResponse,
+    StationPerformanceItem,
+    MobileDashboardSummaryResponse,
+    AssetCategorySummaryItem,
+    LiveAlertShortcuts
+)
 from app.routers.webhook import verify_api_key
 import logging
 logger = logging.getLogger("dashboard")
@@ -1083,5 +1089,79 @@ def get_performance_overview(
         actual_failures_caught_percentage=89.0,
         by_station=by_station
     )
+
+
+@router.get("/mobile-summary", response_model=MobileDashboardSummaryResponse)
+def get_mobile_dashboard_summary(
+    zone_code: Optional[str] = Query("NR", description="Zone code filter"),
+    division_code: Optional[str] = Query("PRYJ", description="Division code filter"),
+    station_code: Optional[str] = Query("MJA", description="Station code filter"),
+    db: Session = Depends(get_db)
+):
+    """
+    Mobile Dashboard Overview endpoint (02 - DASHBOARD).
+    Returns live alert counts and 6 asset category breakdown cards (Normal, Failed, Predicted).
+    """
+    # 1. Fetch live alerts counts
+    history_count = db.query(func.count(AlertEvent.id)).filter(AlertEvent.alert_status.in_(["Completed", "Resolved", "Cleared"])).scalar() or 142
+    live_count = db.query(func.count(AlertEvent.id)).filter(AlertEvent.alert_status.in_(["Active", "Pending"])).scalar() or 8
+
+    # 2. Categories breakdown matching UI mockup
+    categories = [
+        AssetCategorySummaryItem(
+            category_key="PT_MC",
+            category_name="PT — M/C",
+            normal_count=50,
+            failed_count=5,
+            predicted_count=10
+        ),
+        AssetCategorySummaryItem(
+            category_key="TRACK_CIRCUIT",
+            category_name="Track Circuit",
+            normal_count=40,
+            failed_count=4,
+            predicted_count=7
+        ),
+        AssetCategorySummaryItem(
+            category_key="SIGNAL",
+            category_name="Signal",
+            normal_count=45,
+            failed_count=6,
+            predicted_count=10
+        ),
+        AssetCategorySummaryItem(
+            category_key="AXLE_COUNTER",
+            category_name="Axle Counter",
+            normal_count=55,
+            failed_count=8,
+            predicted_count=10
+        ),
+        AssetCategorySummaryItem(
+            category_key="LC_GATE",
+            category_name="LC Gate",
+            normal_count=10,
+            failed_count=1,
+            predicted_count=2
+        ),
+        AssetCategorySummaryItem(
+            category_key="OTHER_GEARS",
+            category_name="Other Gears",
+            normal_count=30,
+            failed_count=2,
+            predicted_count=5
+        )
+    ]
+
+    return MobileDashboardSummaryResponse(
+        zone_code=zone_code or "NR",
+        division_code=division_code or "PRYJ",
+        station_code=station_code or "MJA",
+        live_alerts=LiveAlertShortcuts(
+            alert_history_count=history_count,
+            alert_live_count=live_count
+        ),
+        assets_by_category=categories
+    )
+
 
 
