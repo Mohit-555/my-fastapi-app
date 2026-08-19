@@ -182,6 +182,20 @@ Connect to SSE endpoint for continuous real-time parameter stream without pollin
 
 ---
 
+## 🛠️ Architectural Note: Why `GET /telemetry/live-card` (HTTP GET) & `GET /telemetry/live` (SSE Stream) are Used Together
+
+To deliver a **fast, flicker-free, and real-time user experience** in mobile environments, the RDPMS platform adopts a **"Fetch-then-Stream" Pattern**:
+
+1. **Step 1 — Immediate Screen Population (`GET /telemetry/live-card`)**:
+   - **Why**: Streaming endpoints (SSE / WebSockets) take a few seconds to initiate connections and only push data when *new* telemetry packets arrive from the physical tracks.
+   - **Solution**: The app issues a standard HTTP `GET /telemetry/live-card` on tab open. This instantly populates the **Asset Header**, **Status Pills**, **LIVE PARAMETERS Table**, and **12-Cycle Throw Time Chart** in ~15ms without showing blank screens or loading spinners.
+
+2. **Step 2 — Real-Time Streaming (`GET /telemetry/live`)**:
+   - **Why**: After initial rendering, user expectations demand that values (like `Current: 4.6 A` or `Throw time: 4.1 s`) update live as train point machines operate on track.
+   - **Solution**: The app connects the SSE stream `/telemetry/live`. Incoming data packets dynamically refresh values on screen without reloading the page or making repeated polling GET requests.
+
+---
+
 ## 3. Flutter / Dart Mobile Implementation Code Example
 
 ```dart
