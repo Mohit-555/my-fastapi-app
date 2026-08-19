@@ -1426,5 +1426,29 @@ class FaultyByStationResponse(BaseModel):
     rows: List[FaultyByStationItem]
 
 
+class LiveParameterItem(BaseModel):
+    param: str
+    value: str
+    range: str
+    trend: str
+
+
+class ThrowTimeCyclePoint(BaseModel):
+    cycle: int
+    seconds: float
+
+
+class TelemetryLiveCardResponse(BaseModel):
+    station_code: str
+    asset_number: str
+    asset_type_name: str
+    last_sync: str
+    asset_status: str
+    parameters: List[LiveParameterItem]
+    throw_time_cycles: List[ThrowTimeCyclePoint]
+    threshold_seconds: float
+
+
+
 
 

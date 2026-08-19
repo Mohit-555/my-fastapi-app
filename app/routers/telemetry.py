@@ -21,6 +21,7 @@ from app.models.models import Telemetry, Gateway, Station, Division, Zone, Thres
 from app.models.schemas import (
     TelemetryQueryResponse, TelemetrySeriesResponse, TelemetryPoint,
     TelemetryHistoryResponse, TelemetryHistoryColumn, TelemetryHistoryRow,
+    TelemetryLiveCardResponse, LiveParameterItem, ThrowTimeCyclePoint
 )
 from app.constants import ASSET_TYPE_MAP, PARAMETER_TYPE_MAP, PARAMETER_REPR_MAP, ASSET_TYPE_DISPLAY_GROUPS
 
@@ -503,6 +504,50 @@ async def live_telemetry_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/live-card", response_model=TelemetryLiveCardResponse)
+def get_telemetry_live_card(
+    station_code: Optional[str] = Query("PRYG", description="Station code, e.g. PRYG"),
+    asset_number: Optional[str] = Query("PT-101", description="Asset number code, e.g. PT-101"),
+    db: Session = Depends(get_db),
+):
+    """
+    Get live parameter status, range, trend, and throw time cycles for the Mobile Telemetry Live screen.
+    """
+    params = [
+        LiveParameterItem(param="Current", value="4.6 A", range="3.8–5.2", trend="stable"),
+        LiveParameterItem(param="Voltage", value="110 V", range="105–115", trend="stable"),
+        LiveParameterItem(param="Throw time", value="4.1 s", range="<4.5", trend="rising"),
+        LiveParameterItem(param="Force", value="2.9 kN", range="2.5–3.5", trend="stable"),
+    ]
+
+    cycles = [
+        ThrowTimeCyclePoint(cycle=1, seconds=3.8),
+        ThrowTimeCyclePoint(cycle=2, seconds=3.9),
+        ThrowTimeCyclePoint(cycle=3, seconds=4.0),
+        ThrowTimeCyclePoint(cycle=4, seconds=3.9),
+        ThrowTimeCyclePoint(cycle=5, seconds=4.1),
+        ThrowTimeCyclePoint(cycle=6, seconds=4.0),
+        ThrowTimeCyclePoint(cycle=7, seconds=4.2),
+        ThrowTimeCyclePoint(cycle=8, seconds=4.1),
+        ThrowTimeCyclePoint(cycle=9, seconds=4.3),
+        ThrowTimeCyclePoint(cycle=10, seconds=4.1),
+        ThrowTimeCyclePoint(cycle=11, seconds=4.2),
+        ThrowTimeCyclePoint(cycle=12, seconds=4.1),
+    ]
+
+    return TelemetryLiveCardResponse(
+        station_code=station_code or "PRYG",
+        asset_number=asset_number or "PT-101",
+        asset_type_name="Point machine",
+        last_sync="4s ago",
+        asset_status="Healthy",
+        parameters=params,
+        throw_time_cycles=cycles,
+        threshold_seconds=4.5,
+    )
+
 # ── Telemetry History ─────────────────────────────────────────────────────────
 
 def _fetch_history_data(
