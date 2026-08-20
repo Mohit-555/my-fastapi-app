@@ -494,13 +494,10 @@ async def live_telemetry_stream(
         .first()
     )
     if not asset:
-        asset = db.query(Asset).filter(Asset.station_id == station_id).first()
-
-    # If no specific asset in DB, return stream safely with request parameters
-    actual_asset_number = asset.asset_number_code if asset else asset_number
+        raise HTTPException(status_code=404, detail=f"Asset {asset_number} not found at station {station_id}")
 
     return StreamingResponse(
-        _sse_event_generator(request, station_id, actual_asset_number, poll_interval),
+        _sse_event_generator(request, station_id, asset_number, poll_interval),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

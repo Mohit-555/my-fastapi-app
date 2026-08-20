@@ -1163,7 +1163,7 @@ def ensure_default_assets(db: Session) -> None:
             db.add(Asset(
                 smms_asset_code=f"SMMS-PT-{s.station_code}",
                 smms_asset_name=f"Point Machine {s.station_name}",
-                asset_number_code=f"PT-101",
+                asset_number_code=f"PM-101",
                 asset_number_id="01",
                 asset_type_hex="00",
                 station_gateway_id=stngw_id,
