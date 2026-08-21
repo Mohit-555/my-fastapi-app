@@ -743,7 +743,25 @@ def get_telemetry_history(
         if station_id:
             stn = db.query(Station).filter(Station.id == station_id).first()
             stn_name = stn.station_name if stn else None
+        
+        sample_live = [
+            {
+                "time": now.strftime("%H:%M:%S"),
+                "Avg_Current": 3.18,
+                "Peak_Current": 7.50,
+                "Battery_Voltage": 12.39,
+                "Stroke_Time": 1944.0,
+                "Temperature": 46.5
+            }
+        ]
         return TelemetryHistoryResponse(
+            Zone="NR",
+            Division="PRYG",
+            Asset_Type="Point Machine",
+            Asset_No=asset_number_hex or "PT-101",
+            Time=now.strftime("%H:%M:%S"),
+            Status="Predictive",
+            live_data=sample_live,
             station_id=station_id,
             station_name=stn_name,
             asset_number=asset_number_hex,
