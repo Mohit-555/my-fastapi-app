@@ -17,11 +17,10 @@ from app.routers.dashboard import (
 )
 from app.services.statistics_service import statistics_service
 
-router = APIRouter(tags=["Performance Module"])
+router = APIRouter(prefix="/api/performance", tags=["Performance Module"])
 
 
-@router.api_route("/performance", methods=["GET", "POST"])
-@router.api_route("/api/performance", methods=["GET", "POST"])
+@router.api_route("", methods=["GET", "POST"])
 async def get_performance_module_report(
     start_date: Optional[str] = Query(None, description="Start date DD/MM/YYYY"),
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
@@ -127,8 +126,7 @@ class ActualFailureCreate(BaseModel):
     cause: str = Field(..., description="Failure Cause detail")
 
 
-@router.post("/performance/actual-failure")
-@router.post("/api/performance/actual-failure")
+@router.post("/actual-failure")
 async def create_actual_failure_entry(
     payload: ActualFailureCreate,
     db: Session = Depends(get_db)
