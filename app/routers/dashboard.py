@@ -765,6 +765,16 @@ async def get_performance_report(
             "actual_fail_alert_per": 0.0
         })
     
+    # Calculate 3 Average KPI percentages across matching stations
+    if result_rows:
+        avg_fail_acc = round(sum(r["fail_alert_per"] for r in result_rows) / len(result_rows), 1)
+        avg_pred_acc = round(sum(r["pred_alert_per"] for r in result_rows) / len(result_rows), 1)
+        avg_actual_cov = round(sum(r["actual_fail_alert_per"] for r in result_rows) / len(result_rows), 1)
+    else:
+        avg_fail_acc = 0.0
+        avg_pred_acc = 0.0
+        avg_actual_cov = 0.0
+
     # Pagination
     total_rows = len(result_rows)
     total_pages = (total_rows + page_size - 1) // page_size if total_rows else 0
@@ -775,6 +785,9 @@ async def get_performance_report(
         "status": "success",
         "vendor_code": settings.VENDOR_CODE,
         "vendor_name": settings.VENDOR_NAME,
+        "avg_failure_alert_accuracy": avg_fail_acc,
+        "avg_predictive_alert_accuracy": avg_pred_acc,
+        "avg_actual_failure_coverage": avg_actual_cov,
         "start_date": start_date,
         "start_time": start_time,
         "end_date": end_date,
