@@ -758,8 +758,6 @@ async def get_performance_report(
             "zone": stn.division.zone.zone_code,
             "division": stn.division.division_code,
             "station": stn.station_code,
-            "vendor_code": settings.VENDOR_CODE,
-            "vendor_name": settings.VENDOR_NAME,
             "fail_alert_per": stats.get("failure_success_rate", 0.0),
             "pred_alert_per": stats.get("predictive_success_rate", 0.0),
             "actual_fail_alert_per": 0.0
@@ -783,8 +781,6 @@ async def get_performance_report(
     
     return {
         "status": "success",
-        "vendor_code": settings.VENDOR_CODE,
-        "vendor_name": settings.VENDOR_NAME,
         "avg_failure_alert_accuracy": avg_fail_acc,
         "avg_predictive_alert_accuracy": avg_pred_acc,
         "avg_actual_failure_coverage": avg_actual_cov,
