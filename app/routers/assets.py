@@ -939,7 +939,8 @@ def get_asset_utilization(
         ops_count = t_query.scalar() or 0
         
         # Get readable asset type name
-        type_name = ASSET_TYPE_MAP.get(ast.asset_type_hex, ast.asset_type_hex)
+        val = ASSET_TYPE_MAP.get(ast.asset_type_hex, ast.asset_type_hex)
+        type_name = val[1] if isinstance(val, (tuple, list)) else str(val)
         
         rows.append({
             "sr_no": idx,
