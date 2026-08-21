@@ -744,7 +744,6 @@ def _download_alert_summary_response(rows: List[AlertSummaryRow]) -> StreamingRe
     )
 
 
-@router.get("/summary/export")
 @router.get("/summary/download")
 def download_alert_summary(
     zone_id: Optional[int] = Query(None),
