@@ -693,7 +693,7 @@ async def get_asset_detail_report(
 
 # ============ 5. Performance Report ============
 
-@router.post("/performance")
+@router.api_route("/performance", methods=["GET", "POST"])
 async def get_performance_report(
     start_date: Optional[str] = Query(None, description="Start date DD/MM/YYYY (or use JSON body)"),
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
@@ -705,15 +705,15 @@ async def get_performance_report(
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
     body: Optional[DashboardEnvelopeBody] = Body(None, description="Annexure F JSON envelope — overrides query params when provided"),
-    api_key: bool = Depends(verify_api_key),
     db: Session = Depends(get_db)
 ):
     """
     Performance Report - Annexure F §5
     
-    Returns performance metrics for each station. Accepts filters either as
-    flat query params or the spec's JSON body envelope (see alert_summary).
+    Returns overall top 3 KPI average percentages AND station-wise performance metrics breakdown in ONE single response.
     """
+    if not start_date:
+        start_date = (datetime.now() - timedelta(days=30)).strftime("%d/%m/%Y")
     m = _merge_envelope(body, start_date=start_date, start_time=start_time,
                          end_date=end_date, end_time=end_time, zone=zone,
                          division=division, station=station,
