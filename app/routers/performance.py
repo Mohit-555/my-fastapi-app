@@ -154,13 +154,13 @@ async def create_actual_failure_entry(
     event = AlertEvent(
         station_id=station_id,
         asset_no=payload.asset_no,
-        asset_type=payload.asset_type,
+        asset_type_hex="01",
         alert_type="Failure",
         alert_status="Confirmed",
         alert_time=failure_dt,
         cause=payload.cause,
         feedback="T",
-        description=f"Actual Site Failure Recorded: {payload.cause}"
+        remark=f"Actual Site Failure Recorded: {payload.cause}"
     )
     
     db.add(event)
