@@ -14,7 +14,7 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from app.database import SessionLocal, engine
 from app.auth_utils import get_current_user
 from app.models.models import Base
-from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin, equipment_room, maintenance, webhook, config, statistics, websocket, sse, realtime, smms_telemetry, dashboard, monitoring, slave_card
+from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin, equipment_room, maintenance, webhook, config, statistics, websocket, sse, realtime, smms_telemetry, dashboard, monitoring, slave_card, performance
 from app.routers import auth
 from app.rbac_defaults import ensure_default_menus, ensure_default_roles_users_and_permissions, ensure_default_zones, ensure_default_divisions, ensure_default_stations, ensure_default_asset_types, ensure_default_alert_causes, ensure_default_assets
 from app.services.scheduler import scheduler
@@ -191,6 +191,7 @@ app.include_router(sse.router)
 app.include_router(realtime.router)
 app.include_router(smms_telemetry.router)
 app.include_router(dashboard.router)
+app.include_router(performance.router)
 app.include_router(monitoring.router)
 # ── Decode utilities ──────────────────────────────────────────────────────────
 app.include_router(decode.router, dependencies=protected_route)
