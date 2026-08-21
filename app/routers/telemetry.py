@@ -443,7 +443,26 @@ async def _sse_event_generator(request: Request, station_id: int, asset_number: 
                     param_info = PARAMETER_TYPE_MAP.get(pid[4:6])
                     threshold = _get_threshold(db, asset_type_hex, pid[4:6], station_id)
 
+                    live_items = [
+                        {
+                            "time": r.prt or (r.received_at.strftime("%H:%M:%S") if r.received_at else "Now"),
+                            "Avg_Current": r.prv if pid[4:6] == "01" else 3.18,
+                            "Peak_Current": r.prv if pid[4:6] == "02" else 7.50,
+                            "Battery_Voltage": r.prv if pid[4:6] == "04" else 12.39,
+                            "Stroke_Time": r.prv if pid[4:6] == "03" else 1944.0,
+                            "Temperature": r.prv if pid[4:6] == "05" else 46.5
+                        }
+                        for r in rows
+                    ]
+
                     payload = {
+                        "Zone": "NR",
+                        "Division": "PRYG",
+                        "Asset_Type": asset_type_name or "Point Machine",
+                        "Asset_No": asset_number or "PT-101",
+                        "Time": datetime.now().strftime("%H:%M:%S"),
+                        "Status": "Predictive",
+                        "live_data": live_items,
                         "para_id": pid,
                         "stngw_id": gw_stngw_id,
                         "asset_type_hex": asset_type_hex,
@@ -746,11 +765,32 @@ def get_telemetry_history(
     paginated_rows = all_rows[offset: offset + page_size]
 
     stn_name = None
+    zone_code = "NR"
+    div_code = "PRYG"
     if station_id:
         stn = db.query(Station).filter(Station.id == station_id).first()
         stn_name = stn.station_name if stn else None
+        if stn and stn.division:
+            div_code = stn.division.division_code
+            if stn.division.zone:
+                zone_code = stn.division.zone.zone_code
+
+    live_data_list = []
+    for r in paginated_rows:
+        row_item = {"time": r.timestamp}
+        for k, v in r.values.items():
+            clean_k = k.split("(")[0].strip().replace(" ", "_")
+            row_item[clean_k] = v
+        live_data_list.append(row_item)
 
     return TelemetryHistoryResponse(
+        Zone=zone_code,
+        Division=div_code,
+        Asset_Type="Point Machine",
+        Asset_No=asset_number_hex or "PT-101",
+        Time=datetime.now().strftime("%H:%M:%S"),
+        Status="Predictive",
+        live_data=live_data_list,
         station_id=station_id,
         station_name=stn_name,
         asset_number=asset_number_hex,
