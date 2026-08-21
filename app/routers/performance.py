@@ -113,3 +113,69 @@ async def get_performance_module_report(
         "total_pages": total_pages,
         "rows": paginated_rows
     }
+
+
+# ============ Enter Actual Failure Entry Endpoint ============
+
+from pydantic import BaseModel, Field
+
+class ActualFailureCreate(BaseModel):
+    station: str = Field(..., description="Station code or station name, e.g. MJA")
+    asset_type: str = Field("Point Machine", description="Asset Type, e.g. Point Machine")
+    asset_no: str = Field(..., description="Asset Number, e.g. PT-101")
+    failure_date: str = Field(..., description="Failure Date DD/MM/YYYY or YYYY-MM-DD")
+    cause: str = Field(..., description="Failure Cause detail")
+
+
+@router.post("/performance/actual-failure")
+@router.post("/api/performance/actual-failure")
+async def create_actual_failure_entry(
+    payload: ActualFailureCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Submits ground-truth site failure entry from the 'Enter Actual Failure' form.
+    Creates an official AlertEvent record for AI accuracy scoring.
+    """
+    station_obj = db.query(Station).filter(
+        (Station.station_code == payload.station.upper()) | (Station.station_name.ilike(f"%{payload.station}%"))
+    ).first()
+    
+    station_id = station_obj.id if station_obj else 1
+    
+    try:
+        if "/" in payload.failure_date:
+            failure_dt = datetime.strptime(payload.failure_date, "%d/%m/%Y")
+        else:
+            failure_dt = datetime.strptime(payload.failure_date, "%Y-%m-%d")
+    except Exception:
+        failure_dt = datetime.now()
+        
+    event = AlertEvent(
+        station_id=station_id,
+        asset_no=payload.asset_no,
+        asset_type=payload.asset_type,
+        alert_type="Failure",
+        alert_status="Confirmed",
+        alert_time=failure_dt,
+        cause=payload.cause,
+        feedback="T",
+        description=f"Actual Site Failure Recorded: {payload.cause}"
+    )
+    
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    
+    return {
+        "status": "success",
+        "message": f"Actual failure entry saved for asset {payload.asset_no} at station {payload.station}",
+        "data": {
+            "id": event.id,
+            "station": payload.station,
+            "asset_type": payload.asset_type,
+            "asset_no": payload.asset_no,
+            "failure_date": payload.failure_date,
+            "cause": payload.cause
+        }
+    }
