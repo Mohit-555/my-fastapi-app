@@ -810,7 +810,6 @@ def get_alert_history(
     )
 
 
-@router.get("/history/export")
 @router.get("/history/download")
 def download_alert_history(
     zone_id: Optional[int] = Query(None),
