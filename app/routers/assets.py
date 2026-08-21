@@ -928,14 +928,13 @@ def get_asset_utilization(
             
     for idx, ast in enumerate(assets, start=1):
         # Calculate number of operations from telemetry packets
-        t_query = db.query(func.count(Telemetry.id)).filter(
-            Telemetry.station_id == ast.station_id,
-            Telemetry.asset_no == ast.asset_number_code
+        t_query = db.query(func.count(Telemetry.id)).join(Gateway, Gateway.id == Telemetry.gateway_id).filter(
+            Gateway.station_id == ast.station_id
         )
         if start_dt:
-            t_query = t_query.filter(Telemetry.timestamp >= start_dt)
+            t_query = t_query.filter(Telemetry.received_at >= start_dt)
         if end_dt:
-            t_query = t_query.filter(Telemetry.timestamp <= end_dt)
+            t_query = t_query.filter(Telemetry.received_at <= end_dt)
             
         ops_count = t_query.scalar() or 0
         
