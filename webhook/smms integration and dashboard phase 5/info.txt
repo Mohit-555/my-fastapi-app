@@ -1,0 +1,20 @@
+┌─────────────────────────────────────────────────────────────────┐
+│                    PHASE 5: SMMS INTEGRATION                     │
+├─────────────────────────────────────────────────────────────────┤
+│  1. SMMS Asset Sync                                             │
+│     - Fetch assets from SMMS                                    │
+│     - Map SMMS assets to RDPMS parameters                       │
+│     - Sync asset metadata                                       │
+│                                                                 │
+│  2. SMMS Telemetry API                                          │
+│     - Provide live telemetry to SMMS                            │
+│     - Standard data format                                      │
+│     - API Key authentication                                    │
+│                                                                 │
+│  3. Common Dashboard APIs (Annexure F)                         │
+│     - Alert Summary Report                                      │
+│     - Alert History Report                                      │
+│     - Telemetry History Report                                  │
+│     - Asset Detail Report                                       │
+│     - Performance Report                                        │
+└─────────────────────────────────────────────────────────────────┘
