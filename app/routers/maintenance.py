@@ -211,7 +211,6 @@ def activate_maintenance_mode(payload: MaintenanceModeRequest, db: Session = Dep
 
 
 @router.get("/download")
-@router.get("/export")
 def download_maintenance_modes(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
