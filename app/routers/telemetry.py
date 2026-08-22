@@ -319,61 +319,6 @@ def query_telemetry(
     }
 
 
-@router.get("/latest/{station_id}", response_model=StandardResponse[List[TelemetrySeriesResponse]])
-def get_latest_by_station(
-    station_id: int,
-    asset_type: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-):
-    """
-    Get the single latest reading for every para_id at a station.
-    Used to populate the dashboard summary strip / health cards.
-    """
-    station = db.query(Station).filter(Station.id == station_id).first()
-    if not station:
-        raise HTTPException(status_code=404, detail=f"Station {station_id} not found")
-
-    gateways = db.query(Gateway).filter(Gateway.station_id == station_id).all()
-    if not gateways:
-        return {"status": True, "message": "No gateways found for station", "data": []}
-
-    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
-    asset_type_hexes = (
-        [h.strip().upper() for h in asset_type_hex.split(",")]
-        if asset_type_hex else None
-    )
-
-    series = []
-    for gw in gateways:
-        # Get distinct para_ids for this gateway
-        para_ids = (
-            db.query(Telemetry.para_id)
-            .filter(Telemetry.gateway_id == gw.id)
-            .distinct()
-            .all()
-        )
-        for (pid,) in para_ids:
-            if len(pid) != 8:
-                continue
-            if asset_type_hexes and pid[0:2] not in asset_type_hexes:
-                continue
-
-            latest_row = (
-                db.query(Telemetry)
-                .filter(Telemetry.gateway_id == gw.id, Telemetry.para_id == pid)
-                .order_by(Telemetry.received_at.desc())
-                .first()
-            )
-            if latest_row:
-                series.append(_build_series(db, pid, [latest_row], gw))
-
-    return {
-        "status": True,
-        "message": "Latest telemetry retrieved successfully",
-        "data": series
-    }
-
-
 # ── SSE Live Stream ───────────────────────────────────────────────────────────
 
 async def _sse_event_generator(request: Request, station_id: int, asset_number: str, poll_interval: int):
@@ -528,53 +473,6 @@ async def live_telemetry_stream(
         },
     )
 
-
-@router.get("/live-card", response_model=StandardResponse[TelemetryLiveCardResponse])
-def get_telemetry_live_card(
-    station_code: Optional[str] = Query("PRYG", description="Station code, e.g. PRYG"),
-    asset_number: Optional[str] = Query("PT-101", description="Asset number code, e.g. PT-101"),
-    db: Session = Depends(get_db),
-):
-    """
-    Get live parameter status, range, trend, and throw time cycles for the Mobile Telemetry Live screen.
-    """
-    params = [
-        LiveParameterItem(param="Current", value="4.6 A", range="3.8–5.2", trend="stable"),
-        LiveParameterItem(param="Voltage", value="110 V", range="105–115", trend="stable"),
-        LiveParameterItem(param="Throw time", value="4.1 s", range="<4.5", trend="rising"),
-        LiveParameterItem(param="Force", value="2.9 kN", range="2.5–3.5", trend="stable"),
-    ]
-
-    cycles = [
-        ThrowTimeCyclePoint(cycle=1, seconds=3.8),
-        ThrowTimeCyclePoint(cycle=2, seconds=3.9),
-        ThrowTimeCyclePoint(cycle=3, seconds=4.0),
-        ThrowTimeCyclePoint(cycle=4, seconds=3.9),
-        ThrowTimeCyclePoint(cycle=5, seconds=4.1),
-        ThrowTimeCyclePoint(cycle=6, seconds=4.0),
-        ThrowTimeCyclePoint(cycle=7, seconds=4.2),
-        ThrowTimeCyclePoint(cycle=8, seconds=4.1),
-        ThrowTimeCyclePoint(cycle=9, seconds=4.3),
-        ThrowTimeCyclePoint(cycle=10, seconds=4.1),
-        ThrowTimeCyclePoint(cycle=11, seconds=4.2),
-        ThrowTimeCyclePoint(cycle=12, seconds=4.1),
-    ]
-
-    response_data = TelemetryLiveCardResponse(
-        station_code=station_code or "PRYG",
-        asset_number=asset_number or "PT-101",
-        asset_type_name="Point machine",
-        last_sync="4s ago",
-        asset_status="Healthy",
-        parameters=params,
-        throw_time_cycles=cycles,
-        threshold_seconds=4.5,
-    )
-    return {
-        "status": True,
-        "message": "Live card data retrieved successfully",
-        "data": response_data
-    }
 
 # ── Telemetry History ─────────────────────────────────────────────────────────
 
