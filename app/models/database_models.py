@@ -101,11 +101,12 @@ class NetworkHealth(BaseModel):
 class ParameterConfig(BaseModel):
     """Configuration for each parameter type"""
     para_id: str
-    parameter_type_id: str  # One byte hex
+    asset_type_id: str
+    asset_number_id: str = "01"       # placeholder; not used as lookup key
+    parameter_type_id: str            # One byte hex
     parameter_representation_id: str  # One byte hex
     parameter_representation_code: str
-    parameter_representation_name: str
-    asset_type_id: str
+    parameter_representation_name: str = ""
     unit: Optional[str] = None
     standard_value: Optional[float] = None
     min_safe: Optional[float] = None
@@ -115,6 +116,7 @@ class ParameterConfig(BaseModel):
     sampling_interval_ms: Optional[int] = None
     is_event_based: bool = False
     is_digital: bool = False
+
 
 # ============ Station Gateway ============
 
