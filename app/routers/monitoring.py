@@ -169,10 +169,34 @@ async def telemetry_debug(db: Session = Depends(get_db)):
         for a in all_db_alerts
     ]
         
+    from app.models.models import Station, Division, Zone
+    st = db.query(Station).filter(Station.id == 1).first()
+    st_info = {
+        "id": st.id if st else None,
+        "station_code": st.station_code if st else None,
+        "division_id": st.division_id if st else None
+    } if st else None
+    
+    div = db.query(Division).filter(Division.id == st.division_id).first() if st else None
+    div_info = {
+        "id": div.id if div else None,
+        "division_code": div.division_code if div else None,
+        "zone_id": div.zone_id if div else None
+    } if div else None
+    
+    zn = db.query(Zone).filter(Zone.id == div.zone_id).first() if div else None
+    zn_info = {
+        "id": zn.id if zn else None,
+        "zone_code": zn.zone_code if zn else None
+    } if zn else None
+        
     return {
         "telemetry": telemetry_list,
         "asset_parameter": ap_info,
-        "db_alerts": db_alerts_info
+        "db_alerts": db_alerts_info,
+        "station_1": st_info,
+        "division": div_info,
+        "zone": zn_info
     }
 
 @router.get("/health/totals", response_model=SystemHealthTotalsResponse)
