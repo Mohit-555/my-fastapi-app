@@ -67,7 +67,8 @@ async def system_health(
 @router.get("/telemetry-debug")
 async def telemetry_debug(db: Session = Depends(get_db)):
     from app.models.models import Telemetry, AssetParameter, Asset
-    from app.services.alert_engine import alert_engine
+    from app.services.alert_engine import alert_engine, AlertType
+    from app.services.alert_processor import safe_parse_datetime
     
     # Query latest telemetry records for 0001000C
     telemetry_records = db.query(Telemetry).filter(Telemetry.para_id == "0001000C").order_by(Telemetry.id.desc()).limit(5).all()
@@ -84,6 +85,43 @@ async def telemetry_debug(db: Session = Depends(get_db)):
             db=db
         )
         
+        # Try to generate alert for each evaluation result
+        generation_results = []
+        for alert_data in evaluation_result:
+            try:
+                # Find mapped asset
+                ap = db.query(AssetParameter).filter(AssetParameter.para_id == r.para_id).first()
+                asset = db.query(Asset).filter(Asset.id == ap.asset_id).first() if ap else None
+                if not asset:
+                    generation_results.append({"status": "error", "message": "Asset not found"})
+                    continue
+                    
+                # Call _generate_alert
+                alert = alert_engine._generate_alert(
+                    station_id=1,  # LKO station ID
+                    asset_id=asset.id,
+                    asset_number_code=asset.asset_number_code,
+                    asset_type_hex=asset.asset_type_hex,
+                    cause_code=alert_data["cause_code"],
+                    cause_detail=alert_data["cause_detail"],
+                    alert_type=alert_data["alert_type"],
+                    timestamp=safe_parse_datetime(r.prt),
+                    db=db
+                )
+                if alert:
+                    generation_results.append({"status": "success", "alert_id": alert.id})
+                else:
+                    generation_results.append({
+                        "status": "skipped",
+                        "should_generate": alert_engine._should_generate_alert(
+                            asset.asset_number_code, alert_data["cause_code"], alert_data["alert_type"]
+                        ),
+                        "active_alerts_keys": list(alert_engine.active_alerts.keys()),
+                        "alert_history_keys": list(alert_engine.alert_history.keys())
+                    })
+            except Exception as e:
+                generation_results.append({"status": "exception", "error": str(e)})
+        
         telemetry_list.append({
             "id": r.id,
             "gateway_id": r.gateway_id,
@@ -92,7 +130,8 @@ async def telemetry_debug(db: Session = Depends(get_db)):
             "prt": r.prt,
             "is_processed": r.is_processed,
             "received_at": r.received_at.isoformat() if r.received_at else None,
-            "evaluation_result": evaluation_result
+            "evaluation_result": evaluation_result,
+            "generation_results": generation_results
         })
         
     # Query AssetParameter for 0001000C
