@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_, case
+
 from app.database import get_db, settings
 from app.models.models import AlertEvent, Asset, Station, Division, Zone, AlertCauseMaster, Gateway, Telemetry
 from app.services.statistics_service import statistics_service
