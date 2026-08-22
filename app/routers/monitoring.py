@@ -207,6 +207,24 @@ async def telemetry_debug(db: Session = Depends(get_db)):
     except Exception as e:
         live_query_results = {"error": str(e)}
 
+    # Run _process_batch manually
+    from app.services.alert_processor import alert_processor
+    import asyncio
+    
+    tasks_info = []
+    for t in asyncio.all_tasks():
+        tasks_info.append({
+            "name": t.get_name(),
+            "coro": str(t.get_coro())
+        })
+        
+    process_batch_res = None
+    try:
+        await alert_processor._process_batch()
+        process_batch_res = "Success"
+    except Exception as e:
+        process_batch_res = f"Error: {e}"
+
     return {
         "telemetry": telemetry_list,
         "asset_parameter": ap_info,
@@ -214,7 +232,9 @@ async def telemetry_debug(db: Session = Depends(get_db)):
         "station_1": st_info,
         "division": div_info,
         "zone": zn_info,
-        "live_query_results": live_query_results
+        "live_query_results": live_query_results,
+        "asyncio_tasks": tasks_info,
+        "manual_process_batch": process_batch_res
     }
 
 @router.get("/health/totals", response_model=SystemHealthTotalsResponse)
