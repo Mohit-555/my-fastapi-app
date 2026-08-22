@@ -96,28 +96,36 @@ async def telemetry_debug(db: Session = Depends(get_db)):
                     generation_results.append({"status": "error", "message": "Asset not found"})
                     continue
                     
-                # Call _generate_alert
-                alert = alert_engine._generate_alert(
+                # Call create_alert_event directly to see the exception
+                from app.routers.alerts import create_alert_event
+                from app.models.schemas import AlertEventCreate
+                import traceback
+                
+                payload = AlertEventCreate(
                     station_id=1,  # LKO station ID
-                    asset_id=asset.id,
-                    asset_number_code=asset.asset_number_code,
+                    alert_type=alert_data["alert_type"].value,
                     asset_type_hex=asset.asset_type_hex,
-                    cause_code=alert_data["cause_code"],
-                    cause_detail=alert_data["cause_detail"],
-                    alert_type=alert_data["alert_type"],
-                    timestamp=safe_parse_datetime(r.prt),
-                    db=db
+                    asset_no=asset.asset_number_code,
+                    cause=alert_data["cause_code"],
+                    alert_status="Active",
+                    alert_time=safe_parse_datetime(r.prt),
+                    remark=alert_data["cause_detail"]
                 )
-                if alert:
+                
+                try:
+                    alert = create_alert_event(payload, db)
                     generation_results.append({"status": "success", "alert_id": alert.id})
-                else:
+                except HTTPException as he:
                     generation_results.append({
-                        "status": "skipped",
-                        "should_generate": alert_engine._should_generate_alert(
-                            asset.asset_number_code, alert_data["cause_code"], alert_data["alert_type"]
-                        ),
-                        "active_alerts_keys": list(alert_engine.active_alerts.keys()),
-                        "alert_history_keys": list(alert_engine.alert_history.keys())
+                        "status": "http_exception",
+                        "status_code": he.status_code,
+                        "detail": he.detail
+                    })
+                except Exception as ex:
+                    generation_results.append({
+                        "status": "exception",
+                        "error": str(ex),
+                        "trace": traceback.format_exc()
                     })
             except Exception as e:
                 generation_results.append({"status": "exception", "error": str(e)})
