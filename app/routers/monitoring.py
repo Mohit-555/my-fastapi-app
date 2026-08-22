@@ -72,7 +72,7 @@ async def telemetry_debug(db: Session = Depends(get_db)):
     from fastapi import HTTPException
     
     # Query latest telemetry records overall
-    telemetry_records = db.query(Telemetry).order_by(Telemetry.id.desc()).limit(10).all()
+    telemetry_records = db.query(Telemetry).order_by(Telemetry.id.desc()).limit(20).all()
     
     telemetry_list = []
     for r in telemetry_records:
@@ -139,6 +139,7 @@ async def telemetry_debug(db: Session = Depends(get_db)):
             "prt": r.prt,
             "is_processed": r.is_processed,
             "received_at": r.received_at.isoformat() if r.received_at else None,
+            "raw_payload": r.raw_payload,
             "evaluation_result": evaluation_result,
             "generation_results": generation_results
         })
