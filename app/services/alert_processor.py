@@ -29,8 +29,8 @@ class AlertProcessor:
     def __init__(self):
         self.alert_engine = alert_engine
         self.is_running = False
-        self.batch_size = 100
-        self.processing_interval = 5  # seconds
+        self.batch_size = 1000
+        self.processing_interval = 1  # seconds
         self._task = None
     
     async def start(self):
@@ -68,32 +68,44 @@ class AlertProcessor:
             processed_count = 0
             alert_count = 0
             
+            # Batch query related records to resolve N+1 database roundtrips
+            gateway_ids = {t.gateway_id for t in unprocessed if t.gateway_id}
+            para_ids = {t.para_id for t in unprocessed if t.para_id}
+            
+            gateways = {}
+            if gateway_ids:
+                g_rows = db.query(Gateway).filter(Gateway.id.in_(gateway_ids)).all()
+                gateways = {g.id: g for g in g_rows}
+                
+            asset_params = {}
+            if para_ids:
+                ap_rows = db.query(AssetParameter).filter(AssetParameter.para_id.in_(para_ids)).all()
+                asset_params = {ap.para_id.upper(): ap for ap in ap_rows}
+                
+            asset_ids = {ap.asset_id for ap in asset_params.values() if ap.asset_id}
+            assets = {}
+            if asset_ids:
+                a_rows = db.query(Asset).filter(Asset.id.in_(asset_ids)).all()
+                assets = {a.id: a for a in a_rows}
+            
             for telemetry in unprocessed:
                 try:
-                    # Get gateway
-                    gateway = db.query(Gateway).filter(
-                        Gateway.id == telemetry.gateway_id
-                    ).first()
-                    
+                    # Get gateway from batch mapping
+                    gateway = gateways.get(telemetry.gateway_id)
                     if not gateway:
                         telemetry.is_processed = True
                         continue
                     
-                    # Get asset parameter mapping
-                    asset_param = db.query(AssetParameter).filter(
-                        AssetParameter.para_id == telemetry.para_id
-                    ).first()
-                    
+                    # Get asset parameter mapping from batch mapping
+                    para_id_key = telemetry.para_id.upper() if telemetry.para_id else None
+                    asset_param = asset_params.get(para_id_key)
                     if not asset_param or not asset_param.asset_id:
                         # Mark as processed anyway (no asset mapping)
                         telemetry.is_processed = True
                         continue
                     
-                    # Get asset
-                    asset = db.query(Asset).filter(
-                        Asset.id == asset_param.asset_id
-                    ).first()
-                    
+                    # Get asset from batch mapping
+                    asset = assets.get(asset_param.asset_id)
                     if not asset:
                         telemetry.is_processed = True
                         continue
@@ -123,12 +135,6 @@ class AlertProcessor:
                         )
                         if alert:
                             alert_count += 1
-                            # Push to any dashboard subscribed via
-                            # ws://.../ws/alerts/{station_code}. Previously
-                            # only manual actions (acknowledge/feedback/
-                            # clear) broadcast; newly-generated alerts from
-                            # this background loop never reached connected
-                            # clients until they reconnected or polled.
                             try:
                                 from app.routers.alerts import _broadcast_alert_update
                                 _broadcast_alert_update(alert)
