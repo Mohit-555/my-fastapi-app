@@ -11,8 +11,6 @@ from app.models.schemas import (
     StandardResponse
 )
 from app.routers.dashboard import (
-    DashboardEnvelopeBody,
-    _merge_envelope,
     _parse_date_range,
     _resolve_location_ids
 )
@@ -21,7 +19,7 @@ from app.services.statistics_service import statistics_service
 router = APIRouter(prefix="/api/performance", tags=["Performance Module"])
 
 
-@router.api_route("", methods=["GET", "POST"])
+@router.get("")
 async def get_performance_module_report(
     start_date: Optional[str] = Query(None, description="Start date DD/MM/YYYY"),
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
@@ -30,9 +28,8 @@ async def get_performance_module_report(
     zone: Optional[List[str]] = Query(None, description="Zone codes"),
     division: Optional[List[str]] = Query(None, description="Division codes"),
     station: Optional[List[str]] = Query(None, description="Station codes"),
-    page_number: Optional[int] = Query(1, ge=1, description="Page number"),
-    page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
-    body: Optional[DashboardEnvelopeBody] = Body(None, description="Annexure F JSON envelope — overrides query params when provided"),
+    page_number: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=500, description="Page size"),
     db: Session = Depends(get_db)
 ):
     """
@@ -41,14 +38,6 @@ async def get_performance_module_report(
     """
     if not start_date:
         start_date = (datetime.now() - timedelta(days=30)).strftime("%d/%m/%Y")
-
-    m = _merge_envelope(body, start_date=start_date, start_time=start_time,
-                         end_date=end_date, end_time=end_time, zone=zone,
-                         division=division, station=station,
-                         page_number=page_number, page_size=page_size)
-    start_date, start_time, end_date, end_time = m['start_date'], m['start_time'], m['end_date'], m['end_time']
-    zone, division, station = m['zone'], m['division'], m['station']
-    page_number, page_size = m['page_number'] or 1, m['page_size'] or 50
 
     start_dt, end_dt = _parse_date_range(start_date, start_time, end_date, end_time)
     zone_ids, division_ids, station_ids = _resolve_location_ids(db, zone, division, station)
