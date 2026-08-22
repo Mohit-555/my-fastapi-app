@@ -62,6 +62,55 @@ async def system_health(
         },
         "last_sync": sync_results
     }
+
+
+@router.get("/telemetry-debug")
+async def telemetry_debug(db: Session = Depends(get_db)):
+    from app.models.models import Telemetry, AssetParameter, Asset
+    from app.services.alert_engine import alert_engine
+    
+    # Query latest telemetry records for 0001000C
+    telemetry_records = db.query(Telemetry).filter(Telemetry.para_id == "0001000C").order_by(Telemetry.id.desc()).limit(5).all()
+    
+    telemetry_list = []
+    for r in telemetry_records:
+        # Run manual evaluation for this record
+        evaluation_result = alert_engine.evaluate_telemetry(
+            gateway_id=r.gateway_id,
+            stngw_id="01011200",  # LKO gateway
+            para_id=r.para_id,
+            value=r.prv,
+            timestamp=r.prt,
+            db=db
+        )
+        
+        telemetry_list.append({
+            "id": r.id,
+            "gateway_id": r.gateway_id,
+            "para_id": r.para_id,
+            "prv": r.prv,
+            "prt": r.prt,
+            "is_processed": r.is_processed,
+            "received_at": r.received_at.isoformat() if r.received_at else None,
+            "evaluation_result": evaluation_result
+        })
+        
+    # Query AssetParameter for 0001000C
+    ap = db.query(AssetParameter).filter(AssetParameter.para_id == "0001000C").first()
+    ap_info = None
+    if ap:
+        ap_info = {
+            "id": ap.id,
+            "para_id": ap.para_id,
+            "asset_id": ap.asset_id,
+            "is_assigned": ap.is_assigned
+        }
+        
+    return {
+        "telemetry": telemetry_list,
+        "asset_parameter": ap_info
+    }
+
 @router.get("/health/totals", response_model=SystemHealthTotalsResponse)
 async def get_health_totals(
     zone_id: Optional[int] = Query(None),
