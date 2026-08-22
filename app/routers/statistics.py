@@ -26,12 +26,16 @@ async def get_alert_statistics(
     )
     
     return {
-        "period": {
-            "start": start_date.isoformat(),
-            "end": end_date.isoformat(),
-            "days": days
-        },
-        "statistics": stats
+        "status": True,
+        "message": "Alert statistics retrieved successfully",
+        "data": {
+            "period": {
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat(),
+                "days": days
+            },
+            "statistics": stats
+        }
     }
 
 @router.get("/performance/{stngw_id}")
@@ -51,13 +55,17 @@ async def get_performance_metrics(
     )
     
     return {
-        "stngw_id": stngw_id,
-        "period": {
-            "start": start_date.isoformat(),
-            "end": end_date.isoformat(),
-            "days": days
-        },
-        "metrics": metrics
+        "status": True,
+        "message": "Performance metrics retrieved successfully",
+        "data": {
+            "stngw_id": stngw_id,
+            "period": {
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat(),
+                "days": days
+            },
+            "metrics": metrics
+        }
     }
 
 @router.get("/asset-availability")
@@ -79,12 +87,16 @@ async def get_asset_availability(
     )
     
     return {
-        "stngw_id": stngw_id,
-        "asset_number_code": asset_number_code,
-        "period": {
-            "start": start_date.isoformat(),
-            "end": end_date.isoformat(),
-            "days": days
-        },
-        "availability": availability
+        "status": True,
+        "message": "Asset availability retrieved successfully",
+        "data": {
+            "stngw_id": stngw_id,
+            "asset_number_code": asset_number_code,
+            "period": {
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat(),
+                "days": days
+            },
+            "availability": availability
+        }
     }

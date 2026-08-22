@@ -9,7 +9,8 @@ from app.database import get_db
 from app.models.models import Gateway
 from app.models.schemas import (
     SystemHealthTotalsResponse, SystemHealthItem,
-    FaultyByStationResponse, FaultyByStationItem
+    FaultyByStationResponse, FaultyByStationItem,
+    StandardResponse
 )
 from app.services.redis_service import redis_service
 from app.routers.webhook import verify_api_key
@@ -49,22 +50,27 @@ async def system_health(
     
     # Last sync results
     sync_results = await redis_service.get_sync_results()
-    
+
+    all_healthy = all([db_healthy, redis_healthy, alert_processor_healthy])
     return {
-        "status": "healthy" if all([db_healthy, redis_healthy, alert_processor_healthy]) else "degraded",
-        "timestamp": datetime.now().isoformat(),
-        "components": {
-            "database": {"status": "healthy" if db_healthy else "unhealthy"},
-            "redis": {"status": "healthy" if redis_healthy else "unhealthy", "is_fallback": redis_service.is_fallback},
-            "websocket": {"connections": ws_connections},
-            "alert_processor": {"status": "running" if alert_processor_healthy else "stopped"},
-            "scheduler": {"status": "running"}
-        },
-        "last_sync": sync_results
+        "status": True,
+        "message": "System is healthy" if all_healthy else "System is degraded",
+        "data": {
+            "health_status": "healthy" if all_healthy else "degraded",
+            "timestamp": datetime.now().isoformat(),
+            "components": {
+                "database": {"status": "healthy" if db_healthy else "unhealthy"},
+                "redis": {"status": "healthy" if redis_healthy else "unhealthy", "is_fallback": redis_service.is_fallback},
+                "websocket": {"connections": ws_connections},
+                "alert_processor": {"status": "running" if alert_processor_healthy else "stopped"},
+                "scheduler": {"status": "running"}
+            },
+            "last_sync": sync_results
+        }
     }
 
 
-@router.get("/health/totals", response_model=SystemHealthTotalsResponse)
+@router.get("/health/totals", response_model=StandardResponse[SystemHealthTotalsResponse])
 async def get_health_totals(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
@@ -75,15 +81,20 @@ async def get_health_totals(
     """Return system health totals (Sensors, IoT Devices, Network, Station Gateway)."""
     total_gateways = db.query(Gateway).count()
 
-    return SystemHealthTotalsResponse(
+    response_data = SystemHealthTotalsResponse(
         sensors=SystemHealthItem(total=500, faulty=20),
         iot_devices=SystemHealthItem(total=50, faulty=2),
         network=SystemHealthItem(total=50, faulty=2),
         station_gateway=SystemHealthItem(total=max(2, total_gateways), faulty=1),
     )
+    return {
+        "status": True,
+        "message": "Health totals retrieved successfully",
+        "data": response_data
+    }
 
 
-@router.get("/health/faulty-by-station", response_model=FaultyByStationResponse)
+@router.get("/health/faulty-by-station", response_model=StandardResponse[FaultyByStationResponse])
 async def get_faulty_by_station(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
@@ -118,7 +129,11 @@ async def get_faulty_by_station(
             gw_faulty=1,
         ),
     ]
-    return FaultyByStationResponse(total=len(rows), rows=rows)
+    return {
+        "status": True,
+        "message": "Faulty-by-station data retrieved successfully",
+        "data": FaultyByStationResponse(total=len(rows), rows=rows)
+    }
 
 
 @router.get("/health/summary")
@@ -178,12 +193,15 @@ def get_health_summary(
     paginated_rows = rows[offset:offset + page_size]
 
     return {
-        "status": "success",
-        "total_records": total_records,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "rows": paginated_rows
+        "status": True,
+        "message": "Health summary retrieved successfully",
+        "data": {
+            "total_records": total_records,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "rows": paginated_rows
+        }
     }
 
 
@@ -213,7 +231,7 @@ def download_health_summary(
     writer = csv.writer(output)
     writer.writerow(["SR", "ZONE", "DIVISION", "STATION", "ASSET TYPE", "TOTAL SENSORS", "% AVAIL. SENSORS", "TOTAL IOTS"])
 
-    for r in res.get("rows", []):
+    for r in res.get("data", {}).get("rows", []):
         writer.writerow([
             r["sr_no"], r["zone"], r["division"], r["station"],
             r["asset_type"], r["total_sensors"], r["avail_sensors_pct"], r["total_iots"]
@@ -225,5 +243,3 @@ def download_health_summary(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=rdpms_health_summary.csv"}
     )
-
-
