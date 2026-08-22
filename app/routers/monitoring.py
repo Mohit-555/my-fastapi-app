@@ -218,6 +218,22 @@ async def telemetry_debug(db: Session = Depends(get_db)):
             "coro": str(t.get_coro())
         })
         
+    # Count unprocessed
+    unprocessed_count = db.query(Telemetry).filter(Telemetry.is_processed == False).count()
+    oldest_unprocessed = db.query(Telemetry).filter(Telemetry.is_processed == False).order_by(Telemetry.id.asc()).first()
+    oldest_info = {
+        "id": oldest_unprocessed.id,
+        "prt": oldest_unprocessed.prt,
+        "received_at": oldest_unprocessed.received_at.isoformat() if oldest_unprocessed.received_at else None
+    } if oldest_unprocessed else None
+
+    newest_unprocessed = db.query(Telemetry).filter(Telemetry.is_processed == False).order_by(Telemetry.id.desc()).first()
+    newest_info = {
+        "id": newest_unprocessed.id,
+        "prt": newest_unprocessed.prt,
+        "received_at": newest_unprocessed.received_at.isoformat() if newest_unprocessed.received_at else None
+    } if newest_unprocessed else None
+
     process_batch_res = None
     try:
         await alert_processor._process_batch()
@@ -234,7 +250,10 @@ async def telemetry_debug(db: Session = Depends(get_db)):
         "zone": zn_info,
         "live_query_results": live_query_results,
         "asyncio_tasks": tasks_info,
-        "manual_process_batch": process_batch_res
+        "manual_process_batch": process_batch_res,
+        "unprocessed_count": unprocessed_count,
+        "oldest_unprocessed": oldest_info,
+        "newest_unprocessed": newest_info
     }
 
 @router.get("/health/totals", response_model=SystemHealthTotalsResponse)
