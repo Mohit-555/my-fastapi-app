@@ -190,13 +190,31 @@ async def telemetry_debug(db: Session = Depends(get_db)):
         "zone_code": zn.zone_code if zn else None
     } if zn else None
         
+    # Run _base_live_query
+    from app.routers.alerts import _base_live_query
+    try:
+        live_query_rows = _base_live_query(db, None, None, None, None, None, None, None, None).all()
+        live_query_results = [
+            {
+                "id": r.id,
+                "station_id": r.station_id,
+                "asset_no": r.asset_no,
+                "cause": r.cause,
+                "alert_status": r.alert_status
+            }
+            for r in live_query_rows
+        ]
+    except Exception as e:
+        live_query_results = {"error": str(e)}
+
     return {
         "telemetry": telemetry_list,
         "asset_parameter": ap_info,
         "db_alerts": db_alerts_info,
         "station_1": st_info,
         "division": div_info,
-        "zone": zn_info
+        "zone": zn_info,
+        "live_query_results": live_query_results
     }
 
 @router.get("/health/totals", response_model=SystemHealthTotalsResponse)
