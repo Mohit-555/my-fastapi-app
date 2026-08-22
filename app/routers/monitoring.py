@@ -154,9 +154,25 @@ async def telemetry_debug(db: Session = Depends(get_db)):
             "is_assigned": ap.is_assigned
         }
         
+    # Query all active or semi-active AlertEvents
+    from app.models.models import AlertEvent
+    all_db_alerts = db.query(AlertEvent).all()
+    db_alerts_info = [
+        {
+            "id": a.id,
+            "station_id": a.station_id,
+            "asset_no": a.asset_no,
+            "cause": a.cause,
+            "alert_status": a.alert_status,
+            "rectification_time": a.rectification_time.isoformat() if a.rectification_time else None
+        }
+        for a in all_db_alerts
+    ]
+        
     return {
         "telemetry": telemetry_list,
-        "asset_parameter": ap_info
+        "asset_parameter": ap_info,
+        "db_alerts": db_alerts_info
     }
 
 @router.get("/health/totals", response_model=SystemHealthTotalsResponse)
