@@ -191,7 +191,27 @@ async def telemetry_debug(db: Session = Depends(get_db)):
     } if zn else None
         
     # Run _base_live_query
-    from app.routers.alerts import _base_live_query
+    from app.routers.alerts import _base_live_query, _live_cards
+    from app.models.models import AlertEvent
+    
+    alert_11 = db.query(AlertEvent).filter(AlertEvent.id == 11).first()
+    alert_11_details = None
+    if alert_11:
+        alert_11_details = {
+            "id": alert_11.id,
+            "station_id": alert_11.station_id,
+            "asset_id": alert_11.asset_id,
+            "asset_no": alert_11.asset_no,
+            "asset_type_hex": alert_11.asset_type_hex,
+            "alert_type": alert_11.alert_type,
+            "alert_status": alert_11.alert_status,
+            "cause": alert_11.cause,
+            "feedback": alert_11.feedback,
+            "acknowledged": alert_11.acknowledged,
+            "alert_time": alert_11.alert_time.isoformat() if alert_11.alert_time else None,
+            "rectification_time": alert_11.rectification_time.isoformat() if alert_11.rectification_time else None
+        }
+
     try:
         live_query_rows = _base_live_query(db, None, None, None, None, None, None, None, None).all()
         live_query_results = [
@@ -204,8 +224,24 @@ async def telemetry_debug(db: Session = Depends(get_db)):
             }
             for r in live_query_rows
         ]
+        
+        try:
+            live_cards_test_list = _live_cards(live_query_rows)
+            live_cards_res = [
+                {
+                    "id": c.id,
+                    "title": c.title,
+                    "asset_no": c.asset_no,
+                    "alert_status": c.alert_status,
+                    "cause": c.cause
+                }
+                for c in live_cards_test_list
+            ]
+        except Exception as e:
+            live_cards_res = f"ValidationError: {type(e).__name__}: {str(e)}"
     except Exception as e:
         live_query_results = {"error": str(e)}
+        live_cards_res = {"error": str(e)}
 
     # Run _process_batch manually
     from app.services.alert_processor import alert_processor
@@ -317,6 +353,8 @@ async def telemetry_debug(db: Session = Depends(get_db)):
         "division": div_info,
         "zone": zn_info,
         "live_query_results": live_query_results,
+        "live_cards_test": live_cards_res,
+        "alert_11_details": alert_11_details,
         "asyncio_tasks": tasks_info,
         "manual_process_batch": process_batch_res,
         "unprocessed_count": unprocessed_count,
