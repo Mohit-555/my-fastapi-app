@@ -24,20 +24,19 @@ logger = logging.getLogger("webhook")
 
 
 def safe_create_task(coro):
-    """
-    Defensive wrapper around asyncio.create_task — swallows the case where
-    there's no running event loop (shouldn't normally happen under uvicorn,
-    but avoids crashing an otherwise-successful webhook response if it does)
-    instead of raising RuntimeError out of a broadcast/cache-write call.
-    """
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(coro)
     except RuntimeError:
         try:
             import anyio
-            anyio.from_thread.run(lambda: coro)
-        except Exception:
+
+            async def await_coro():
+                await coro
+
+            anyio.from_thread.run(await_coro)
+        except Exception as exc:
+            logger.error(f"Background task failed: {exc}")
             coro.close()
 
 # ============ Metrics Collection ============
@@ -947,6 +946,10 @@ def receive_health_data(
                             alerts_created += 1
 
             db.commit()
+            if alerts_created or alerts_resolved:
+                safe_create_task(
+                    websocket_manager.broadcast_dashboard_update("alert_updated")
+                )
             response_data = {
                 "status": "success",
                 "rqi": payload.rqi,
@@ -992,6 +995,10 @@ def receive_discovery(
             _check_gateway_cert_binding(mtls_cn, gateway)
 
             db.commit()
+            import anyio
+            anyio.from_thread.run(
+             websocket_manager.broadcast_dashboard_update,"gateway_updated")
+            
             response_data = {
                 "status": "success",
                 "rqi": payload.rqi,
@@ -1182,6 +1189,10 @@ def receive_information(
                     errors.append(f"{entry.smms_asset_code}: {str(e)}")
 
             db.commit()
+            if assets_created or assets_updated:
+                safe_create_task(
+                    websocket_manager.broadcast_dashboard_update("asset_updated")
+                )
             logger.info(f"RESI: {payload.resi} | GW: {payload.stngw_id} | Information ingestion complete. created={assets_created} updated={assets_updated} params_mapped={params_mapped}")
             webhook_requests.labels('information', 'success').inc()
             return {
@@ -1283,4 +1294,4 @@ def receive_image(
             db.rollback()
             logger.error(f"RESI: {payload.resi} | GW: {payload.stngw_id} | Image ingestion failed: {str(e)}")
             webhook_requests.labels('image', 'error').inc()
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e)) 

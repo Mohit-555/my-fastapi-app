@@ -223,7 +223,15 @@ class ConnectionManager:
             }
         }
         await self.broadcast_to_station(station_code, message)
-    
+        
+    async def broadcast_dashboard_update(self, reason: str):
+        """Notify main-dashboard clients that the overview data changed."""
+        await self.broadcast_to_station("_dashboard_", {
+            "type": "dashboard_update",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "reason": reason
+        })
+
     async def broadcast_maintenance_mode(
         self,
         station_code: str,

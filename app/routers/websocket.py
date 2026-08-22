@@ -15,6 +15,28 @@ logger = logging.getLogger("websocket")
 
 router = APIRouter(tags=["WebSocket"])
 
+@router.websocket("/ws/dashboard")
+async def websocket_dashboard(websocket: WebSocket):
+    """Notify the React dashboard when /api/dashboard/overview should be refreshed."""
+    connection_id = await websocket_manager.connect(
+        websocket=websocket,
+        station_code="__dashboard__",
+        client_info={"type": "dashboard"}
+    )
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            try:
+                message = json.loads(data)
+                if message.get("type") == "pong":
+                    websocket_manager.handle_pong(connection_id)
+            except json.JSONDecodeError:
+                pass
+    except WebSocketDisconnect:
+        websocket_manager.disconnect(websocket)
+        logger.info(f"Dashboard WebSocket disconnected: {connection_id}")
+
 @router.websocket("/ws/telemetry/{station_code}")
 async def websocket_telemetry(
     websocket: WebSocket,
