@@ -5,37 +5,51 @@ from typing import List
 from app.database import get_db
 from app.services.websocket_manager import safe_notify_dashboard
 from app.models.models import Zone
-from app.models.schemas import ZoneCreate, ZoneUpdate, ZoneResponse, ZoneWithDivisions, DropdownOption
+from app.models.schemas import ZoneCreate, ZoneUpdate, ZoneResponse, ZoneWithDivisions, DropdownOption, StandardResponse
 
 router = APIRouter(prefix="/zones", tags=["Zones"])
 
 
-@router.get("/", response_model=List[ZoneResponse])
+@router.get("/", response_model=StandardResponse[List[ZoneResponse]])
 def get_all_zones(db: Session = Depends(get_db)):
     """Get all zones"""
-    return db.query(Zone).order_by(Zone.zone_name).all()
+    zones = db.query(Zone).order_by(Zone.zone_name).all()
+    return {
+        "status": True,
+        "message": "Zones retrieved successfully",
+        "data": zones
+    }
 
 
-@router.get("/dropdown", response_model=List[DropdownOption])
+@router.get("/dropdown", response_model=StandardResponse[List[DropdownOption]])
 def get_zones_dropdown(db: Session = Depends(get_db)):
     """Get zones formatted for frontend dropdown"""
     zones = db.query(Zone).order_by(Zone.zone_name).all()
-    return [
+    options = [
         DropdownOption(id=z.id, label=z.zone_name, code=z.zone_code, hex_id=z.zone_id_hex)
         for z in zones
     ]
+    return {
+        "status": True,
+        "message": "Zone dropdown options retrieved successfully",
+        "data": options
+    }
 
 
-@router.get("/{zone_id}", response_model=ZoneWithDivisions)
+@router.get("/{zone_id}", response_model=StandardResponse[ZoneWithDivisions])
 def get_zone(zone_id: int, db: Session = Depends(get_db)):
     """Get a single zone with all its divisions"""
     zone = db.query(Zone).filter(Zone.id == zone_id).first()
     if not zone:
         raise HTTPException(status_code=404, detail=f"Zone with id {zone_id} not found")
-    return zone
+    return {
+        "status": True,
+        "message": "Zone retrieved successfully",
+        "data": zone
+    }
 
 
-@router.post("/", response_model=ZoneResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=StandardResponse[ZoneResponse], status_code=status.HTTP_201_CREATED)
 def create_zone(payload: ZoneCreate, db: Session = Depends(get_db)):
     """Create a new zone"""
     existing = db.query(Zone).filter(Zone.zone_code == payload.zone_code).first()
@@ -59,10 +73,14 @@ def create_zone(payload: ZoneCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(zone)
     safe_notify_dashboard("zone_updated")
-    return zone
+    return {
+        "status": True,
+        "message": "Zone created successfully",
+        "data": zone
+    }
 
 
-@router.put("/{zone_id}", response_model=ZoneResponse)
+@router.put("/{zone_id}", response_model=StandardResponse[ZoneResponse])
 def update_zone(zone_id: int, payload: ZoneUpdate, db: Session = Depends(get_db)):
     """Update a zone"""
     zone = db.query(Zone).filter(Zone.id == zone_id).first()
@@ -75,7 +93,11 @@ def update_zone(zone_id: int, payload: ZoneUpdate, db: Session = Depends(get_db)
     db.commit()
     db.refresh(zone)
     safe_notify_dashboard("zone_updated")
-    return zone
+    return {
+        "status": True,
+        "message": "Zone updated successfully",
+        "data": zone
+    }
 
 
 @router.delete("/{zone_id}", status_code=status.HTTP_204_NO_CONTENT)

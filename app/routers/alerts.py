@@ -34,6 +34,7 @@ from app.models.schemas import (
     AssetTypeGroupOption,
     AssetTypeOption,
     DropdownOption,
+    StandardResponse
 )
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
@@ -503,19 +504,23 @@ def _live_cards(raw_rows) -> List[AlertLiveCard]:
     return cards
 
 
-@router.get("/types", response_model=List[AlertFilterOption])
+@router.get("/types", response_model=StandardResponse[List[AlertFilterOption]])
 def list_alert_types():
     """
     Return a list of alert types for dropdown filters.
     """
-    return [
-        AlertFilterOption(id=1, label="All", value="ALL"),
-        AlertFilterOption(id=2, label="Predictive", value="Predictive"),
-        AlertFilterOption(id=3, label="Failure", value="Failure"),
-    ]
+    return {
+        "status": True,
+        "message": "Alert types retrieved successfully",
+        "data": [
+            AlertFilterOption(id=1, label="All", value="ALL"),
+            AlertFilterOption(id=2, label="Predictive", value="Predictive"),
+            AlertFilterOption(id=3, label="Failure", value="Failure"),
+        ]
+    }
 
 
-@router.get("/asset-numbers", response_model=List[AlertFilterOption])
+@router.get("/asset-numbers", response_model=StandardResponse[List[AlertFilterOption]])
 def list_alert_asset_numbers(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
@@ -578,13 +583,18 @@ def list_alert_asset_numbers(
             registered.add(row.asset_no)
 
     # ── 3. Build sorted response ─────────────────────────────────────────
-    return [
+    options = [
         AlertFilterOption(id=idx, label=code, value=code)
         for idx, code in enumerate(sorted(registered), start=1)
     ]
+    return {
+        "status": True,
+        "message": "Asset numbers retrieved successfully",
+        "data": options
+    }
 
 
-@router.get("/causes", response_model=List[AlertFilterOption])
+@router.get("/causes", response_model=StandardResponse[List[AlertFilterOption]])
 def list_alert_causes(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
@@ -634,13 +644,18 @@ def list_alert_causes(
             result_causes.append((code, code))
             master_codes.add(code.upper())
 
-    return [
+    options = [
         AlertFilterOption(id=idx, label=detail, value=code)
         for idx, (code, detail) in enumerate(result_causes, start=1)
     ]
+    return {
+        "status": True,
+        "message": "Causes retrieved successfully",
+        "data": options
+    }
 
 
-@router.get("/live", response_model=AlertLiveResponse)
+@router.get("/live", response_model=StandardResponse[AlertLiveResponse])
 def get_alert_live(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
@@ -659,7 +674,7 @@ def get_alert_live(
     alerts = _live_cards(raw_rows)
     predictive = sum(1 for row in alerts if row.alert_type.lower() == "predictive")
     failure = sum(1 for row in alerts if row.alert_type.lower() == "failure")
-    return AlertLiveResponse(
+    response_data = AlertLiveResponse(
         summary=AlertLiveSummary(
             predictive=predictive,
             failure=failure,
@@ -667,9 +682,14 @@ def get_alert_live(
         ),
         alerts=alerts,
     )
+    return {
+        "status": True,
+        "message": "Live alerts retrieved successfully",
+        "data": response_data
+    }
 
 
-@router.get("/summary", response_model=AlertSummaryResponse)
+@router.get("/summary", response_model=StandardResponse[AlertSummaryResponse])
 def get_alert_summary(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
@@ -698,7 +718,7 @@ def get_alert_summary(
     total_alerts = db.query(func.coalesce(func.sum(summary_sq.c.total), 0)).scalar() or 0
     total_pages, offset = _page_meta(total_rows, page, page_size)
     rows = _summary_rows(q.offset(offset).limit(page_size).all(), start=offset + 1)
-    return AlertSummaryResponse(
+    response_data = AlertSummaryResponse(
         from_time=_combine_datetime(from_date, from_time, is_end=False).isoformat()
         if from_date or from_time else None,
         to_time=_combine_datetime(to_date, to_time, is_end=True).isoformat()
@@ -710,6 +730,11 @@ def get_alert_summary(
         total_pages=total_pages,
         rows=rows,
     )
+    return {
+        "status": True,
+        "message": "Alert summary report retrieved successfully",
+        "data": response_data
+    }
 
 
 def _download_alert_summary_response(rows: List[AlertSummaryRow]) -> StreamingResponse:
@@ -768,7 +793,7 @@ def download_alert_summary(
     return _download_alert_summary_response(_summary_rows(raw_rows))
 
 
-@router.get("/history", response_model=AlertHistoryResponse)
+@router.get("/history", response_model=StandardResponse[AlertHistoryResponse])
 def get_alert_history(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
@@ -797,7 +822,7 @@ def get_alert_history(
     total = q.count()
     total_pages, offset = _page_meta(total, page, page_size)
     rows = _history_rows(q.offset(offset).limit(page_size).all(), start=offset + 1)
-    return AlertHistoryResponse(
+    response_data = AlertHistoryResponse(
         from_time=_combine_datetime(from_date, from_time, is_end=False).isoformat()
         if from_date or from_time else None,
         to_time=_combine_datetime(to_date, to_time, is_end=True).isoformat()
@@ -808,6 +833,11 @@ def get_alert_history(
         total_pages=total_pages,
         rows=rows,
     )
+    return {
+        "status": True,
+        "message": "Alert history report retrieved successfully",
+        "data": response_data
+    }
 
 
 @router.get("/history/download")
@@ -876,7 +906,7 @@ def download_alert_history(
     )
 
 
-@router.get("/filters", response_model=AlertFiltersResponse)
+@router.get("/filters", response_model=StandardResponse[AlertFiltersResponse])
 def get_alert_filters(db: Session = Depends(get_db)):
     """Return dropdown data for the Alert Summary filter bar."""
     zones = db.query(Zone).order_by(Zone.zone_name).all()
@@ -1236,7 +1266,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
             zone_name=z.zone_name if z else None,
         ))
 
-    return AlertFiltersResponse(
+    response_data = AlertFiltersResponse(
         zones=zones_list,
         divisions=divisions_list,
         stations=stations_list,
@@ -1253,9 +1283,14 @@ def get_alert_filters(db: Session = Depends(get_db)):
         card_types=card_types_list,
         gateways=gateways_list,
     )
+    return {
+        "status": True,
+        "message": "Alert filters retrieved successfully",
+        "data": response_data
+    }
 
 
-@router.get("/events", response_model=AlertEventsResponse)
+@router.get("/events", response_model=StandardResponse[AlertEventsResponse])
 def list_alert_events(
     station_id: Optional[int] = Query(None),
     alert_type: Optional[str] = Query(None),
@@ -1287,13 +1322,18 @@ def list_alert_events(
     total = q.count()
     total_pages, offset = _page_meta(total, page, page_size)
     rows = q.order_by(AlertEvent.alert_time.desc()).offset(offset).limit(page_size).all()
-    return AlertEventsResponse(
+    response_data = AlertEventsResponse(
         total=total,
         page=page,
         page_size=page_size,
         total_pages=total_pages,
         rows=rows,
     )
+    return {
+        "status": True,
+        "message": "Alert events retrieved successfully",
+        "data": response_data
+    }
 
 
 def _broadcast_alert_update(record: AlertEvent):
@@ -1322,7 +1362,7 @@ def _broadcast_alert_update(record: AlertEvent):
     safe_notify_dashboard("alert_updated")
 
 
-@router.post("/events", response_model=AlertEventResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/events", response_model=StandardResponse[AlertEventResponse], status_code=status.HTTP_201_CREATED)
 def create_alert_event(payload: AlertEventCreate, db: Session = Depends(get_db)):
     """Create an alert event that appears in Alert Summary."""
     _validate_event_payload(payload, db)
@@ -1387,10 +1427,14 @@ def create_alert_event(payload: AlertEventCreate, db: Session = Depends(get_db))
     }
 
     _broadcast_alert_update(record)
-    return record
+    return {
+        "status": True,
+        "message": "Alert event created successfully",
+        "data": record
+    }
 
 
-@router.post("/{event_id}/feedback", response_model=AlertEventResponse)
+@router.post("/{event_id}/feedback", response_model=StandardResponse[AlertEventResponse])
 def update_alert_feedback(event_id: int, payload: AlertFeedbackUpdate, db: Session = Depends(get_db)):
     """Set operator feedback for an alert event."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
@@ -1418,10 +1462,14 @@ def update_alert_feedback(event_id: int, payload: AlertFeedbackUpdate, db: Sessi
     db.commit()
     db.refresh(record)
     _broadcast_alert_update(record)
-    return record
+    return {
+        "status": True,
+        "message": "Alert feedback updated successfully",
+        "data": record
+    }
 
 
-@router.post("/{event_id}/remark", response_model=AlertEventResponse)
+@router.post("/{event_id}/remark", response_model=StandardResponse[AlertEventResponse])
 def update_alert_remark(event_id: int, payload: AlertRemarkUpdate, db: Session = Depends(get_db)):
     """Set or replace remarks for an alert event."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
@@ -1432,10 +1480,14 @@ def update_alert_remark(event_id: int, payload: AlertRemarkUpdate, db: Session =
     db.commit()
     db.refresh(record)
     _broadcast_alert_update(record)
-    return record
+    return {
+        "status": True,
+        "message": "Alert remark updated successfully",
+        "data": record
+    }
 
 
-@router.post("/{event_id}/acknowledge", response_model=AlertEventResponse)
+@router.post("/{event_id}/acknowledge", response_model=StandardResponse[AlertEventResponse])
 def acknowledge_alert(event_id: int, db: Session = Depends(get_db)):
     """Acknowledge a live alert without clearing/rectifying it."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
@@ -1448,10 +1500,14 @@ def acknowledge_alert(event_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(record)
     _broadcast_alert_update(record)
-    return record
+    return {
+        "status": True,
+        "message": "Alert acknowledged successfully",
+        "data": record
+    }
 
 
-@router.post("/{event_id}/rectification", response_model=AlertEventResponse)
+@router.post("/{event_id}/rectification", response_model=StandardResponse[AlertEventResponse])
 def update_alert_rectification(
     event_id: int,
     payload: AlertRectificationUpdate,
@@ -1481,10 +1537,14 @@ def update_alert_rectification(
     db.commit()
     db.refresh(record)
     _broadcast_alert_update(record)
-    return record
+    return {
+        "status": True,
+        "message": "Alert rectification updated successfully",
+        "data": record
+    }
 
 
-@router.put("/events/{event_id}", response_model=AlertEventResponse)
+@router.put("/events/{event_id}", response_model=StandardResponse[AlertEventResponse])
 def update_alert_event(event_id: int, payload: AlertEventUpdate, db: Session = Depends(get_db)):
     """Update a raw alert event."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
@@ -1506,10 +1566,14 @@ def update_alert_event(event_id: int, payload: AlertEventUpdate, db: Session = D
 
     db.commit()
     db.refresh(record)
-    return record
+    return {
+        "status": True,
+        "message": "Alert event updated successfully",
+        "data": record
+    }
 
 
-@router.post("/{event_id}/escalate", response_model=AlertEventResponse)
+@router.post("/{event_id}/escalate", response_model=StandardResponse[AlertEventResponse])
 def escalate_alert(
     event_id: int,
     target_level: Optional[str] = Query(None, regex="^(JE|SSE|ASTE|DSTE)$"),
@@ -1547,5 +1611,9 @@ def escalate_alert(
     db.commit()
     db.refresh(record)
     _broadcast_alert_update(record)
-    return record
+    return {
+        "status": True,
+        "message": f"Alert escalated to {escalate_to} successfully",
+        "data": record
+    }
 

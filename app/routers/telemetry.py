@@ -21,7 +21,8 @@ from app.models.models import Telemetry, Gateway, Station, Division, Zone, Thres
 from app.models.schemas import (
     TelemetryQueryResponse, TelemetrySeriesResponse, TelemetryPoint,
     TelemetryHistoryResponse, TelemetryHistoryColumn, TelemetryHistoryRow,
-    TelemetryLiveCardResponse, LiveParameterItem, ThrowTimeCyclePoint
+    TelemetryLiveCardResponse, LiveParameterItem, ThrowTimeCyclePoint,
+    StandardResponse
 )
 from app.constants import ASSET_TYPE_MAP, PARAMETER_TYPE_MAP, PARAMETER_REPR_MAP, ASSET_TYPE_DISPLAY_GROUPS
 
@@ -164,7 +165,7 @@ def _build_series(
     )
 
 
-@router.get("", response_model=TelemetryQueryResponse)
+@router.get("", response_model=StandardResponse[TelemetryQueryResponse])
 def query_telemetry(
     # ── Location filters ──────────────────────────────────────────────────────
     zone_id:     Optional[int]  = Query(None, description="Filter by zone"),
@@ -216,33 +217,27 @@ def query_telemetry(
     # ── Resolve station IDs from location filter ──────────────────────────────
     station_ids = _resolve_station_ids(db, zone_id, division_id, station_id)
 
+    _empty = TelemetryQueryResponse(
+        station_id=station_id,
+        station_name=None,
+        asset_type_hex=asset_type_hex,
+        asset_number=asset_number_hex,
+        from_time=from_time.isoformat(),
+        to_time=to_time.isoformat(),
+        series=[],
+    )
+
     # ── Resolve gateway IDs ───────────────────────────────────────────────────
     gw_query = db.query(Gateway)
     if station_ids is not None:
         if not station_ids:
             # Location filter matched nothing
-            return TelemetryQueryResponse(
-                station_id=station_id,
-                station_name=None,
-                asset_type_hex=asset_type_hex,
-                asset_number=asset_number_hex,
-                from_time=from_time.isoformat(),
-                to_time=to_time.isoformat(),
-                series=[],
-            )
+            return {"status": True, "message": "No telemetry data found", "data": _empty}
         gw_query = gw_query.filter(Gateway.station_id.in_(station_ids))
 
     gateways = gw_query.all()
     if not gateways:
-        return TelemetryQueryResponse(
-            station_id=station_id,
-            station_name=None,
-            asset_type_hex=asset_type_hex,
-            asset_number=asset_number_hex,
-            from_time=from_time.isoformat(),
-            to_time=to_time.isoformat(),
-            series=[],
-        )
+        return {"status": True, "message": "No telemetry data found", "data": _empty}
 
     gateway_ids = [g.id for g in gateways]
     gateway_map = {g.id: g for g in gateways}
@@ -308,7 +303,7 @@ def query_telemetry(
         stn = db.query(Station).filter(Station.id == station_id).first()
         stn_name = stn.station_name if stn else None
 
-    return TelemetryQueryResponse(
+    response_data = TelemetryQueryResponse(
         station_id=station_id,
         station_name=stn_name,
         asset_type_hex=asset_type_hex,
@@ -317,9 +312,14 @@ def query_telemetry(
         to_time=to_time.isoformat(),
         series=series,
     )
+    return {
+        "status": True,
+        "message": "Telemetry data retrieved successfully",
+        "data": response_data
+    }
 
 
-@router.get("/latest/{station_id}", response_model=List[TelemetrySeriesResponse])
+@router.get("/latest/{station_id}", response_model=StandardResponse[List[TelemetrySeriesResponse]])
 def get_latest_by_station(
     station_id: int,
     asset_type: Optional[str] = Query(None),
@@ -335,7 +335,7 @@ def get_latest_by_station(
 
     gateways = db.query(Gateway).filter(Gateway.station_id == station_id).all()
     if not gateways:
-        return []
+        return {"status": True, "message": "No gateways found for station", "data": []}
 
     asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     asset_type_hexes = (
@@ -367,7 +367,11 @@ def get_latest_by_station(
             if latest_row:
                 series.append(_build_series(db, pid, [latest_row], gw))
 
-    return series
+    return {
+        "status": True,
+        "message": "Latest telemetry retrieved successfully",
+        "data": series
+    }
 
 
 # ── SSE Live Stream ───────────────────────────────────────────────────────────
@@ -525,7 +529,7 @@ async def live_telemetry_stream(
     )
 
 
-@router.get("/live-card", response_model=TelemetryLiveCardResponse)
+@router.get("/live-card", response_model=StandardResponse[TelemetryLiveCardResponse])
 def get_telemetry_live_card(
     station_code: Optional[str] = Query("PRYG", description="Station code, e.g. PRYG"),
     asset_number: Optional[str] = Query("PT-101", description="Asset number code, e.g. PT-101"),
@@ -556,7 +560,7 @@ def get_telemetry_live_card(
         ThrowTimeCyclePoint(cycle=12, seconds=4.1),
     ]
 
-    return TelemetryLiveCardResponse(
+    response_data = TelemetryLiveCardResponse(
         station_code=station_code or "PRYG",
         asset_number=asset_number or "PT-101",
         asset_type_name="Point machine",
@@ -566,6 +570,11 @@ def get_telemetry_live_card(
         throw_time_cycles=cycles,
         threshold_seconds=4.5,
     )
+    return {
+        "status": True,
+        "message": "Live card data retrieved successfully",
+        "data": response_data
+    }
 
 # ── Telemetry History ─────────────────────────────────────────────────────────
 
@@ -706,7 +715,7 @@ def _build_history_columns_and_rows(
     return columns, history_rows
 
 
-@router.get("/history", response_model=TelemetryHistoryResponse)
+@router.get("/history", response_model=StandardResponse[TelemetryHistoryResponse])
 def get_telemetry_history(
     station_id:       Optional[int]      = Query(None),
     asset_number_hex: Optional[str]      = Query(None, description="Asset number hex, e.g. '01'"),
@@ -754,7 +763,7 @@ def get_telemetry_history(
                 "Temperature": 46.5
             }
         ]
-        return TelemetryHistoryResponse(
+        empty_response = TelemetryHistoryResponse(
             Zone="NR",
             Division="PRYG",
             Asset_Type="Point Machine",
@@ -774,6 +783,11 @@ def get_telemetry_history(
             total_pages=0,
             rows=[],
         )
+        return {
+            "status": True,
+            "message": "No telemetry history found",
+            "data": empty_response
+        }
 
     columns, all_rows = _build_history_columns_and_rows(db, gateway_map, grouped, station_id)
 
@@ -801,7 +815,7 @@ def get_telemetry_history(
             row_item[clean_k] = v
         live_data_list.append(row_item)
 
-    return TelemetryHistoryResponse(
+    response_data = TelemetryHistoryResponse(
         Zone=zone_code,
         Division=div_code,
         Asset_Type="Point Machine",
@@ -821,6 +835,11 @@ def get_telemetry_history(
         total_pages=total_pages,
         rows=paginated_rows,
     )
+    return {
+        "status": True,
+        "message": "Telemetry history retrieved successfully",
+        "data": response_data
+    }
 
 
 @router.get("/history/download")

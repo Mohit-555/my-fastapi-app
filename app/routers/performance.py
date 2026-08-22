@@ -7,7 +7,8 @@ from app.database import get_db, settings
 from app.models.models import Station, Division, Zone, AlertEvent
 from app.models.schemas import (
     PerformanceOverviewResponse,
-    StationPerformanceItem
+    StationPerformanceItem,
+    StandardResponse
 )
 from app.routers.dashboard import (
     DashboardEnvelopeBody,
@@ -94,19 +95,22 @@ async def get_performance_module_report(
     paginated_rows = result_rows[offset:offset + page_size]
     
     return {
-        "status": "success",
-        "avg_failure_alert_accuracy": avg_fail_acc,
-        "avg_predictive_alert_accuracy": avg_pred_acc,
-        "avg_actual_failure_coverage": avg_actual_cov,
-        "start_date": start_date,
-        "start_time": start_time,
-        "end_date": end_date,
-        "end_time": end_time,
-        "total_rows": total_rows,
-        "page": page_number,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "rows": paginated_rows
+        "status": True,
+        "message": "Performance module report retrieved successfully",
+        "data": {
+            "avg_failure_alert_accuracy": avg_fail_acc,
+            "avg_predictive_alert_accuracy": avg_pred_acc,
+            "avg_actual_failure_coverage": avg_actual_cov,
+            "start_date": start_date,
+            "start_time": start_time,
+            "end_date": end_date,
+            "end_time": end_time,
+            "total_rows": total_rows,
+            "page": page_number,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "rows": paginated_rows
+        }
     }
 
 
@@ -162,7 +166,7 @@ async def create_actual_failure_entry(
     db.refresh(event)
     
     return {
-        "status": "success",
+        "status": True,
         "message": f"Actual failure entry saved for asset {payload.asset_no} at station {payload.station}",
         "data": {
             "id": event.id,

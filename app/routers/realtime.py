@@ -36,10 +36,13 @@ async def get_live_telemetry(
     gateway = db.query(Gateway).filter(Gateway.station_id == station.id).first()
     if not gateway:
         return {
-            "station_code": station_code,
-            "timestamp": datetime.now().isoformat(),
-            "parameters": {},
-            "message": "No gateway found for station"
+            "status": True,
+            "message": "No gateway found for station",
+            "data": {
+                "station_code": station_code,
+                "timestamp": datetime.now().isoformat(),
+                "parameters": {}
+            }
         }
     
     # Get latest values from Redis
@@ -64,11 +67,15 @@ async def get_live_telemetry(
             }
     
     return {
-        "station_code": station_code,
-        "station_name": station.station_name,
-        "timestamp": datetime.now().isoformat(),
-        "parameter_count": len(latest_values),
-        "parameters": latest_values
+        "status": True,
+        "message": "Live telemetry retrieved successfully",
+        "data": {
+            "station_code": station_code,
+            "station_name": station.station_name,
+            "timestamp": datetime.now().isoformat(),
+            "parameter_count": len(latest_values),
+            "parameters": latest_values
+        }
     }
 
 
@@ -108,27 +115,31 @@ async def get_telemetry_history(
     param_config = param_config_service.get_parameter_config(para_id)
     
     return {
-        "para_id": para_id,
-        "station_code": station_code,
-        "period": {
-            "start": start_time.isoformat(),
-            "end": end_time.isoformat(),
-            "hours": hours
-        },
-        "data_points": len(history),
-        "parameter_info": {
-            "name": param_config.parameter_representation_name if param_config else None,
-            "unit": param_config.unit if param_config else None,
-            "min_safe": param_config.min_safe if param_config else None,
-            "max_safe": param_config.max_safe if param_config else None
-        } if param_config else None,
-        "values": [
-            {
-                "timestamp": h.prt,
-                "value": h.prv
-            }
-            for h in history
-        ]
+        "status": True,
+        "message": "Telemetry history retrieved successfully",
+        "data": {
+            "para_id": para_id,
+            "station_code": station_code,
+            "period": {
+                "start": start_time.isoformat(),
+                "end": end_time.isoformat(),
+                "hours": hours
+            },
+            "data_points": len(history),
+            "parameter_info": {
+                "name": param_config.parameter_representation_name if param_config else None,
+                "unit": param_config.unit if param_config else None,
+                "min_safe": param_config.min_safe if param_config else None,
+                "max_safe": param_config.max_safe if param_config else None
+            } if param_config else None,
+            "values": [
+                {
+                    "timestamp": h.prt,
+                    "value": h.prv
+                }
+                for h in history
+            ]
+        }
     }
 
 
@@ -270,21 +281,25 @@ async def get_dashboard_data(
             telemetry_summary["latest_timestamp"] = latest_ts
     
     return {
-        "station_code": station_code,
-        "station_name": station.station_name,
-        "timestamp": datetime.now().isoformat(),
-        "metrics": {
-            "total_assets": total_assets,
-            "failures": active_failures,
-            "system_health": system_health_val,
-            "gateway_health": gateway_health_val,
-            "prediction_accuracy": prediction_accuracy_val,
-            "mttr_hours": mttr_val
-        },
-        "alerts": alert_summary,
-        "health": health_status,
-        "telemetry": telemetry_summary,
-        "gateway_status": "online" if gateway else "offline"
+        "status": True,
+        "message": "Dashboard data retrieved successfully",
+        "data": {
+            "station_code": station_code,
+            "station_name": station.station_name,
+            "timestamp": datetime.now().isoformat(),
+            "metrics": {
+                "total_assets": total_assets,
+                "failures": active_failures,
+                "system_health": system_health_val,
+                "gateway_health": gateway_health_val,
+                "prediction_accuracy": prediction_accuracy_val,
+                "mttr_hours": mttr_val
+            },
+            "alerts": alert_summary,
+            "health": health_status,
+            "telemetry": telemetry_summary,
+            "gateway_status": "online" if gateway else "offline"
+        }
     }
 
 
@@ -340,23 +355,27 @@ async def get_asset_status(
             sensor_health[para_id] = health
     
     return {
-        "station_code": station_code,
-        "asset_number_code": asset.asset_number_code,
-        "asset_type_hex": asset.asset_type_hex,
-        "asset_make": asset.make,
-        "asset_model": asset.model,
-        "timestamp": datetime.now().isoformat(),
-        "parameters": latest_values,
-        "active_alerts": [
-            {
-                "id": alert.id,
-                "alert_type": alert.alert_type,
-                "cause": alert.cause,
-                "cause_detail": alert.remark or "",
-                "time": alert.alert_time.isoformat() if alert.alert_time else datetime.utcnow().isoformat()
-            }
-            for alert in active_alerts
-        ],
-        "sensor_health": sensor_health,
-        "status": "active" if not active_alerts else "alerting"
+        "status": True,
+        "message": "Asset status retrieved successfully",
+        "data": {
+            "station_code": station_code,
+            "asset_number_code": asset.asset_number_code,
+            "asset_type_hex": asset.asset_type_hex,
+            "asset_make": asset.make,
+            "asset_model": asset.model,
+            "timestamp": datetime.now().isoformat(),
+            "parameters": latest_values,
+            "active_alerts": [
+                {
+                    "id": alert.id,
+                    "alert_type": alert.alert_type,
+                    "cause": alert.cause,
+                    "cause_detail": alert.remark or "",
+                    "time": alert.alert_time.isoformat() if alert.alert_time else datetime.utcnow().isoformat()
+                }
+                for alert in active_alerts
+            ],
+            "sensor_health": sensor_health,
+            "asset_status": "active" if not active_alerts else "alerting"
+        }
     }

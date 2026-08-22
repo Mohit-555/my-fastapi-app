@@ -5,28 +5,38 @@ from typing import List
 from app.database import get_db
 from app.services.websocket_manager import safe_notify_dashboard
 from app.models.models import Division, Zone
-from app.models.schemas import DivisionCreate, DivisionUpdate, DivisionResponse, DivisionWithStations, DropdownOption
+from app.models.schemas import DivisionCreate, DivisionUpdate, DivisionResponse, DivisionWithStations, DropdownOption, StandardResponse
 
 router = APIRouter(prefix="/divisions", tags=["Divisions"])
 
 
-@router.get("/", response_model=List[DivisionResponse])
+@router.get("/", response_model=StandardResponse[List[DivisionResponse]])
 def get_all_divisions(db: Session = Depends(get_db)):
     """Get all divisions"""
-    return db.query(Division).order_by(Division.division_name).all()
+    divisions = db.query(Division).order_by(Division.division_name).all()
+    return {
+        "status": True,
+        "message": "Divisions retrieved successfully",
+        "data": divisions
+    }
 
 
-@router.get("/by-zone/{zone_id}", response_model=List[DivisionResponse])
+@router.get("/by-zone/{zone_id}", response_model=StandardResponse[List[DivisionResponse]])
 def get_divisions_by_zone(zone_id: int, db: Session = Depends(get_db)):
     """Get all divisions under a specific zone — use this for the Division dropdown after selecting a Zone"""
     zone = db.query(Zone).filter(Zone.id == zone_id).first()
     if not zone:
         raise HTTPException(status_code=404, detail=f"Zone with id {zone_id} not found")
 
-    return db.query(Division).filter(Division.zone_id == zone_id).order_by(Division.division_name).all()
+    divisions = db.query(Division).filter(Division.zone_id == zone_id).order_by(Division.division_name).all()
+    return {
+        "status": True,
+        "message": "Divisions retrieved successfully",
+        "data": divisions
+    }
 
 
-@router.get("/by-zone/{zone_id}/dropdown", response_model=List[DropdownOption])
+@router.get("/by-zone/{zone_id}/dropdown", response_model=StandardResponse[List[DropdownOption]])
 def get_divisions_dropdown(zone_id: int, db: Session = Depends(get_db)):
     """Get divisions for a zone, formatted for frontend dropdown"""
     zone = db.query(Zone).filter(Zone.id == zone_id).first()
@@ -34,22 +44,31 @@ def get_divisions_dropdown(zone_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Zone with id {zone_id} not found")
 
     divisions = db.query(Division).filter(Division.zone_id == zone_id).order_by(Division.division_name).all()
-    return [
+    options = [
         DropdownOption(id=d.id, label=d.division_name, code=d.division_code, hex_id=d.division_id_hex)
         for d in divisions
     ]
+    return {
+        "status": True,
+        "message": "Division dropdown options retrieved successfully",
+        "data": options
+    }
 
 
-@router.get("/{division_id}", response_model=DivisionWithStations)
+@router.get("/{division_id}", response_model=StandardResponse[DivisionWithStations])
 def get_division(division_id: int, db: Session = Depends(get_db)):
     """Get a single division with all its stations"""
     division = db.query(Division).filter(Division.id == division_id).first()
     if not division:
         raise HTTPException(status_code=404, detail=f"Division with id {division_id} not found")
-    return division
+    return {
+        "status": True,
+        "message": "Division retrieved successfully",
+        "data": division
+    }
 
 
-@router.post("/", response_model=DivisionResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=StandardResponse[DivisionResponse], status_code=status.HTTP_201_CREATED)
 def create_division(payload: DivisionCreate, db: Session = Depends(get_db)):
     """Create a new division"""
     zone_id = payload.zone_id
@@ -86,10 +105,14 @@ def create_division(payload: DivisionCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(division)
     safe_notify_dashboard("division_updated")
-    return division
+    return {
+        "status": True,
+        "message": "Division created successfully",
+        "data": division
+    }
 
 
-@router.put("/{division_id}", response_model=DivisionResponse)
+@router.put("/{division_id}", response_model=StandardResponse[DivisionResponse])
 def update_division(division_id: int, payload: DivisionUpdate, db: Session = Depends(get_db)):
     """Update a division"""
     division = db.query(Division).filter(Division.id == division_id).first()
@@ -116,7 +139,11 @@ def update_division(division_id: int, payload: DivisionUpdate, db: Session = Dep
     db.commit()
     db.refresh(division)
     safe_notify_dashboard("division_updated")
-    return division
+    return {
+        "status": True,
+        "message": "Division updated successfully",
+        "data": division
+    }
 
 
 @router.delete("/{division_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field, AliasChoices, model_validator
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Generic, TypeVar
 from datetime import datetime
 from enum import Enum as PyEnum
 
@@ -1506,6 +1506,15 @@ class InfrastructureSummary(BaseModel):
     sensors_flt: int
     iot_ok: int
     iot_flt: int
+
+
+T = TypeVar("T")
+
+class StandardResponse(BaseModel, Generic[T]):
+    status: bool = True
+    message: str = "Success"
+    data: T
+
 
 
 

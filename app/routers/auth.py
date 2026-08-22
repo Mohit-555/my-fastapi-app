@@ -8,7 +8,8 @@ from app.models.models import RefreshToken, User
 from app.models.schemas import (
     UserRegisterRequest, UserLoginRequest,
     LogoutRequest, LogoutResponse, RefreshTokenRequest,
-    LoginResponse, TokenResponse, UserResponse, ChangePasswordRequest
+    LoginResponse, TokenResponse, UserResponse, ChangePasswordRequest,
+    StandardResponse
 )
 from app.auth_utils import (
     hash_password, verify_password, create_access_token, create_refresh_token,
@@ -43,7 +44,7 @@ def _issue_tokens(user: User, db: Session, remember_me: bool = False) -> TokenRe
     )
 
 
-@router.post("/register", response_model=UserResponse, status_code=201)
+@router.post("/register", response_model=StandardResponse[UserResponse], status_code=201)
 @limiter.limit("5/minute")
 def register(request: Request, payload: UserRegisterRequest, db: Session = Depends(get_db)):
     if payload.password != payload.confirm_password:
@@ -70,7 +71,11 @@ def register(request: Request, payload: UserRegisterRequest, db: Session = Depen
     db.add(user)
     db.commit()
     db.refresh(user)
-    return user
+    return {
+        "status": True,
+        "message": "User registered successfully",
+        "data": user
+    }
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -114,7 +119,7 @@ def login(request: Request, payload: UserLoginRequest, db: Session = Depends(get
 
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post("/refresh", response_model=StandardResponse[TokenResponse])
 @limiter.limit("10/minute")
 def refresh(request: Request, payload: RefreshTokenRequest, db: Session = Depends(get_db)):
     token_hash = hash_refresh_token(payload.refresh_token)
@@ -133,10 +138,15 @@ def refresh(request: Request, payload: RefreshTokenRequest, db: Session = Depend
 
     refresh_token.revoked_at = datetime.utcnow()
     db.commit()
-    return _issue_tokens(user, db, remember_me=refresh_token.remember_me)
+    tokens = _issue_tokens(user, db, remember_me=refresh_token.remember_me)
+    return {
+        "status": True,
+        "message": "Tokens refreshed successfully",
+        "data": tokens
+    }
 
 
-@router.post("/logout", response_model=LogoutResponse)
+@router.post("/logout", response_model=StandardResponse[LogoutResponse])
 def logout(payload: LogoutRequest, db: Session = Depends(get_db)):
     token_hash = hash_refresh_token(payload.refresh_token)
     refresh_token = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
@@ -145,32 +155,40 @@ def logout(payload: LogoutRequest, db: Session = Depends(get_db)):
         refresh_token.revoked_at = datetime.utcnow()
         db.commit()
 
-    return LogoutResponse(message="Logged out successfully")
+    return {
+        "status": True,
+        "message": "Logged out successfully",
+        "data": LogoutResponse(message="Logged out successfully")
+    }
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me", response_model=StandardResponse[UserResponse])
 def get_me(
     current_user: User = Depends(get_current_user),
 ):
     return {
-        "id": current_user.id,
-        "full_name": current_user.full_name,
-        "employee_id": current_user.employee_id,
-        "designation": current_user.designation,
-        "role_id": current_user.role_id,
-        "zone_id": current_user.zone_id,
-        "division_id": current_user.division_id,
-        "email": current_user.email,
-        "mobile_number": current_user.mobile_number,
-        "reporting_officer_id": current_user.reporting_officer_id,
-        "is_active": current_user.is_active,
-        "created_at": current_user.created_at,
-        "zone_name": current_user.zone.zone_name if current_user.zone else None,
-        "zone_code": current_user.zone.zone_code if current_user.zone else None,
-        "division_name": current_user.division.division_name if current_user.division else None,
-        "division_code": current_user.division.division_code if current_user.division else None,
-        "role_name": current_user.role.name if current_user.role else None,
-        "role_display_name": current_user.role.display_name if current_user.role else None,
+        "status": True,
+        "message": "User info retrieved successfully",
+        "data": {
+            "id": current_user.id,
+            "full_name": current_user.full_name,
+            "employee_id": current_user.employee_id,
+            "designation": current_user.designation,
+            "role_id": current_user.role_id,
+            "zone_id": current_user.zone_id,
+            "division_id": current_user.division_id,
+            "email": current_user.email,
+            "mobile_number": current_user.mobile_number,
+            "reporting_officer_id": current_user.reporting_officer_id,
+            "is_active": current_user.is_active,
+            "created_at": current_user.created_at,
+            "zone_name": current_user.zone.zone_name if current_user.zone else None,
+            "zone_code": current_user.zone.zone_code if current_user.zone else None,
+            "division_name": current_user.division.division_name if current_user.division else None,
+            "division_code": current_user.division.division_code if current_user.division else None,
+            "role_name": current_user.role.name if current_user.role else None,
+            "role_display_name": current_user.role.display_name if current_user.role else None,
+        }
     }
 
 
@@ -191,5 +209,5 @@ def change_my_password(
     current_user.hashed_password = hash_password(payload.new_password)
     db.commit()
     db.refresh(current_user)
-    return {"status": True, "message": "Password updated successfully"}
+    return {"status": True, "message": "Password updated successfully", "data": None}
 

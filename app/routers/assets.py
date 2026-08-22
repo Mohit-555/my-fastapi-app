@@ -44,6 +44,7 @@ from app.models.schemas import (
     AssetParameterUpdate,
     AssetParameterResponse,
     AssetParameterListResponse,
+    StandardResponse
 )
 from app.constants import (
     ASSET_TYPE_MAP,
@@ -100,7 +101,7 @@ def _resolve_asset_types_to_hex(db: Session, asset_type: Optional[str]) -> Optio
 
 # ── Asset Type Endpoints ──────────────────────────────────────────────────────
 
-@router.get("/types", response_model=List[AssetTypeOption])
+@router.get("/types", response_model=StandardResponse[List[AssetTypeOption]])
 def list_asset_types(db: Session = Depends(get_db)):
     """
     Return a flat list of all asset types.
@@ -122,10 +123,14 @@ def list_asset_types(db: Session = Depends(get_db)):
             label=t.asset_type_name,
             group_label=hex_to_group.get(t.asset_type_id, t.asset_type_name),
         ))
-    return result
+    return {
+        "status": True,
+        "message": "Asset types retrieved successfully",
+        "data": result
+    }
 
 
-@router.get("/types/grouped", response_model=List[AssetTypeGroupOption])
+@router.get("/types/grouped", response_model=StandardResponse[List[AssetTypeGroupOption]])
 def list_asset_types_grouped(db: Session = Depends(get_db)):
     """
     Return asset types grouped by dashboard display group.
@@ -158,12 +163,16 @@ def list_asset_types_grouped(db: Session = Depends(get_db)):
             members=members,
         ))
         group_id += 1
-    return groups
+    return {
+        "status": True,
+        "message": "Grouped asset types retrieved successfully",
+        "data": groups
+    }
 
 
 # ── Parameter Type Endpoints ──────────────────────────────────────────────────
 
-@router.get("/parameters", response_model=List[ParameterTypeOption])
+@router.get("/parameters", response_model=StandardResponse[List[ParameterTypeOption]])
 def list_parameter_types(
     asset_type: Optional[str] = Query(
         None,
@@ -189,19 +198,29 @@ def list_parameter_types(
         )
         for hex_id, info in PARAMETER_TYPE_MAP.items()
     ]
-    return sorted(result, key=lambda x: x.hex_id)
+    sorted_result = sorted(result, key=lambda x: x.hex_id)
+    return {
+        "status": True,
+        "message": "Parameter types retrieved successfully",
+        "data": sorted_result
+    }
 
 
-@router.get("/representations", response_model=List[ParameterReprOption])
+@router.get("/representations", response_model=StandardResponse[List[ParameterReprOption]])
 def list_representations():
     """
     Return all parameter representation types (byte 8 of para_id).
     E.g. Instantaneous, Average, Maximum, Minimum, RMS.
     """
-    return [
+    options = [
         ParameterReprOption(hex_id=h, code=info[0], label=info[1])
         for h, info in PARAMETER_REPR_MAP.items()
     ]
+    return {
+        "status": True,
+        "message": "Representations retrieved successfully",
+        "data": options
+    }
 
 
 # ── Asset Inventory / Asset Detail ────────────────────────────────────────────
@@ -284,7 +303,7 @@ def _asset_detail_rows(raw_rows) -> List[AssetDetailRow]:
     return rows
 
 
-@router.get("/detail", response_model=AssetDetailResponse)
+@router.get("/detail", response_model=StandardResponse[AssetDetailResponse])
 def get_asset_detail(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
@@ -310,11 +329,16 @@ def get_asset_detail(
         asset_make=asset_make,
     ).all()
     rows = _asset_detail_rows(raw_rows)
-    return AssetDetailResponse(
+    response_data = AssetDetailResponse(
         as_on=date.today().isoformat(),
         total=sum(row.count for row in rows),
         rows=rows,
     )
+    return {
+        "status": True,
+        "message": "Asset details retrieved successfully",
+        "data": response_data
+    }
 
 
 @router.get("/detail/download")
@@ -362,7 +386,7 @@ def download_asset_detail(
     )
 
 
-@router.get("/makes", response_model=List[AssetMakeOption])
+@router.get("/makes", response_model=StandardResponse[List[AssetMakeOption]])
 def list_asset_makes(
     asset_type: Optional[str] = Query(None),
     station_id: Optional[int] = Query(None),
@@ -381,13 +405,18 @@ def list_asset_makes(
         q = q.filter(AssetInventory.station_id == station_id)
 
     makes = [row.asset_make for row in q.order_by(AssetInventory.asset_make).all()]
-    return [
+    options = [
         AssetMakeOption(id=idx, label=make, value=make)
         for idx, make in enumerate(makes, start=1)
     ]
+    return {
+        "status": True,
+        "message": "Asset makes retrieved successfully",
+        "data": options
+    }
 
 
-@router.get("/filters", response_model=AssetFiltersResponse)
+@router.get("/filters", response_model=StandardResponse[AssetFiltersResponse])
 def get_asset_filters(db: Session = Depends(get_db)):
     """Return dropdown data for the Asset Detail / Inventory filter bar."""
     zones = db.query(Zone).order_by(Zone.zone_name).all()
@@ -573,7 +602,7 @@ def get_asset_filters(db: Session = Depends(get_db)):
         for r in roles
     ]
 
-    return AssetFiltersResponse(
+    response_data = AssetFiltersResponse(
         zones=zones_list,
         divisions=divisions_list,
         stations=stations_list,
@@ -581,9 +610,14 @@ def get_asset_filters(db: Session = Depends(get_db)):
         asset_makes=asset_makes_list,
         roles=roles_list,
     )
+    return {
+        "status": True,
+        "message": "Asset filters retrieved successfully",
+        "data": response_data
+    }
 
 
-@router.get("/inventory", response_model=List[AssetInventoryResponse])
+@router.get("/inventory", response_model=StandardResponse[List[AssetInventoryResponse]])
 def list_asset_inventory(
     station_id: Optional[int] = Query(None),
     asset_type: Optional[str] = Query(None),
@@ -603,10 +637,15 @@ def list_asset_inventory(
             q = q.filter(AssetInventory.asset_type_hex.in_(hex_list))
     if asset_make:
         q = q.filter(func.lower(AssetInventory.asset_make) == asset_make.lower())
-    return q.order_by(AssetInventory.station_id, AssetInventory.asset_type_hex, AssetInventory.asset_make).all()
+    rows = q.order_by(AssetInventory.station_id, AssetInventory.asset_type_hex, AssetInventory.asset_make).all()
+    return {
+        "status": True,
+        "message": "Asset inventory retrieved successfully",
+        "data": rows
+    }
 
 
-@router.post("/inventory", response_model=AssetInventoryResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/inventory", response_model=StandardResponse[AssetInventoryResponse], status_code=status.HTTP_201_CREATED)
 def create_asset_inventory(payload: AssetInventoryCreate, db: Session = Depends(get_db)):
     """Create a raw asset inventory record."""
     if payload.asset_type_hex.upper() not in ASSET_TYPE_MAP:
@@ -636,10 +675,14 @@ def create_asset_inventory(payload: AssetInventoryCreate, db: Session = Depends(
             detail="Asset inventory for this station_id + asset_type_hex + asset_make already exists. Use PUT to update it."
         )
     db.refresh(record)
-    return record
+    return {
+        "status": True,
+        "message": "Asset inventory record created successfully",
+        "data": record
+    }
 
 
-@router.put("/inventory/{inventory_id}", response_model=AssetInventoryResponse)
+@router.put("/inventory/{inventory_id}", response_model=StandardResponse[AssetInventoryResponse])
 def update_asset_inventory(
     inventory_id: int,
     payload: AssetInventoryUpdate,
@@ -679,7 +722,11 @@ def update_asset_inventory(
             detail="Asset inventory for this station_id + asset_type_hex + asset_make already exists."
         )
     db.refresh(record)
-    return record
+    return {
+        "status": True,
+        "message": "Asset inventory record updated successfully",
+        "data": record
+    }
 
 
 @router.delete("/inventory/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -694,7 +741,7 @@ def delete_asset_inventory(inventory_id: int, db: Session = Depends(get_db)):
 
 # ── Threshold CRUD ────────────────────────────────────────────────────────────
 
-@router.get("/thresholds", response_model=List[ThresholdResponse])
+@router.get("/thresholds", response_model=StandardResponse[List[ThresholdResponse]])
 def list_thresholds(
     asset_type: Optional[str] = Query(None),
     station_id: Optional[int] = Query(None),
@@ -714,18 +761,27 @@ def list_thresholds(
             q = q.filter(Threshold.asset_type_hex.in_(hex_list))
     if station_id is not None:
         q = q.filter(Threshold.station_id == station_id)
-    return q.order_by(Threshold.asset_type_hex, Threshold.parameter_type_hex).all()
+    rows = q.order_by(Threshold.asset_type_hex, Threshold.parameter_type_hex).all()
+    return {
+        "status": True,
+        "message": "Thresholds retrieved successfully",
+        "data": rows
+    }
 
 
-@router.get("/thresholds/{threshold_id}", response_model=ThresholdResponse)
+@router.get("/thresholds/{threshold_id}", response_model=StandardResponse[ThresholdResponse])
 def get_threshold(threshold_id: int, db: Session = Depends(get_db)):
     t = db.query(Threshold).filter(Threshold.id == threshold_id).first()
     if not t:
         raise HTTPException(status_code=404, detail=f"Threshold {threshold_id} not found")
-    return t
+    return {
+        "status": True,
+        "message": "Threshold retrieved successfully",
+        "data": t
+    }
 
 
-@router.post("/thresholds", response_model=ThresholdResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/thresholds", response_model=StandardResponse[ThresholdResponse], status_code=status.HTTP_201_CREATED)
 def create_threshold(payload: ThresholdCreate, db: Session = Depends(get_db)):
     """
     Create a new threshold.
@@ -779,10 +835,14 @@ def create_threshold(payload: ThresholdCreate, db: Session = Depends(get_db)):
         )
     db.refresh(t)
     safe_notify_dashboard("threshold_updated")
-    return t
+    return {
+        "status": True,
+        "message": "Threshold created successfully",
+        "data": t
+    }
 
 
-@router.put("/thresholds/{threshold_id}", response_model=ThresholdResponse)
+@router.put("/thresholds/{threshold_id}", response_model=StandardResponse[ThresholdResponse])
 def update_threshold(threshold_id: int, payload: ThresholdUpdate, db: Session = Depends(get_db)):
     """Update threshold values."""
     t = db.query(Threshold).filter(Threshold.id == threshold_id).first()
@@ -795,7 +855,11 @@ def update_threshold(threshold_id: int, payload: ThresholdUpdate, db: Session = 
     db.commit()
     db.refresh(t)
     safe_notify_dashboard("threshold_updated")
-    return t
+    return {
+        "status": True,
+        "message": "Threshold updated successfully",
+        "data": t
+    }
 
 
 @router.delete("/thresholds/{threshold_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -810,7 +874,7 @@ def delete_threshold(threshold_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/thresholds/resolve/{asset_type_hex}/{parameter_type_hex}",
-            response_model=Optional[ThresholdResponse])
+            response_model=StandardResponse[Optional[ThresholdResponse]])
 def resolve_threshold(
     asset_type_hex: str,
     parameter_type_hex: str,
@@ -824,20 +888,26 @@ def resolve_threshold(
     Returns the station-specific threshold if one exists, otherwise the global default.
     Returns null if no threshold is configured.
     """
+    t = None
     if station_id:
         t = db.query(Threshold).filter(
             Threshold.asset_type_hex == asset_type_hex.upper(),
             Threshold.parameter_type_hex == parameter_type_hex.upper(),
             Threshold.station_id == station_id,
         ).first()
-        if t:
-            return t
 
-    return db.query(Threshold).filter(
-        Threshold.asset_type_hex == asset_type_hex.upper(),
-        Threshold.parameter_type_hex == parameter_type_hex.upper(),
-        Threshold.station_id.is_(None),
-    ).first()
+    if not t:
+        t = db.query(Threshold).filter(
+            Threshold.asset_type_hex == asset_type_hex.upper(),
+            Threshold.parameter_type_hex == parameter_type_hex.upper(),
+            Threshold.station_id.is_(None),
+        ).first()
+
+    return {
+        "status": True,
+        "message": "Threshold resolved successfully" if t else "No threshold configured",
+        "data": t
+    }
 
 
 # ── Physical Asset CRUD ───────────────────────────────────────────────────────
@@ -1010,7 +1080,7 @@ def download_asset_utilization(
     )
 
 
-@router.get("", response_model=AssetListResponse)
+@router.get("", response_model=StandardResponse[AssetListResponse])
 def list_assets(
     station_id:     Optional[int]  = Query(None, description="Filter by station"),
     asset_type:     Optional[str]  = Query(None, description="Filter by asset type (ID or hex)"),
@@ -1062,25 +1132,34 @@ def list_assets(
         .all()
     )
 
-    return AssetListResponse(
+    response_data = AssetListResponse(
         total=total,
         page=page,
         page_size=page_size,
         total_pages=total_pages,
         rows=[_build_response(r) for r in records],
     )
+    return {
+        "status": True,
+        "message": "Assets retrieved successfully",
+        "data": response_data
+    }
 
 
-@router.get("/{asset_id}", response_model=AssetResponse)
+@router.get("/{asset_id}", response_model=StandardResponse[AssetResponse])
 def get_asset(asset_id: int, db: Session = Depends(get_db)):
     """Retrieve a single physical asset by its internal ID."""
     record = db.query(Asset).filter(Asset.id == asset_id).first()
     if not record:
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} not found")
-    return _build_response(record)
+    return {
+        "status": True,
+        "message": "Asset retrieved successfully",
+        "data": _build_response(record)
+    }
 
 
-@router.post("", response_model=AssetResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=StandardResponse[AssetResponse], status_code=status.HTTP_201_CREATED)
 def create_asset(payload: AssetCreate, db: Session = Depends(get_db)):
     """
     Register a new physical asset instance.
@@ -1137,10 +1216,14 @@ def create_asset(payload: AssetCreate, db: Session = Depends(get_db)):
         )
     db.refresh(record)
     safe_notify_dashboard("asset_created")
-    return _build_response(record)
+    return {
+        "status": True,
+        "message": "Asset created successfully",
+        "data": _build_response(record)
+    }
 
 
-@router.post("/bulk", response_model=List[AssetResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/bulk", response_model=StandardResponse[List[AssetResponse]], status_code=status.HTTP_201_CREATED)
 def create_assets_bulk(payload: List[AssetCreate], db: Session = Depends(get_db)):
     """
     Register multiple physical asset instances in a single request.
@@ -1229,10 +1312,14 @@ def create_assets_bulk(payload: List[AssetCreate], db: Session = Depends(get_db)
         db.refresh(asset)
 
     safe_notify_dashboard("asset_created")
-    return [_build_response(a) for a in created_assets]
+    return {
+        "status": True,
+        "message": f"{len(created_assets)} assets created successfully",
+        "data": [_build_response(a) for a in created_assets]
+    }
 
 
-@router.put("/{asset_id}", response_model=AssetResponse)
+@router.put("/{asset_id}", response_model=StandardResponse[AssetResponse])
 def update_asset(
     asset_id: int,
     payload: AssetUpdate,
@@ -1285,7 +1372,11 @@ def update_asset(
         )
     db.refresh(record)
     safe_notify_dashboard("asset_updated")
-    return _build_response(record)
+    return {
+        "status": True,
+        "message": "Asset updated successfully",
+        "data": _build_response(record)
+    }
 
 
 @router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1341,7 +1432,7 @@ def _build_asset_parameter_response(ap: AssetParameter) -> AssetParameterRespons
     )
 
 
-@router.get("/parameters/configure", response_model=AssetParameterListResponse)
+@router.get("/parameters/configure", response_model=StandardResponse[AssetParameterListResponse])
 def list_asset_parameters(
     is_assigned: Optional[bool] = Query(None, description="Filter to only assigned or only unassigned rows"),
     station_id: Optional[int] = Query(None, description="Filter to parameters whose assigned asset belongs to this station"),
@@ -1372,25 +1463,34 @@ def list_asset_parameters(
     offset = (page - 1) * page_size
     rows = q.order_by(AssetParameter.created_at.desc()).offset(offset).limit(page_size).all()
 
-    return AssetParameterListResponse(
+    response_data = AssetParameterListResponse(
         total=total,
         page=page,
         page_size=page_size,
         total_pages=total_pages,
         rows=[_build_asset_parameter_response(r) for r in rows],
     )
+    return {
+        "status": True,
+        "message": "Asset parameters retrieved successfully",
+        "data": response_data
+    }
 
 
-@router.get("/parameters/configure/{asset_parameter_id}", response_model=AssetParameterResponse)
+@router.get("/parameters/configure/{asset_parameter_id}", response_model=StandardResponse[AssetParameterResponse])
 def get_asset_parameter(asset_parameter_id: int, db: Session = Depends(get_db)):
     """Retrieve a single discovered para_id mapping by its internal ID."""
     ap = db.query(AssetParameter).filter(AssetParameter.id == asset_parameter_id).first()
     if not ap:
         raise HTTPException(status_code=404, detail=f"Asset parameter {asset_parameter_id} not found")
-    return _build_asset_parameter_response(ap)
+    return {
+        "status": True,
+        "message": "Asset parameter retrieved successfully",
+        "data": _build_asset_parameter_response(ap)
+    }
 
 
-@router.put("/parameters/configure/{asset_parameter_id}", response_model=AssetParameterResponse)
+@router.put("/parameters/configure/{asset_parameter_id}", response_model=StandardResponse[AssetParameterResponse])
 def assign_asset_parameter(
     asset_parameter_id: int,
     payload: AssetParameterUpdate,
@@ -1431,7 +1531,11 @@ def assign_asset_parameter(
     db.commit()
     db.refresh(ap)
     safe_notify_dashboard("parameter_assigned")
-    return _build_asset_parameter_response(ap)
+    return {
+        "status": True,
+        "message": "Asset parameter assigned successfully",
+        "data": _build_asset_parameter_response(ap)
+    }
 
 
 @router.delete("/parameters/configure/{asset_parameter_id}", status_code=status.HTTP_204_NO_CONTENT)

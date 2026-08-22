@@ -5,28 +5,38 @@ from typing import List
 from app.database import get_db
 from app.services.websocket_manager import safe_notify_dashboard
 from app.models.models import Station, Division
-from app.models.schemas import StationCreate, StationUpdate, StationResponse, DropdownOption
+from app.models.schemas import StationCreate, StationUpdate, StationResponse, DropdownOption, StandardResponse
 
 router = APIRouter(prefix="/stations", tags=["Stations"])
 
 
-@router.get("/", response_model=List[StationResponse])
+@router.get("/", response_model=StandardResponse[List[StationResponse]])
 def get_all_stations(db: Session = Depends(get_db)):
     """Get all stations"""
-    return db.query(Station).order_by(Station.station_name).all()
+    stations = db.query(Station).order_by(Station.station_name).all()
+    return {
+        "status": True,
+        "message": "Stations retrieved successfully",
+        "data": stations
+    }
 
 
-@router.get("/by-division/{division_id}", response_model=List[StationResponse])
+@router.get("/by-division/{division_id}", response_model=StandardResponse[List[StationResponse]])
 def get_stations_by_division(division_id: int, db: Session = Depends(get_db)):
     """Get all stations under a specific division — use this for the Station dropdown after selecting a Division"""
     division = db.query(Division).filter(Division.id == division_id).first()
     if not division:
         raise HTTPException(status_code=404, detail=f"Division with id {division_id} not found")
 
-    return db.query(Station).filter(Station.division_id == division_id).order_by(Station.station_name).all()
+    stations = db.query(Station).filter(Station.division_id == division_id).order_by(Station.station_name).all()
+    return {
+        "status": True,
+        "message": "Stations retrieved successfully",
+        "data": stations
+    }
 
 
-@router.get("/by-division/{division_id}/dropdown", response_model=List[DropdownOption])
+@router.get("/by-division/{division_id}/dropdown", response_model=StandardResponse[List[DropdownOption]])
 def get_stations_dropdown(division_id: int, db: Session = Depends(get_db)):
     """Get stations for a division, formatted for frontend dropdown"""
     division = db.query(Division).filter(Division.id == division_id).first()
@@ -34,22 +44,31 @@ def get_stations_dropdown(division_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Division with id {division_id} not found")
 
     stations = db.query(Station).filter(Station.division_id == division_id).order_by(Station.station_name).all()
-    return [
+    options = [
         DropdownOption(id=s.id, label=s.station_name, code=s.station_code, hex_id=s.station_id_hex)
         for s in stations
     ]
+    return {
+        "status": True,
+        "message": "Station dropdown options retrieved successfully",
+        "data": options
+    }
 
 
-@router.get("/{station_id}", response_model=StationResponse)
+@router.get("/{station_id}", response_model=StandardResponse[StationResponse])
 def get_station(station_id: int, db: Session = Depends(get_db)):
     """Get a single station"""
     station = db.query(Station).filter(Station.id == station_id).first()
     if not station:
         raise HTTPException(status_code=404, detail=f"Station with id {station_id} not found")
-    return station
+    return {
+        "status": True,
+        "message": "Station retrieved successfully",
+        "data": station
+    }
 
 
-@router.post("/", response_model=StationResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=StandardResponse[StationResponse], status_code=status.HTTP_201_CREATED)
 def create_station(payload: StationCreate, db: Session = Depends(get_db)):
     """Create a new station"""
     division_id = payload.division_id
@@ -87,10 +106,14 @@ def create_station(payload: StationCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(station)
     safe_notify_dashboard("station_updated")
-    return station
+    return {
+        "status": True,
+        "message": "Station created successfully",
+        "data": station
+    }
 
 
-@router.put("/{station_id}", response_model=StationResponse)
+@router.put("/{station_id}", response_model=StandardResponse[StationResponse])
 def update_station(station_id: int, payload: StationUpdate, db: Session = Depends(get_db)):
     """Update a station"""
     station = db.query(Station).filter(Station.id == station_id).first()
@@ -117,7 +140,11 @@ def update_station(station_id: int, payload: StationUpdate, db: Session = Depend
     db.commit()
     db.refresh(station)
     safe_notify_dashboard("station_updated")
-    return station
+    return {
+        "status": True,
+        "message": "Station updated successfully",
+        "data": station
+    }
 
 
 @router.delete("/{station_id}", status_code=status.HTTP_204_NO_CONTENT)

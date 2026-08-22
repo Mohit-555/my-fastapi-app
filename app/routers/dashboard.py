@@ -18,7 +18,8 @@ from app.models.schemas import (
     AssetCategorySummaryItem,
     LiveAlertShortcuts,
     FleetHealthSummary,
-    InfrastructureSummary
+    InfrastructureSummary,
+    StandardResponse
 )
 from app.routers.webhook import verify_api_key
 import logging
@@ -279,18 +280,21 @@ async def get_alert_summary_report(
         })
     
     return {
-        "status": "success",
-        "vendor_code": settings.VENDOR_CODE,
-        "vendor_name": settings.VENDOR_NAME,
-        "start_date": start_date,
-        "start_time": start_time,
-        "end_date": end_date,
-        "end_time": end_time,
-        "total_rows": total_rows,
-        "page": page_number,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "rows": result_rows
+        "status": True,
+        "message": "Alert summary report retrieved successfully",
+        "data": {
+            "vendor_code": settings.VENDOR_CODE,
+            "vendor_name": settings.VENDOR_NAME,
+            "start_date": start_date,
+            "start_time": start_time,
+            "end_date": end_date,
+            "end_time": end_time,
+            "total_rows": total_rows,
+            "page": page_number,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "rows": result_rows
+        }
     }
 
 
@@ -428,18 +432,21 @@ async def get_alert_history_report(
         })
     
     return {
-        "status": "success",
-        "vendor_code": settings.VENDOR_CODE,
-        "vendor_name": settings.VENDOR_NAME,
-        "start_date": start_date,
-        "start_time": start_time,
-        "end_date": end_date,
-        "end_time": end_time,
-        "total_rows": total_rows,
-        "page": page_number,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "rows": result_rows
+        "status": True,
+        "message": "Alert history report retrieved successfully",
+        "data": {
+            "vendor_code": settings.VENDOR_CODE,
+            "vendor_name": settings.VENDOR_NAME,
+            "start_date": start_date,
+            "start_time": start_time,
+            "end_date": end_date,
+            "end_time": end_time,
+            "total_rows": total_rows,
+            "page": page_number,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "rows": result_rows
+        }
     }
 
 
@@ -576,18 +583,21 @@ async def get_telemetry_history_report(
         })
     
     return {
-        "status": "success",
-        "vendor_code": settings.VENDOR_CODE,
-        "vendor_name": settings.VENDOR_NAME,
-        "start_date": start_date,
-        "start_time": start_time,
-        "end_date": end_date,
-        "end_time": end_time,
-        "total_rows": total_rows,
-        "page": page_number,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "rows": result_rows
+        "status": True,
+        "message": "Telemetry history report retrieved successfully",
+        "data": {
+            "vendor_code": settings.VENDOR_CODE,
+            "vendor_name": settings.VENDOR_NAME,
+            "start_date": start_date,
+            "start_time": start_time,
+            "end_date": end_date,
+            "end_time": end_time,
+            "total_rows": total_rows,
+            "page": page_number,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "rows": result_rows
+        }
     }
 
 
@@ -679,15 +689,18 @@ async def get_asset_detail_report(
         })
     
     return {
-        "status": "success",
-        "vendor_code": settings.VENDOR_CODE,
-        "vendor_name": settings.VENDOR_NAME,
-        "as_on_date": datetime.now().strftime('%d/%m/%Y'),
-        "total_rows": total_rows,
-        "page": page_number,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "rows": result_rows
+        "status": True,
+        "message": "Asset detail report retrieved successfully",
+        "data": {
+            "vendor_code": settings.VENDOR_CODE,
+            "vendor_name": settings.VENDOR_NAME,
+            "as_on_date": datetime.now().strftime('%d/%m/%Y'),
+            "total_rows": total_rows,
+            "page": page_number,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "rows": result_rows
+        }
     }
 
 
@@ -780,19 +793,22 @@ async def get_performance_report(
     paginated_rows = result_rows[offset:offset + page_size]
     
     return {
-        "status": "success",
-        "avg_failure_alert_accuracy": avg_fail_acc,
-        "avg_predictive_alert_accuracy": avg_pred_acc,
-        "avg_actual_failure_coverage": avg_actual_cov,
-        "start_date": start_date,
-        "start_time": start_time,
-        "end_date": end_date,
-        "end_time": end_time,
-        "total_rows": total_rows,
-        "page": page_number,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "rows": paginated_rows
+        "status": True,
+        "message": "Performance report retrieved successfully",
+        "data": {
+            "avg_failure_alert_accuracy": avg_fail_acc,
+            "avg_predictive_alert_accuracy": avg_pred_acc,
+            "avg_actual_failure_coverage": avg_actual_cov,
+            "start_date": start_date,
+            "start_time": start_time,
+            "end_date": end_date,
+            "end_time": end_time,
+            "total_rows": total_rows,
+            "page": page_number,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "rows": paginated_rows
+        }
     }
 
 
@@ -1021,45 +1037,50 @@ async def get_dashboard_overview(
             ]
 
         return {
-            "status": "success",
-            "kpis": {
-                "total_assets": total_assets,
-                "failures": active_failures,
-                "system_health": system_health,
-                "gateway_health": gateway_health,
-                "prediction_accuracy": prediction_accuracy,
-                "mttr_hours": mttr_hours
-            },
-            "alert_trend": alert_trend,
-            "alert_severity": alert_severity,
-            "division_health": division_health,
-            "failure_frequency": failure_frequency,
-            "failure_root_causes": root_causes,
-            "recent_activities": recent_activities
+            "status": True,
+            "message": "Dashboard overview retrieved successfully",
+            "data": {
+                "kpis": {
+                    "total_assets": total_assets,
+                    "failures": active_failures,
+                    "system_health": system_health,
+                    "gateway_health": gateway_health,
+                    "prediction_accuracy": prediction_accuracy,
+                    "mttr_hours": mttr_hours
+                },
+                "alert_trend": alert_trend,
+                "alert_severity": alert_severity,
+                "division_health": division_health,
+                "failure_frequency": failure_frequency,
+                "failure_root_causes": root_causes,
+                "recent_activities": recent_activities
+            }
         }
     except Exception as e:
         logger.error(f"Error generating dashboard overview: {e}")
         return {
-            "status": "error",
-            "detail": str(e),
-            "kpis": {
-                "total_assets": 200,
-                "failures": 10,
-                "system_health": 94.0,
-                "gateway_health": 96.0,
-                "prediction_accuracy": 91.0,
-                "mttr_hours": 4.2
-            },
-            "alert_trend": [],
-            "alert_severity": {"Critical": 12, "High": 8, "Medium": 45, "Low": 35},
-            "division_health": [],
-            "failure_frequency": [],
-            "failure_root_causes": [],
-            "recent_activities": []
+            "status": False,
+            "message": f"Error generating dashboard overview: {str(e)}",
+            "data": {
+                "kpis": {
+                    "total_assets": 200,
+                    "failures": 10,
+                    "system_health": 94.0,
+                    "gateway_health": 96.0,
+                    "prediction_accuracy": 91.0,
+                    "mttr_hours": 4.2
+                },
+                "alert_trend": [],
+                "alert_severity": {"Critical": 12, "High": 8, "Medium": 45, "Low": 35},
+                "division_health": [],
+                "failure_frequency": [],
+                "failure_root_causes": [],
+                "recent_activities": []
+            }
         }
 
 
-@router.get("/performance-overview", response_model=PerformanceOverviewResponse)
+@router.get("/performance-overview", response_model=StandardResponse[PerformanceOverviewResponse])
 def get_performance_overview(
     zone_code: Optional[str] = Query("NR", description="Zone code filter, e.g. NR"),
     division_code: Optional[str] = Query("PRYJ", description="Division code filter, e.g. PRYJ"),
@@ -1094,15 +1115,19 @@ def get_performance_overview(
         )
     ]
 
-    return PerformanceOverviewResponse(
-        confirmed_failure_percentage=82.0,
-        confirmed_predictive_percentage=71.0,
-        actual_failures_caught_percentage=89.0,
-        by_station=by_station
-    )
+    return {
+        "status": True,
+        "message": "Performance overview retrieved successfully",
+        "data": PerformanceOverviewResponse(
+            confirmed_failure_percentage=82.0,
+            confirmed_predictive_percentage=71.0,
+            actual_failures_caught_percentage=89.0,
+            by_station=by_station
+        )
+    }
 
 
-@router.get("/mobile-summary", response_model=MobileDashboardSummaryResponse)
+@router.get("/mobile-summary", response_model=StandardResponse[MobileDashboardSummaryResponse])
 def get_mobile_dashboard_summary(
     zone_code: Optional[str] = Query("NR", description="Zone code filter"),
     division_code: Optional[str] = Query("PRYJ", description="Division code filter"),
@@ -1163,28 +1188,32 @@ def get_mobile_dashboard_summary(
         )
     ]
 
-    return MobileDashboardSummaryResponse(
-        zone_code=zone_code or "NR",
-        division_code=division_code or "PRYJ",
-        station_code=station_code or "MJA",
-        live_alerts=LiveAlertShortcuts(
-            alert_history_count=history_count,
-            alert_live_count=live_count
-        ),
-        assets_by_category=categories,
-        fleet_health=FleetHealthSummary(
-            normal_percentage=77.0,
-            normal_count=230,
-            predicted_count=44,
-            failed_count=26
-        ),
-        infrastructure=InfrastructureSummary(
-            sensors_ok=55,
-            sensors_flt=8,
-            iot_ok=55,
-            iot_flt=8
+    return {
+        "status": True,
+        "message": "Mobile summary retrieved successfully",
+        "data": MobileDashboardSummaryResponse(
+            zone_code=zone_code or "NR",
+            division_code=division_code or "PRYJ",
+            station_code=station_code or "MJA",
+            live_alerts=LiveAlertShortcuts(
+                alert_history_count=history_count,
+                alert_live_count=live_count
+            ),
+            assets_by_category=categories,
+            fleet_health=FleetHealthSummary(
+                normal_percentage=77.0,
+                normal_count=230,
+                predicted_count=44,
+                failed_count=26
+            ),
+            infrastructure=InfrastructureSummary(
+                sensors_ok=55,
+                sensors_flt=8,
+                iot_ok=55,
+                iot_flt=8
+            )
         )
-    )
+    }
 
 
 
