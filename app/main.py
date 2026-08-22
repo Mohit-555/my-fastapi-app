@@ -164,49 +164,29 @@ protected_route = [Depends(get_current_user)]
 
 # ── Reference data ────────────────────────────────────────────────────────────
 app.include_router(zones.router, dependencies=protected_route)
-app.include_router(zones.router, prefix="/api", dependencies=protected_route)
-
 app.include_router(divisions.router, dependencies=protected_route)
-app.include_router(divisions.router, prefix="/api", dependencies=protected_route)
-
 app.include_router(stations.router, dependencies=protected_route)
-app.include_router(stations.router, prefix="/api", dependencies=protected_route)
 
 # ── Asset metadata & thresholds ───────────────────────────────────────────────
 app.include_router(assets.router, dependencies=protected_route)
-app.include_router(assets.router, prefix="/api", dependencies=protected_route)
 
 # ── Alerts summary, filters, and event records ────────────────────────────────
 app.include_router(alerts.router, dependencies=protected_route)
-app.include_router(alerts.router, prefix="/api", dependencies=protected_route)
 
 # Add after the alerts router line:
 app.include_router(admin.router, dependencies=protected_route)
-app.include_router(admin.router, prefix="/api", dependencies=protected_route)
-
 app.include_router(equipment_room.router, dependencies=protected_route)
-app.include_router(equipment_room.router, prefix="/api", dependencies=protected_route)
-
 app.include_router(maintenance.router, dependencies=protected_route)
-app.include_router(maintenance.router, prefix="/api", dependencies=protected_route)
-
 # ── Gateway ingestion ─────────────────────────────────────────────────────────
 app.include_router(gateway.router, dependencies=protected_route)
-app.include_router(gateway.router, prefix="/api", dependencies=protected_route)
-
 app.include_router(slave_card.router, dependencies=protected_route)
-app.include_router(slave_card.router, prefix="/api", dependencies=protected_route)
 
 # ── Telemetry query & live stream ─────────────────────────────────────────────
 app.include_router(telemetry.router, dependencies=protected_route)
-app.include_router(telemetry.router, prefix="/api", dependencies=protected_route)
 app.include_router(telemetry.integration_router)
 app.include_router(auth.router)
-app.include_router(auth.router, prefix="/api")
 app.include_router(webhook.router)
-app.include_router(webhook.router, prefix="/api")
 app.include_router(websocket.router)
-app.include_router(websocket.router, prefix="/api")
 app.include_router(sse.router)
 app.include_router(realtime.router)
 app.include_router(smms_telemetry.router)
