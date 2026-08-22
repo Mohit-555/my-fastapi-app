@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.database import get_db
+from app.services.websocket_manager import safe_notify_dashboard
 from app.models.models import Zone
 from app.models.schemas import ZoneCreate, ZoneUpdate, ZoneResponse, ZoneWithDivisions, DropdownOption
 
@@ -57,6 +58,7 @@ def create_zone(payload: ZoneCreate, db: Session = Depends(get_db)):
     db.add(zone)
     db.commit()
     db.refresh(zone)
+    safe_notify_dashboard("zone_updated")
     return zone
 
 
@@ -72,6 +74,7 @@ def update_zone(zone_id: int, payload: ZoneUpdate, db: Session = Depends(get_db)
 
     db.commit()
     db.refresh(zone)
+    safe_notify_dashboard("zone_updated")
     return zone
 
 
@@ -90,3 +93,4 @@ def delete_zone(zone_id: int, db: Session = Depends(get_db)):
 
     db.delete(zone)
     db.commit()
+    safe_notify_dashboard("zone_updated")

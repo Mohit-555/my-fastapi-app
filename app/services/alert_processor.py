@@ -145,6 +145,9 @@ class AlertProcessor:
                     telemetry.is_processed = True
             
             db.commit()
+            if alert_count > 0:
+                from app.services.websocket_manager import websocket_manager
+                await websocket_manager.broadcast_dashboard_update("alert_created")
             
             if processed_count > 0:
                 logger.info(f"Processed {processed_count} telemetry records, generated {alert_count} alerts")

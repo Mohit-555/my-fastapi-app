@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.database import get_db
+from app.services.websocket_manager import safe_notify_dashboard
 from app.models.models import Station, Division
 from app.models.schemas import StationCreate, StationUpdate, StationResponse, DropdownOption
 
@@ -85,6 +86,7 @@ def create_station(payload: StationCreate, db: Session = Depends(get_db)):
     db.add(station)
     db.commit()
     db.refresh(station)
+    safe_notify_dashboard("station_updated")
     return station
 
 
@@ -114,6 +116,7 @@ def update_station(station_id: int, payload: StationUpdate, db: Session = Depend
 
     db.commit()
     db.refresh(station)
+    safe_notify_dashboard("station_updated")
     return station
 
 
@@ -131,3 +134,4 @@ def delete_station(station_id: int, db: Session = Depends(get_db)):
 
     db.delete(station)
     db.commit()
+    safe_notify_dashboard("station_updated")

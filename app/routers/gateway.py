@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.database import get_db
+from app.services.websocket_manager import safe_notify_dashboard
 from app.models.models import Gateway, Telemetry, Zone, Division, Station, AssetParameter
 from app.models.schemas import GatewayDataPayload, TelemetryResponse, GatewayResponse
 
@@ -261,6 +262,9 @@ def receive_gateway_data(payload: GatewayDataPayload, db: Session = Depends(get_
             "duplicates_skipped": saved_count + duplicate_count,
             "note": "Entire batch rolled back — a concurrent duplicate delivery was detected at the database level.",
         }
+    if saved_count > 0:
+        safe_notify_dashboard("telemetry_ingested")
+
     return {
         "status": "accepted",
         "stngw_id": stngw_id,
@@ -327,6 +331,7 @@ def link_gateway_station(stngw_id: str, db: Session = Depends(get_db)):
     gateway.station_id = station_id
     db.commit()
     db.refresh(gateway)
+    safe_notify_dashboard("gateway_updated")
     return gateway
 
 

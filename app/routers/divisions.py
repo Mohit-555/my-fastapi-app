@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.database import get_db
+from app.services.websocket_manager import safe_notify_dashboard
 from app.models.models import Division, Zone
 from app.models.schemas import DivisionCreate, DivisionUpdate, DivisionResponse, DivisionWithStations, DropdownOption
 
@@ -84,6 +85,7 @@ def create_division(payload: DivisionCreate, db: Session = Depends(get_db)):
     db.add(division)
     db.commit()
     db.refresh(division)
+    safe_notify_dashboard("division_updated")
     return division
 
 
@@ -113,6 +115,7 @@ def update_division(division_id: int, payload: DivisionUpdate, db: Session = Dep
 
     db.commit()
     db.refresh(division)
+    safe_notify_dashboard("division_updated")
     return division
 
 
@@ -128,3 +131,4 @@ def delete_division(division_id: int, db: Session = Depends(get_db)):
 
     db.delete(division)
     db.commit()
+    safe_notify_dashboard("division_updated")

@@ -46,4 +46,10 @@ rdpms_frontend/
 frontend_png/
 alert/
 MOBILE_APP_*.md
+RDPMS_ENGINEERING_NOTES/
+RDPMS_API.postman_collection.json
+RDPMS_MODULE_API_MAPPING_GUIDE.md
+RDPMS_Master_API_Mapping_Sheet.csv
+websocket.md
+rdpms_backend.zip
 

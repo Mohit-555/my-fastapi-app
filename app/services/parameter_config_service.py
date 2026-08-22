@@ -8,10 +8,17 @@ from app.models.database_models import ParameterConfig
 logger = logging.getLogger("parameter_config")
 
 class ParameterConfigService:
-    """Service for managing parameter configurations"""
-    
+    """
+    Service for managing parameter configurations.
+
+    Cache key: (asset_type_id, parameter_type_id, parameter_representation_id)
+    This lets any asset_number_id (byte 2 of para_id) match the same config,
+    which is correct — thresholds are per parameter type, not per asset instance.
+    """
+
     def __init__(self):
-        self.config_cache = {}  # In-memory cache
+        # key: (asset_type_id, parameter_type_id, parameter_representation_id)
+        self.config_cache: dict = {}
         self._load_default_config()
     
     def _load_default_config(self):
@@ -234,6 +241,12 @@ class ParameterConfigService:
             ("21", "20", "VPT110 DC LOC R",  "110 DC at Loc box for Reverse",              "V", 82, 90, None),
             ("30", "00", "IPT N",            "Point Machine Current Normal",               "A", None, None, None),
             ("31", "00", "IPT R",            "Point Machine Current Reverse",              "A", None, None, None),
+            # Gateway hardware sends representation_id=0C/0D for IPT N/R.
+            # These are alias entries so real para_ids like 0001000C resolve
+            # to IPT N with thresholds. Standard values from Annexure C §2.2.
+            ("0C", "00", "IPT N",            "Point Machine Current Normal (GW alias)",    "A", 0.8, 2.5, 0.3),
+            ("0D", "00", "IPT R",            "Point Machine Current Reverse (GW alias)",   "A", 0.8, 2.5, 0.3),
+
             ("40", "20", "VPT 24 DC LOC N",  "24V DC to Relay Room after detection — Normal", "V", None, None, None),
             ("41", "20", "VPT 24 DC LOC R",  "24V DC to Relay Room after detection — Reverse", "V", None, None, None),
             ("50", "60", "XPT",              "Vibration (Optional)",                       None, None, None, None),
@@ -353,13 +366,13 @@ class ParameterConfigService:
         """
         Register a parameter configuration.
 
-        para_id is ALWAYS derived from its four constituent hex bytes
-        (Annexure A §3): asset_type_id + asset_number_id + parameter_type_id +
-        parameter_representation_id. Any "para_id" passed in explicitly is
-        ignored/overwritten, to prevent drift from non-hex placeholder ids
-        (e.g. "DCT00201", "SIG00301") that broke the standard encoding.
+        Cache key is (asset_type_id, parameter_type_id, parameter_representation_id).
+        asset_number_id is NOT part of the key — thresholds are per parameter
+        type, not per individual asset instance, so one entry covers all
+        asset_number_ids for that type. A synthetic para_id is stored in the
+        config object for reference using asset_number_id "01" as placeholder.
         """
-        required = ("asset_type_id", "asset_number_id", "parameter_type_id", "parameter_representation_id")
+        required = ("asset_type_id", "parameter_type_id", "parameter_representation_id")
         missing = [f for f in required if f not in config or config[f] is None]
         if missing:
             logger.error(f"Parameter config missing required id byte(s) {missing}: {config}")
@@ -376,20 +389,51 @@ class ParameterConfigService:
                 logger.error(f"{f}={v!r} is not valid hexadecimal")
                 return
 
+        # Build cache key — asset_number_id is intentionally excluded
+        key = (
+            config["asset_type_id"].upper(),
+            config["parameter_type_id"].upper(),
+            config["parameter_representation_id"].upper(),
+        )
+
+        # Derive a representative para_id (asset_number=01) for the config object
+        asset_number_id = config.get("asset_number_id", "01") or "01"
         para_id = (
             config["asset_type_id"]
-            + config["asset_number_id"]
+            + asset_number_id
             + config["parameter_type_id"]
             + config["parameter_representation_id"]
         ).upper()
         config["para_id"] = para_id
+        if "asset_number_id" not in config:
+            config["asset_number_id"] = asset_number_id
 
-        self.config_cache[para_id] = ParameterConfig(**config)
-        logger.debug(f"Registered parameter config: {para_id}")
+        self.config_cache[key] = ParameterConfig(**config)
+        logger.debug(f"Registered parameter config: key={key} para_id={para_id}")
     
     def get_parameter_config(self, para_id: str) -> Optional[ParameterConfig]:
-        """Get parameter configuration by para_id"""
-        return self.config_cache.get(para_id)
+        """
+        Look up parameter configuration by decoding the 4-byte para_id.
+
+        para_id format (Annexure A §3):
+          Byte 0-1 : asset_type_id      (AA)
+          Byte 2-3 : asset_number_id    (BB) — ignored for threshold lookup
+          Byte 4-5 : parameter_type_id  (CC)
+          Byte 6-7 : representation_id  (DD)
+
+        Any asset_number_id will match the same threshold config, which is
+        the correct production behaviour.
+        """
+        if not para_id or len(para_id) != 8:
+            logger.warning(f"Invalid para_id length: {para_id!r}")
+            return None
+
+        para_id = para_id.upper()
+        key = (para_id[0:2], para_id[4:6], para_id[6:8])
+        config = self.config_cache.get(key)
+        if not config:
+            logger.debug(f"No config for para_id {para_id} (key={key})")
+        return config
     
     def get_parameters_by_asset_type(self, asset_type_id: str) -> List[ParameterConfig]:
         """Get all parameters for an asset type"""
@@ -434,37 +478,68 @@ class ParameterConfigService:
         return sum(filtered_values) / len(filtered_values)
     
     def check_parameter_health(
-        self, 
-        para_id: str, 
+        self,
+        para_id: str,
         value: float
     ) -> Dict[str, Any]:
-        """Check if a parameter value is healthy, warning, or failure"""
+        """
+        Check if a parameter value is healthy, warning, or failure.
+
+        Handles two failure directions:
+        - Under-limit: value < min_fail  (undervoltage / undercurrent)
+        - Over-limit:  value > max_fail  (overvoltage / overcurrent)
+
+        For parameters where min_fail > max_safe (e.g. VSHISIG ON with
+        max_safe=58 and min_fail=90), min_fail is treated as an over-limit
+        failure boundary (value > min_fail = failure).
+        """
         config = self.get_parameter_config(para_id)
         if not config:
             return {"status": "unknown", "message": "No configuration found"}
-        
-        result = {
-            "status": "healthy",
-            "message": "Parameter within safe range",
-            "value": value
-        }
-        
-        # Check failure conditions
-        if config.min_fail is not None and value < config.min_fail:
-            result["status"] = "failure"
-            result["message"] = f"Value {value} below minimum fail threshold {config.min_fail}"
-        elif config.max_fail is not None and value > config.max_fail:
-            result["status"] = "failure"
-            result["message"] = f"Value {value} above maximum fail threshold {config.max_fail}"
-        
-        # Check warning conditions (predictive)
-        elif config.min_safe is not None and value < config.min_safe:
-            result["status"] = "warning"
-            result["message"] = f"Value {value} below minimum safe threshold {config.min_safe}"
-        elif config.max_safe is not None and value > config.max_safe:
-            result["status"] = "warning"
-            result["message"] = f"Value {value} above maximum safe threshold {config.max_safe}"
-        
+
+        result = {"status": "healthy", "message": "Parameter within safe range", "value": value}
+
+        min_safe  = config.min_safe
+        max_safe  = config.max_safe
+        min_fail  = config.min_fail
+        max_fail  = config.max_fail
+
+        # Detect over-limit failure style: min_fail used as upper failure boundary
+        over_limit_style = (
+            min_fail is not None
+            and max_safe is not None
+            and min_fail > max_safe
+        )
+
+        if over_limit_style:
+            # e.g. VSHISIG ON: max_safe=58, min_fail=90 → failure if value > 90
+            if value > min_fail:
+                result["status"] = "failure"
+                result["message"] = f"Value {value} exceeds over-limit failure threshold {min_fail}"
+            elif max_fail is not None and value > max_fail:
+                result["status"] = "failure"
+                result["message"] = f"Value {value} above max_fail {max_fail}"
+            elif min_safe is not None and value < min_safe:
+                result["status"] = "warning"
+                result["message"] = f"Value {value} below minimum safe {min_safe}"
+            elif max_safe is not None and value > max_safe:
+                result["status"] = "warning"
+                result["message"] = f"Value {value} above maximum safe {max_safe}"
+        else:
+            # Standard under-limit style
+            if min_fail is not None and value < min_fail:
+                result["status"] = "failure"
+                result["message"] = f"Value {value} below failure threshold {min_fail}"
+            elif max_fail is not None and value > max_fail:
+                result["status"] = "failure"
+                result["message"] = f"Value {value} above failure threshold {max_fail}"
+            elif min_safe is not None and value < min_safe:
+                result["status"] = "warning"
+                result["message"] = f"Value {value} below minimum safe {min_safe}"
+            elif max_safe is not None and value > max_safe:
+                result["status"] = "warning"
+                result["message"] = f"Value {value} above maximum safe {max_safe}"
+
         return result
 
 # Singleton instance
