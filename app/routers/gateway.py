@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List
@@ -8,7 +8,7 @@ from typing import List
 from app.database import get_db
 from app.services.websocket_manager import safe_notify_dashboard
 from app.models.models import Gateway, Telemetry, Zone, Division, Station, AssetParameter
-from app.models.schemas import GatewayDataPayload, TelemetryResponse, GatewayResponse
+from app.models.schemas import GatewayDataPayload, TelemetryResponse, GatewayResponse, GatewayListResponse, StandardResponse
 
 router = APIRouter(prefix="/gateway", tags=["Gateway Telemetry"])
 
@@ -274,7 +274,7 @@ def receive_gateway_data(payload: GatewayDataPayload, db: Session = Depends(get_
     }
 
 
-@router.get("/data/{stngw_id}", response_model=List[TelemetryResponse])
+@router.get("/data/{stngw_id}", response_model=StandardResponse[List[TelemetryResponse]])
 def get_gateway_telemetry(
     stngw_id: str,
     para_id: str = None,
@@ -300,15 +300,20 @@ def get_gateway_telemetry(
     if para_id:
         query = query.filter(Telemetry.para_id == para_id.upper())
 
-    return (
+    rows = (
         query
         .order_by(Telemetry.received_at.desc())
         .limit(limit)
         .all()
     )
+    return {
+        "status": True,
+        "message": "Gateway telemetry retrieved successfully",
+        "data": rows
+    }
 
 
-@router.post("/{stngw_id}/link-station", response_model=GatewayResponse)
+@router.post("/{stngw_id}/link-station", response_model=StandardResponse[GatewayResponse])
 def link_gateway_station(stngw_id: str, db: Session = Depends(get_db)):
     """
     Manually trigger station auto-assignment for an existing gateway.
@@ -332,16 +337,40 @@ def link_gateway_station(stngw_id: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(gateway)
     safe_notify_dashboard("gateway_updated")
-    return gateway
+    return {
+        "status": True,
+        "message": "Gateway station linked successfully",
+        "data": gateway
+    }
 
 
-@router.get("/list", response_model=List[GatewayResponse])
-def list_gateways(db: Session = Depends(get_db)):
-    """List all registered gateways"""
-    return db.query(Gateway).order_by(Gateway.stngw_id).all()
+@router.get("/list", response_model=StandardResponse[GatewayListResponse])
+def list_gateways(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db)
+):
+    """List all registered gateways with pagination"""
+    q = db.query(Gateway)
+    total = q.count()
+    total_pages = (total + page_size - 1) // page_size if total else 0
+    offset = (page - 1) * page_size
+    rows = q.order_by(Gateway.stngw_id).offset(offset).limit(page_size).all()
+    
+    return {
+        "status": True,
+        "message": "Gateways retrieved successfully",
+        "data": {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "rows": rows
+        }
+    }
 
 
-@router.get("/{stngw_id}/info", response_model=GatewayResponse)
+@router.get("/{stngw_id}/info", response_model=StandardResponse[GatewayResponse])
 def get_gateway_info(stngw_id: str, db: Session = Depends(get_db)):
     """Get gateway registration info"""
     gateway = db.query(Gateway).filter(
@@ -349,4 +378,8 @@ def get_gateway_info(stngw_id: str, db: Session = Depends(get_db)):
     ).first()
     if not gateway:
         raise HTTPException(status_code=404, detail=f"Gateway '{stngw_id}' not found")
-    return gateway
+    return {
+        "status": True,
+        "message": "Gateway info retrieved successfully",
+        "data": gateway
+    }

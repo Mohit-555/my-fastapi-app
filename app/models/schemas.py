@@ -284,6 +284,14 @@ class GatewayResponse(BaseModel):
         from_attributes = True
 
 
+class GatewayListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    rows: List[GatewayResponse]
+
+
 # ─── Telemetry (Gateway Ingestion) ────────────────────────────────────────────
 
 class ParameterPayload(BaseModel):
