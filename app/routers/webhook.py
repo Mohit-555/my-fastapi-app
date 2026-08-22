@@ -995,9 +995,7 @@ def receive_discovery(
             _check_gateway_cert_binding(mtls_cn, gateway)
 
             db.commit()
-            import anyio
-            anyio.from_thread.run(
-             websocket_manager.broadcast_dashboard_update,"gateway_updated")
+            safe_create_task(websocket_manager.broadcast_dashboard_update("gateway_updated"))
             
             response_data = {
                 "status": "success",

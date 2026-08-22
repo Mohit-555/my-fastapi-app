@@ -15,6 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.services.websocket_manager import safe_notify_dashboard
 from app.models.models import AssetInventory, Division, Threshold, Station, Zone, AssetTypeMaster, Asset, Gateway, AssetParameter, Role
 from app.models.schemas import (
     AssetDetailResponse,
@@ -777,6 +778,7 @@ def create_threshold(payload: ThresholdCreate, db: Session = Depends(get_db)):
             detail="A threshold for this asset_type_hex + parameter_type_hex + station_id already exists. Use PUT to update it."
         )
     db.refresh(t)
+    safe_notify_dashboard("threshold_updated")
     return t
 
 
@@ -792,6 +794,7 @@ def update_threshold(threshold_id: int, payload: ThresholdUpdate, db: Session = 
 
     db.commit()
     db.refresh(t)
+    safe_notify_dashboard("threshold_updated")
     return t
 
 
@@ -803,6 +806,7 @@ def delete_threshold(threshold_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Threshold {threshold_id} not found")
     db.delete(t)
     db.commit()
+    safe_notify_dashboard("threshold_updated")
 
 
 @router.get("/thresholds/resolve/{asset_type_hex}/{parameter_type_hex}",
@@ -1132,6 +1136,7 @@ def create_asset(payload: AssetCreate, db: Session = Depends(get_db)):
             detail="smms_asset_code must be unique — an asset with this code already exists."
         )
     db.refresh(record)
+    safe_notify_dashboard("asset_created")
     return _build_response(record)
 
 
@@ -1223,6 +1228,7 @@ def create_assets_bulk(payload: List[AssetCreate], db: Session = Depends(get_db)
     for asset in created_assets:
         db.refresh(asset)
 
+    safe_notify_dashboard("asset_created")
     return [_build_response(a) for a in created_assets]
 
 
@@ -1278,6 +1284,7 @@ def update_asset(
             detail="smms_asset_code must be unique — that code is already taken."
         )
     db.refresh(record)
+    safe_notify_dashboard("asset_updated")
     return _build_response(record)
 
 
@@ -1294,6 +1301,7 @@ def delete_asset(asset_id: int, db: Session = Depends(get_db)):
 
     db.delete(record)
     db.commit()
+    safe_notify_dashboard("asset_deleted")
 
 
 # ── Asset Parameters (para_id → asset + prloc assignment) ────────────────────
@@ -1422,6 +1430,7 @@ def assign_asset_parameter(
 
     db.commit()
     db.refresh(ap)
+    safe_notify_dashboard("parameter_assigned")
     return _build_asset_parameter_response(ap)
 
 
@@ -1438,6 +1447,7 @@ def delete_asset_parameter(asset_parameter_id: int, db: Session = Depends(get_db
         raise HTTPException(status_code=404, detail=f"Asset parameter {asset_parameter_id} not found")
     db.delete(ap)
     db.commit()
+    safe_notify_dashboard("parameter_deleted")
 
 
 # ── Asset Utilization Endpoints ───────────────────────────────────────────────

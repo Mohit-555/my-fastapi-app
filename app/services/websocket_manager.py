@@ -226,7 +226,7 @@ class ConnectionManager:
         
     async def broadcast_dashboard_update(self, reason: str):
         """Notify main-dashboard clients that the overview data changed."""
-        await self.broadcast_to_station("_dashboard_", {
+        await self.broadcast_to_station("__dashboard__", {
             "type": "dashboard_update",
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "reason": reason
@@ -262,3 +262,22 @@ class ConnectionManager:
 
 # Singleton instance
 websocket_manager = ConnectionManager()
+
+
+def safe_notify_dashboard(reason: str):
+    """
+    Safely trigger broadcast_dashboard_update from both sync and async FastAPI routes.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(websocket_manager.broadcast_dashboard_update(reason))
+    except RuntimeError:
+        try:
+            import anyio
+
+            async def await_coro():
+                await websocket_manager.broadcast_dashboard_update(reason)
+
+            anyio.from_thread.run(await_coro)
+        except Exception as exc:
+            logger.error(f"Dashboard notification failed: {exc}")

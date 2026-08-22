@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
-from app.services.websocket_manager import websocket_manager
+from app.services.websocket_manager import websocket_manager, safe_notify_dashboard
 
 from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP, PARAMETER_TYPE_MAP
 from app.database import get_db
@@ -1318,6 +1318,8 @@ def _broadcast_alert_update(record: AlertEvent):
             )
         except RuntimeError:
             pass
+
+    safe_notify_dashboard("alert_updated")
 
 
 @router.post("/events", response_model=AlertEventResponse, status_code=status.HTTP_201_CREATED)
