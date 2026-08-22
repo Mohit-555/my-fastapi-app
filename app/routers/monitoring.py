@@ -62,22 +62,6 @@ async def system_health(
         },
         "last_sync": sync_results
     }
-
-
-@router.get("/routes-debug")
-def routes_debug(api_key: bool = Depends(verify_api_key)):
-    """Debug endpoint to list all registered routes in the running application"""
-    from app.main import app
-    res = []
-    for r in app.routes:
-        res.append({
-            "path": r.path,
-            "name": r.name,
-            "type": type(r).__name__
-        })
-    return res
-
-
 @router.get("/health/totals", response_model=SystemHealthTotalsResponse)
 async def get_health_totals(
     zone_id: Optional[int] = Query(None),
