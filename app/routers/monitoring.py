@@ -247,6 +247,61 @@ async def telemetry_debug(db: Session = Depends(get_db)):
         for r in raw_unprocessed
     ]
 
+    from app.database import SessionLocal
+    test_db = SessionLocal()
+    manual_error = None
+    try:
+        unprocessed_test = test_db.query(Telemetry).filter(
+            Telemetry.is_processed == False
+        ).order_by(Telemetry.id.asc()).limit(10).all()
+        
+        for telemetry in unprocessed_test:
+            # Replicate the core logic:
+            gateway = test_db.query(Gateway).filter(Gateway.id == telemetry.gateway_id).first()
+            if not gateway:
+                telemetry.is_processed = True
+                continue
+                
+            asset_param = test_db.query(AssetParameter).filter(AssetParameter.para_id == telemetry.para_id).first()
+            if not asset_param or not asset_param.asset_id:
+                telemetry.is_processed = True
+                continue
+                
+            asset = test_db.query(Asset).filter(Asset.id == asset_param.asset_id).first()
+            if not asset:
+                telemetry.is_processed = True
+                continue
+                
+            alerts = alert_engine.evaluate_telemetry(
+                gateway_id=gateway.id,
+                stngw_id=gateway.stngw_id,
+                para_id=telemetry.para_id,
+                value=telemetry.prv,
+                timestamp=telemetry.prt,
+                db=test_db
+            )
+            
+            for alert_data in alerts:
+                alert_engine._generate_alert(
+                    station_id=gateway.station_id,
+                    asset_id=asset.id,
+                    asset_number_code=asset.asset_number_code,
+                    asset_type_hex=asset.asset_type_hex,
+                    cause_code=alert_data["cause_code"],
+                    cause_detail=alert_data["cause_detail"],
+                    alert_type=alert_data["alert_type"],
+                    timestamp=safe_parse_datetime(telemetry.prt),
+                    db=test_db
+                )
+            telemetry.is_processed = True
+            
+        test_db.commit()
+    except Exception as e:
+        manual_error = f"Commit failed: {type(e).__name__}: {str(e)}"
+        test_db.rollback()
+    finally:
+        test_db.close()
+
     process_batch_res = None
     try:
         await alert_processor._process_batch()
@@ -267,7 +322,8 @@ async def telemetry_debug(db: Session = Depends(get_db)):
         "unprocessed_count": unprocessed_count,
         "oldest_unprocessed": oldest_info,
         "newest_unprocessed": newest_info,
-        "raw_unprocessed": unprocessed_info
+        "raw_unprocessed": unprocessed_info,
+        "manual_error": manual_error
     }
 
 @router.get("/health/totals", response_model=SystemHealthTotalsResponse)
