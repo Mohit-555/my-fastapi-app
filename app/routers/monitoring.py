@@ -71,8 +71,8 @@ async def telemetry_debug(db: Session = Depends(get_db)):
     from app.services.alert_processor import safe_parse_datetime
     from fastapi import HTTPException
     
-    # Query latest telemetry records for 0001000C
-    telemetry_records = db.query(Telemetry).filter(Telemetry.para_id == "0001000C").order_by(Telemetry.id.desc()).limit(5).all()
+    # Query latest telemetry records overall
+    telemetry_records = db.query(Telemetry).order_by(Telemetry.id.desc()).limit(10).all()
     
     telemetry_list = []
     for r in telemetry_records:
