@@ -234,6 +234,19 @@ async def telemetry_debug(db: Session = Depends(get_db)):
         "received_at": newest_unprocessed.received_at.isoformat() if newest_unprocessed.received_at else None
     } if newest_unprocessed else None
 
+    raw_unprocessed = db.query(Telemetry).filter(Telemetry.is_processed == False).order_by(Telemetry.id.asc()).limit(5).all()
+    unprocessed_info = [
+        {
+            "id": r.id,
+            "gateway_id": r.gateway_id,
+            "para_id": r.para_id,
+            "prv": r.prv,
+            "prt": r.prt,
+            "received_at": r.received_at.isoformat() if r.received_at else None
+        }
+        for r in raw_unprocessed
+    ]
+
     process_batch_res = None
     try:
         await alert_processor._process_batch()
@@ -253,7 +266,8 @@ async def telemetry_debug(db: Session = Depends(get_db)):
         "manual_process_batch": process_batch_res,
         "unprocessed_count": unprocessed_count,
         "oldest_unprocessed": oldest_info,
-        "newest_unprocessed": newest_info
+        "newest_unprocessed": newest_info,
+        "raw_unprocessed": unprocessed_info
     }
 
 @router.get("/health/totals", response_model=SystemHealthTotalsResponse)
