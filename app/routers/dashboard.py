@@ -1197,7 +1197,15 @@ async def get_dashboard_overview(
                 "gatewayHealth": int(gateway_health),
                 "predictionAccuracy": prediction_accuracy_list,
                 "availability": availability,
-                "failureCauses": failure_causes_list
+                "failureCauses": failure_causes_list,
+                "kpis": {
+                    "total_assets": total_assets,
+                    "failures": active_failures,
+                    "system_health": system_health,
+                    "gateway_health": int(gateway_health),
+                    "prediction_accuracy": prediction_accuracy,
+                    "mttr_hours": mttr_hours
+                }
             }
         }
     except Exception as e:
@@ -1228,7 +1236,15 @@ async def get_dashboard_overview(
                 "gatewayHealth": 96,
                 "predictionAccuracy": [],
                 "availability": {"pointMachine": 97, "trackCircuit": 95, "axleCounter": 92},
-                "failureCauses": []
+                "failureCauses": [],
+                "kpis": {
+                    "total_assets": 200,
+                    "failures": 10,
+                    "system_health": 94.0,
+                    "gateway_health": 96,
+                    "prediction_accuracy": 91.0,
+                    "mttr_hours": 4.2
+                }
             }
         }
 
