@@ -5,7 +5,7 @@ from typing import List
 from app.database import get_db
 from app.services.websocket_manager import safe_notify_dashboard
 from app.models.models import Zone
-from app.models.schemas import ZoneCreate, ZoneUpdate, ZoneResponse, ZoneWithDivisions, DropdownOption, StandardResponse
+from app.models.schemas import ZoneCreate, ZoneUpdate, ZoneResponse, ZoneWithDivisions, DropdownOption, StandardResponse, ZoneDropdownResponse
 
 router = APIRouter(prefix="/zones", tags=["Zones"])
 
@@ -21,7 +21,7 @@ def get_all_zones(db: Session = Depends(get_db)):
     }
 
 
-@router.get("/dropdown", response_model=StandardResponse[List[DropdownOption]])
+@router.get("/dropdown", response_model=StandardResponse[ZoneDropdownResponse])
 def get_zones_dropdown(db: Session = Depends(get_db)):
     """Get zones formatted for frontend dropdown"""
     zones = db.query(Zone).order_by(Zone.zone_name).all()
@@ -32,7 +32,9 @@ def get_zones_dropdown(db: Session = Depends(get_db)):
     return {
         "status": True,
         "message": "Zone dropdown options retrieved successfully",
-        "data": options
+        "data": {
+            "zones": options
+        }
     }
 
 

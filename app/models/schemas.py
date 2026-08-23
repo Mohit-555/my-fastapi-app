@@ -581,6 +581,15 @@ class DropdownOption(BaseModel):
     asset_type_name: Optional[str] = None
     asset_type_hex: Optional[str] = None
 
+class ZoneDropdownResponse(BaseModel):
+    zones: List[DropdownOption]
+
+class DivisionDropdownResponse(BaseModel):
+    divisions: List[DropdownOption]
+
+class StationDropdownResponse(BaseModel):
+    stations: List[DropdownOption]
+
 # ─── Alert Summary ────────────────────────────────────────────────────────────
 
 class AlertEventBase(BaseModel):

@@ -5,7 +5,7 @@ from typing import List
 from app.database import get_db
 from app.services.websocket_manager import safe_notify_dashboard
 from app.models.models import Division, Zone
-from app.models.schemas import DivisionCreate, DivisionUpdate, DivisionResponse, DivisionWithStations, DropdownOption, StandardResponse
+from app.models.schemas import DivisionCreate, DivisionUpdate, DivisionResponse, DivisionWithStations, DropdownOption, StandardResponse, DivisionDropdownResponse
 
 router = APIRouter(prefix="/divisions", tags=["Divisions"])
 
@@ -36,7 +36,7 @@ def get_divisions_by_zone(zone_id: int, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/by-zone/{zone_id}/dropdown", response_model=StandardResponse[List[DropdownOption]])
+@router.get("/by-zone/{zone_id}/dropdown", response_model=StandardResponse[DivisionDropdownResponse])
 def get_divisions_dropdown(zone_id: int, db: Session = Depends(get_db)):
     """Get divisions for a zone, formatted for frontend dropdown"""
     zone = db.query(Zone).filter(Zone.id == zone_id).first()
@@ -51,7 +51,9 @@ def get_divisions_dropdown(zone_id: int, db: Session = Depends(get_db)):
     return {
         "status": True,
         "message": "Division dropdown options retrieved successfully",
-        "data": options
+        "data": {
+            "divisions": options
+        }
     }
 
 
