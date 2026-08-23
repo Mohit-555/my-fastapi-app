@@ -1248,14 +1248,7 @@ async def get_dashboard_overview(
                     "gateway_health": int(gateway_health),
                     "prediction_accuracy": prediction_accuracy,
                     "mttr_hours": mttr_hours
-                },
-                # Added snake_case copies for frontend compatibility
-                "alert_trend": alert_trend_list,
-                "alert_severity": alert_severity,
-                "division_health": division_health_list,
-                "failure_frequency": failure_frequency,
-                "failure_root_causes": root_causes,
-                "recent_activities": recent_activities
+                }
             }
         }
     except Exception as e:
@@ -1294,25 +1287,7 @@ async def get_dashboard_overview(
                     "gateway_health": 96,
                     "prediction_accuracy": 91.0,
                     "mttr_hours": 4.2
-                },
-                # Added snake_case copies for frontend compatibility
-                "alert_trend": [],
-                "alert_severity": {"Critical": 12, "High": 8, "Medium": 45, "Low": 35},
-                "division_health": [],
-                "failure_frequency": [
-                    {"name": "Point Machine", "value": 18},
-                    {"name": "Track Circuit", "value": 12},
-                    {"name": "Axle Counter", "value": 8},
-                    {"name": "Signal", "value": 14}
-                ],
-                "failure_root_causes": [
-                    {"cause": "Power Failure", "count": 24},
-                    {"cause": "Communication Loss", "count": 18},
-                    {"cause": "Overheating", "count": 11}
-                ],
-                "recent_activities": [
-                    {"title": "Point Machine PT-103 Failure", "time": "10:24", "severity": "Critical"}
-                ]
+                }
             }
         }
 
