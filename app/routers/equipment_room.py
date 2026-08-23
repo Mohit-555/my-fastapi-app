@@ -85,6 +85,14 @@ def _generate_history_data(
             division = station.division
             zone = division.zone
 
+            # door_status: OPEN if temp exceeds threshold for room type
+            if r.room_type == "RR":
+                door_status = "OPEN" if temp > 40.0 else "CLOSED"
+            elif r.room_type == "IPS":
+                door_status = "OPEN" if temp > 34.0 else "CLOSED"
+            else:  # BATT
+                door_status = "OPEN" if temp > 29.0 else "CLOSED"
+
             rows.append({
                 "id": f"{r.id}-{r.room_type}-{ts.strftime('%Y%m%d%H%M')}",
                 "zone_code": zone.zone_code,
@@ -95,6 +103,7 @@ def _generate_history_data(
                 "room_type": r.room_type,
                 "temperature": temp,
                 "humidity": hum,
+                "door_status": door_status,
             })
     return rows
 

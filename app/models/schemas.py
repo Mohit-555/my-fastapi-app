@@ -1266,6 +1266,7 @@ class EquipmentRoomHistoryRow(BaseModel):
     room_type: str
     temperature: float
     humidity: float
+    door_status: Optional[str] = None
 
     class Config:
         from_attributes = True
