@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Any
 from datetime import datetime, timedelta
 import random
 import hashlib
@@ -99,12 +99,14 @@ def _generate_history_data(
     return rows
 
 
-@router.get("/live", response_model=StandardResponse[List[EquipmentRoomResponse]])
+@router.get("/live", response_model=StandardResponse[Any])
 def get_live_equipment_rooms(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
     room_type: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1),
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
@@ -163,10 +165,22 @@ def get_live_equipment_rooms(
             "updated_at": r.updated_at,
         })
 
+    total = len(response_data)
+    total_pages = (total + page_size - 1) // page_size if total else 0
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_rows = response_data[start_idx:end_idx]
+
     return {
         "status": True,
         "message": "Success",
-        "data": response_data
+        "data": {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "rows": paginated_rows
+        }
     }
 
 
