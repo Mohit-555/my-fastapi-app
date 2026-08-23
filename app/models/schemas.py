@@ -1449,6 +1449,9 @@ class FaultyByStationItem(BaseModel):
 class FaultyByStationResponse(BaseModel):
     total: int
     rows: List[FaultyByStationItem]
+    page: Optional[int] = 1
+    page_size: Optional[int] = 10
+    total_pages: Optional[int] = 1
 
 
 class LiveParameterItem(BaseModel):

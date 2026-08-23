@@ -258,10 +258,18 @@ async def get_faulty_by_station(
     end = start + page_size
     paginated_rows = all_rows[start:end]
     
+    total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 0
+    
     return {
         "status": True,
         "message": "Success",
-        "data": FaultyByStationResponse(total=total_count, rows=paginated_rows)
+        "data": FaultyByStationResponse(
+            total=total_count,
+            rows=paginated_rows,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
+        )
     }
 
 
