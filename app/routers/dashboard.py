@@ -975,6 +975,9 @@ async def get_dashboard_overview(
         # 7. Division Health
         divisions = db.query(Division).all()
         division_health = []
+        from collections import Counter
+        div_code_counts = Counter(d.division_code for d in divisions)
+        
         for div in divisions:
             stn_ids = [s.id for s in div.stations]
             if stn_ids:
@@ -987,7 +990,10 @@ async def get_dashboard_overview(
                 score = round(((div_assets - div_fails) / div_assets) * 100) if div_assets > 0 else 90
             else:
                 score = 85
-            division_health.append({"name": div.division_code, "health": max(50, min(100, score))})
+            
+            # Use zone suffix if division code is duplicate (e.g. NGP)
+            name = f"{div.division_code} ({div.zone.zone_code})" if div_code_counts[div.division_code] > 1 else div.division_code
+            division_health.append({"name": name, "health": max(50, min(100, score))})
 
         if not division_health:
             division_health = [
