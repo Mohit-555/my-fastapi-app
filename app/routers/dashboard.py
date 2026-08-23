@@ -1135,6 +1135,11 @@ async def get_dashboard_overview(
             "total": sum(c["total"] for c in asset_counts.values())
         }
 
+        # Override for consistency between top-level visual cards and detailed KPI counts
+        total_assets = total_assets_dict["total"]
+        active_failures = total_assets_dict["failure"]
+        system_health = max(0.0, min(100.0, round(((total_assets - active_failures) / total_assets) * 100, 1))) if total_assets > 0 else 94.0
+
         sensor_dict = {
             "healthy": total_assets_dict["healthy"],
             "failure": total_assets_dict["failure"],
