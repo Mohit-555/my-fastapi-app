@@ -106,6 +106,15 @@ async def get_faulty_by_station(
     db: Session = Depends(get_db),
 ):
     """Return faulty counts grouped by station & asset with pagination and filtering."""
+    from fastapi.params import Query as FastAPIQuery
+    if isinstance(zone_id, FastAPIQuery): zone_id = None
+    if isinstance(division_id, FastAPIQuery): division_id = None
+    if isinstance(station_id, FastAPIQuery): station_id = None
+    if isinstance(asset_type, FastAPIQuery): asset_type = None
+    if isinstance(asset_no, FastAPIQuery): asset_no = None
+    if isinstance(page, FastAPIQuery) or page is None: page = 1
+    if isinstance(page_size, FastAPIQuery) or page_size is None: page_size = 10
+
     from sqlalchemy import or_
     from app.models.models import AlertEvent, Station, Division, AssetTypeMaster
 
@@ -115,10 +124,10 @@ async def get_faulty_by_station(
     
     if station_id:
         query = query.filter(AlertEvent.station_id == station_id)
-    elif division_id:
-        query = query.join(Station).filter(Station.division_id == division_id)
-    elif zone_id:
-        query = query.join(Station).join(Division, Division.id == Station.division_id).filter(Division.zone_id == zone_id)
+    if division_id:
+        query = query.filter(AlertEvent.station.has(Station.division_id == division_id))
+    if zone_id:
+        query = query.filter(AlertEvent.station.has(Station.division.has(Division.zone_id == zone_id)))
         
     if asset_type:
         query = query.filter(AlertEvent.asset_type_hex == asset_type)
@@ -229,6 +238,17 @@ async def get_faulty_by_station(
                 continue
             if asset_type and asset_type.lower() not in (row.asset_type or "").lower():
                 continue
+                
+            # Filter fallback rows by station/division/zone to keep dropdown selection consistent
+            st_obj = db.query(Station).filter(Station.station_code == row.station_code).first()
+            if st_obj:
+                if station_id and st_obj.id != station_id:
+                    continue
+                if division_id and st_obj.division_id != division_id:
+                    continue
+                if zone_id and (not st_obj.division or st_obj.division.zone_id != zone_id):
+                    continue
+            
             all_rows.append(row)
         
     total_count = len(all_rows)
