@@ -1,6 +1,6 @@
 # app/routers/monitoring.py
 from fastapi import APIRouter, Depends, Query
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -89,7 +89,7 @@ async def get_health_totals(
     )
     return {
         "status": True,
-        "message": "Health totals retrieved successfully",
+        "message": "Success",
         "data": response_data
     }
 
@@ -260,12 +260,12 @@ async def get_faulty_by_station(
     
     return {
         "status": True,
-        "message": "Faulty-by-station data retrieved successfully",
+        "message": "Success",
         "data": FaultyByStationResponse(total=total_count, rows=paginated_rows)
     }
 
 
-@router.get("/health/summary")
+@router.get("/health/summary", response_model=StandardResponse[Any])
 def get_health_summary(
     zone: Optional[str] = Query(None, description="Zone code"),
     division: Optional[str] = Query(None, description="Division code"),
@@ -334,7 +334,7 @@ def get_health_summary(
 
     return {
         "status": True,
-        "message": "Health summary retrieved successfully",
+        "message": "Success",
         "data": {
             "total_records": total_records,
             "page": page,

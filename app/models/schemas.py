@@ -1533,6 +1533,14 @@ class StandardResponse(BaseModel, Generic[T]):
     message: str = "Success"
     data: T
 
+    @model_validator(mode="before")
+    @classmethod
+    def force_success_message(cls, data):
+        if isinstance(data, dict):
+            if data.get("status") is not False:
+                data["message"] = "Success"
+        return data
+
 
 
 
