@@ -10,7 +10,7 @@ import io
 
 from app.database import get_db
 from app.models.models import EquipmentRoom, Station, Division, Zone
-from app.models.schemas import EquipmentRoomResponse, EquipmentRoomHistoryResponse, EquipmentRoomHistoryRow
+from app.models.schemas import EquipmentRoomResponse, EquipmentRoomHistoryResponse, EquipmentRoomHistoryRow, StandardResponse
 from app.auth_utils import get_current_user
 
 router = APIRouter(prefix="/equipment-room", tags=["Equipment Room"])
@@ -99,7 +99,7 @@ def _generate_history_data(
     return rows
 
 
-@router.get("/live", response_model=List[EquipmentRoomResponse])
+@router.get("/live", response_model=StandardResponse[List[EquipmentRoomResponse]])
 def get_live_equipment_rooms(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
@@ -163,10 +163,14 @@ def get_live_equipment_rooms(
             "updated_at": r.updated_at,
         })
 
-    return response_data
+    return {
+        "status": True,
+        "message": "Live equipment rooms retrieved successfully",
+        "data": response_data
+    }
 
 
-@router.get("/history", response_model=EquipmentRoomHistoryResponse)
+@router.get("/history", response_model=StandardResponse[EquipmentRoomHistoryResponse])
 def get_equipment_room_history(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
@@ -187,11 +191,15 @@ def get_equipment_room_history(
     paginated_rows = rows[start_idx:end_idx]
 
     return {
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "rows": paginated_rows,
+        "status": True,
+        "message": "Equipment room history retrieved successfully",
+        "data": {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "rows": paginated_rows,
+        }
     }
 
 

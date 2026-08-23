@@ -7,11 +7,11 @@ from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
 from app.models.models import SlaveCard, Gateway, Station, Division, Zone, AssetParameter
-from app.models.schemas import SlaveCardCreate, SlaveCardUpdate, SlaveCardResponse, SlaveCardListResponse
+from app.models.schemas import SlaveCardCreate, SlaveCardUpdate, SlaveCardResponse, SlaveCardListResponse, StandardResponse
 
 router = APIRouter(prefix="/slave-cards", tags=["Slave Card Management"])
 
-@router.get("", response_model=SlaveCardListResponse)
+@router.get("", response_model=StandardResponse[SlaveCardListResponse])
 def list_slave_cards(
     gateway_id: Optional[int] = Query(None, description="Filter by Gateway ID"),
     stngw_id: Optional[str] = Query(None, description="Filter by Gateway Code (stngw_id)"),
@@ -92,24 +92,32 @@ def list_slave_cards(
 
     rows = q_db.order_by(SlaveCard.id).offset(calc_offset).limit(effective_page_size).all()
 
-    return SlaveCardListResponse(
-        total=total,
-        page=calc_page,
-        page_size=effective_page_size,
-        total_pages=total_pages,
-        rows=rows,
-    )
+    return {
+        "status": True,
+        "message": "Slave cards retrieved successfully",
+        "data": SlaveCardListResponse(
+            total=total,
+            page=calc_page,
+            page_size=effective_page_size,
+            total_pages=total_pages,
+            rows=rows,
+        )
+    }
 
 
-@router.get("/{slave_card_id}", response_model=SlaveCardResponse)
+@router.get("/{slave_card_id}", response_model=StandardResponse[SlaveCardResponse])
 def get_slave_card(slave_card_id: int, db: Session = Depends(get_db)):
     """Retrieve details of a single Slave Card."""
     card = db.query(SlaveCard).filter(SlaveCard.id == slave_card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail=f"Slave Card {slave_card_id} not found")
-    return card
+    return {
+        "status": True,
+        "message": "Slave card retrieved successfully",
+        "data": card
+    }
 
-@router.post("", response_model=SlaveCardResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=StandardResponse[SlaveCardResponse], status_code=status.HTTP_201_CREATED)
 def create_slave_card(payload: SlaveCardCreate, db: Session = Depends(get_db)):
     """Add/configure a new Slave Card under a Master Card/Gateway."""
     # 1. Validate Gateway exists
@@ -150,9 +158,13 @@ def create_slave_card(payload: SlaveCardCreate, db: Session = Depends(get_db)):
             detail="Slave Card unique constraint violation."
         )
     db.refresh(card)
-    return card
+    return {
+        "status": True,
+        "message": "Slave card created successfully",
+        "data": card
+    }
 
-@router.put("/{slave_card_id}", response_model=SlaveCardResponse)
+@router.put("/{slave_card_id}", response_model=StandardResponse[SlaveCardResponse])
 def update_slave_card(
     slave_card_id: int,
     payload: SlaveCardUpdate,
@@ -203,7 +215,11 @@ def update_slave_card(
             detail="Slave Card unique constraint violation."
         )
     db.refresh(card)
-    return card
+    return {
+        "status": True,
+        "message": "Slave card updated successfully",
+        "data": card
+    }
 
 @router.delete("/{slave_card_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_slave_card(slave_card_id: int, db: Session = Depends(get_db)):

@@ -7,7 +7,7 @@ Assets router — serves:
 import csv
 import io
 from datetime import date, datetime
-from typing import List, Optional
+from typing import List, Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
@@ -947,9 +947,11 @@ def _build_response(record: Asset) -> AssetResponse:
         updated_at=record.updated_at,
     )
 
+
+
 # ── Asset Utilization Endpoints ───────────────────────────────────────────────
 
-@router.get("/utilization")
+@router.get("/utilization", response_model=StandardResponse[Any])
 def get_asset_utilization(
     zone: Optional[str] = Query(None, description="Zone code"),
     division: Optional[str] = Query(None, description="Division code"),
@@ -1001,7 +1003,6 @@ def get_asset_utilization(
             pass
             
     for idx, ast in enumerate(assets, start=1):
-        # Calculate number of operations from telemetry packets
         t_query = db.query(func.count(Telemetry.id)).join(Gateway, Gateway.id == Telemetry.gateway_id).filter(
             Gateway.station_id == ast.station_id
         )
@@ -1032,12 +1033,15 @@ def get_asset_utilization(
     paginated_rows = rows[offset:offset + page_size]
     
     return {
-        "status": "success",
-        "total_records": total_records,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "rows": paginated_rows
+        "status": True,
+        "message": "Asset utilization retrieved successfully",
+        "data": {
+            "total_records": total_records,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "rows": paginated_rows
+        }
     }
 
 
@@ -1066,7 +1070,8 @@ def download_asset_utilization(
     writer = csv.writer(output)
     writer.writerow(["SR", "ZONE", "DIVISION", "STATION", "ASSET TYPE", "ASSET NUMBER", "NUMBER OF OPERATIONS"])
     
-    for r in res.get("rows", []):
+    rows = res.get("data", {}).get("rows", []) if "data" in res else res.get("rows", [])
+    for r in rows:
         writer.writerow([
             r["sr_no"], r["zone"], r["division"], r["station"],
             r["asset_type"], r["asset_no"], r["number_of_operations"]
@@ -1078,6 +1083,7 @@ def download_asset_utilization(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=asset_utilization.csv"}
     )
+
 
 
 @router.get("", response_model=StandardResponse[AssetListResponse])
@@ -1553,138 +1559,6 @@ def delete_asset_parameter(asset_parameter_id: int, db: Session = Depends(get_db
     db.commit()
     safe_notify_dashboard("parameter_deleted")
 
-
-# ── Asset Utilization Endpoints ───────────────────────────────────────────────
-
-@router.get("/utilization")
-def get_asset_utilization(
-    zone: Optional[str] = Query(None, description="Zone code"),
-    division: Optional[str] = Query(None, description="Division code"),
-    station: Optional[str] = Query(None, description="Station code"),
-    asset_type: Optional[str] = Query(None, description="Asset type name or hex code"),
-    asset_no: Optional[str] = Query(None, description="Asset number"),
-    from_date: Optional[str] = Query(None, description="Start date DD/MM/YYYY"),
-    to_date: Optional[str] = Query(None, description="End date DD/MM/YYYY"),
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(50, ge=1, le=500, description="Page size"),
-    db: Session = Depends(get_db)
-):
-    """
-    Asset Utilization API — Returns list of assets with operation counts matching filters.
-    """
-    from app.models.models import Telemetry
-    
-    query = db.query(Asset).join(Station, Station.id == Asset.station_id).join(Division, Division.id == Station.division_id).join(Zone, Zone.id == Division.zone_id)
-    
-    if zone:
-        query = query.filter(Zone.zone_code.ilike(f"%{zone}%"))
-    if division:
-        query = query.filter(Division.division_code.ilike(f"%{division}%"))
-    if station:
-        query = query.filter((Station.station_code.ilike(f"%{station}%")) | (Station.station_name.ilike(f"%{station}%")))
-    if asset_no:
-        query = query.filter(Asset.asset_number_code.ilike(f"%{asset_no}%"))
-        
-    asset_hex = _resolve_asset_types_to_hex(db, asset_type)
-    if asset_hex:
-        hex_list = [h.strip() for h in asset_hex.split(",") if h.strip()]
-        query = query.filter(Asset.asset_type_hex.in_(hex_list))
-        
-    assets = query.all()
-    rows = []
-    
-    # Parse dates if provided
-    start_dt = None
-    end_dt = None
-    if from_date:
-        try:
-            start_dt = datetime.strptime(from_date, "%d/%m/%Y") if "/" in from_date else datetime.strptime(from_date, "%Y-%m-%d")
-        except Exception:
-            pass
-    if to_date:
-        try:
-            end_dt = datetime.strptime(to_date, "%d/%m/%Y") if "/" in to_date else datetime.strptime(to_date, "%Y-%m-%d")
-        except Exception:
-            pass
-            
-    for idx, ast in enumerate(assets, start=1):
-        # Calculate number of operations from telemetry packets
-        t_query = db.query(func.count(Telemetry.id)).filter(
-            Telemetry.station_id == ast.station_id,
-            Telemetry.asset_no == ast.asset_number_code
-        )
-        if start_dt:
-            t_query = t_query.filter(Telemetry.timestamp >= start_dt)
-        if end_dt:
-            t_query = t_query.filter(Telemetry.timestamp <= end_dt)
-            
-        ops_count = t_query.scalar() or 0
-        
-        # Get readable asset type name
-        type_name = ASSET_TYPE_MAP.get(ast.asset_type_hex, ast.asset_type_hex)
-        
-        rows.append({
-            "sr_no": idx,
-            "zone": ast.station.division.zone.zone_code,
-            "division": ast.station.division.division_code,
-            "station": ast.station.station_code,
-            "asset_type": type_name,
-            "asset_no": ast.asset_number_code,
-            "number_of_operations": ops_count
-        })
-        
-    total_records = len(rows)
-    total_pages = (total_records + page_size - 1) // page_size if total_records else 0
-    offset = (page - 1) * page_size
-    paginated_rows = rows[offset:offset + page_size]
-    
-    return {
-        "status": "success",
-        "total_records": total_records,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "rows": paginated_rows
-    }
-
-
-@router.get("/utilization/download")
-def download_asset_utilization(
-    zone: Optional[str] = Query(None),
-    division: Optional[str] = Query(None),
-    station: Optional[str] = Query(None),
-    asset_type: Optional[str] = Query(None),
-    asset_no: Optional[str] = Query(None),
-    from_date: Optional[str] = Query(None),
-    to_date: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
-):
-    """
-    Export Asset Utilization data to CSV format.
-    """
-    res = get_asset_utilization(
-        zone=zone, division=division, station=station,
-        asset_type=asset_type, asset_no=asset_no,
-        from_date=from_date, to_date=to_date,
-        page=1, page_size=100000, db=db
-    )
-    
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["SR", "ZONE", "DIVISION", "STATION", "ASSET TYPE", "ASSET NUMBER", "NUMBER OF OPERATIONS"])
-    
-    for r in res.get("rows", []):
-        writer.writerow([
-            r["sr_no"], r["zone"], r["division"], r["station"],
-            r["asset_type"], r["asset_no"], r["number_of_operations"]
-        ])
-        
-    output.seek(0)
-    return StreamingResponse(
-        io.BytesIO(output.getvalue().encode('utf-8')),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=asset_utilization.csv"}
-    )
 
 
 

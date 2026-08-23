@@ -25,7 +25,8 @@ from app.models.schemas import (
     UserDetailResponse, UserListResponse, UserUpdateRequest,
     ChangePasswordRequest, RoleMinimalResponse, ZoneMinimalResponse,
     DivisionMinimalResponse, UserRegisterRequest,
-    AlertCauseCreate, AlertCauseUpdate, AlertCauseResponse, AlertCauseListResponse
+    AlertCauseCreate, AlertCauseUpdate, AlertCauseResponse, AlertCauseListResponse,
+    StandardResponse
 )
 from app.auth_utils import hash_password, verify_password
 from app.rbac_defaults import ensure_default_menus
@@ -101,7 +102,7 @@ def _build_menu_tree(menus: List[Menu]) -> List[MenuTreeResponse]:
 
 # ── Menus ─────────────────────────────────────────────────────────────────────
 
-@router.get("/menus", response_model=List[MenuResponse])
+@router.get("/menus", response_model=StandardResponse[List[MenuResponse]])
 def list_menus(
     include_inactive: bool = Query(False),
     db: Session = Depends(get_db),
@@ -110,10 +111,14 @@ def list_menus(
     q = db.query(Menu)
     if not include_inactive:
         q = q.filter(Menu.is_active == True)
-    return q.order_by(Menu.sort_order, Menu.name).all()
+    return {
+        "status": True,
+        "message": "Menus retrieved successfully",
+        "data": q.order_by(Menu.sort_order, Menu.name).all()
+    }
 
 
-@router.get("/menus/tree", response_model=List[MenuTreeResponse], response_model_exclude_none=True)
+@router.get("/menus/tree", response_model=StandardResponse[List[MenuTreeResponse]], response_model_exclude_none=True)
 def list_menu_tree(
     include_inactive: bool = Query(False),
     db: Session = Depends(get_db),
@@ -123,17 +128,25 @@ def list_menu_tree(
     if not include_inactive:
         q = q.filter(Menu.is_active == True)
     menus = q.order_by(Menu.sort_order, Menu.name).all()
-    return _build_menu_tree(menus)
+    return {
+        "status": True,
+        "message": "Menu tree retrieved successfully",
+        "data": _build_menu_tree(menus)
+    }
 
 
-@router.post("/menus/seed", response_model=List[MenuResponse])
+@router.post("/menus/seed", response_model=StandardResponse[List[MenuResponse]])
 def seed_default_menus(db: Session = Depends(get_db)):
     """Create or update the default RDPMS menu master records."""
     ensure_default_menus(db)
-    return db.query(Menu).filter(Menu.is_active == True).order_by(Menu.sort_order, Menu.name).all()
+    return {
+        "status": True,
+        "message": "Default menus seeded successfully",
+        "data": db.query(Menu).filter(Menu.is_active == True).order_by(Menu.sort_order, Menu.name).all()
+    }
 
 
-@router.post("/menus", response_model=MenuResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/menus", response_model=StandardResponse[MenuResponse], status_code=status.HTTP_201_CREATED)
 def create_menu(payload: MenuCreate, db: Session = Depends(get_db)):
     """Create a new menu item."""
     if db.query(Menu).filter(Menu.slug == payload.slug).first():
@@ -142,10 +155,14 @@ def create_menu(payload: MenuCreate, db: Session = Depends(get_db)):
     db.add(menu)
     db.commit()
     db.refresh(menu)
-    return menu
+    return {
+        "status": True,
+        "message": "Menu created successfully",
+        "data": menu
+    }
 
 
-@router.put("/menus/{menu_id}", response_model=MenuResponse)
+@router.put("/menus/{menu_id}", response_model=StandardResponse[MenuResponse])
 def update_menu(menu_id: int, payload: MenuUpdate, db: Session = Depends(get_db)):
     """Update a menu item."""
     menu = db.query(Menu).filter(Menu.id == menu_id).first()
@@ -155,7 +172,11 @@ def update_menu(menu_id: int, payload: MenuUpdate, db: Session = Depends(get_db)
         setattr(menu, field, value)
     db.commit()
     db.refresh(menu)
-    return menu
+    return {
+        "status": True,
+        "message": "Menu updated successfully",
+        "data": menu
+    }
 
 
 @router.delete("/menus/{menu_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -170,21 +191,29 @@ def delete_menu(menu_id: int, db: Session = Depends(get_db)):
 
 # ── Roles ─────────────────────────────────────────────────────────────────────
 
-@router.get("/roles", response_model=List[RoleResponse], response_model_exclude_none=True)
+@router.get("/roles", response_model=StandardResponse[List[RoleResponse]], response_model_exclude_none=True)
 def list_roles(db: Session = Depends(get_db)):
     """List all roles with their assigned menus."""
-    return db.query(Role).order_by(Role.level).all()
+    return {
+        "status": True,
+        "message": "Roles retrieved successfully",
+        "data": db.query(Role).order_by(Role.level).all()
+    }
 
 
-@router.get("/roles/{role_id}", response_model=RoleResponse, response_model_exclude_none=True)
+@router.get("/roles/{role_id}", response_model=StandardResponse[RoleResponse], response_model_exclude_none=True)
 def get_role(role_id: int, db: Session = Depends(get_db)):
     role = db.query(Role).filter(Role.id == role_id).first()
     if not role:
         raise HTTPException(status_code=404, detail=f"Role {role_id} not found")
-    return role
+    return {
+        "status": True,
+        "message": "Role retrieved successfully",
+        "data": role
+    }
 
 
-@router.post("/roles", response_model=RoleResponse, status_code=status.HTTP_201_CREATED, response_model_exclude_none=True)
+@router.post("/roles", response_model=StandardResponse[RoleResponse], status_code=status.HTTP_201_CREATED, response_model_exclude_none=True)
 def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
     """
     Create a role and optionally assign menus in one call.
@@ -220,10 +249,14 @@ def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
     db.commit()
     db.expire(role, ["role_menus"])
     db.refresh(role)
-    return role
+    return {
+        "status": True,
+        "message": "Role created successfully",
+        "data": role
+    }
 
 
-@router.put("/roles/{role_id}", response_model=RoleResponse, response_model_exclude_none=True)
+@router.put("/roles/{role_id}", response_model=StandardResponse[RoleResponse], response_model_exclude_none=True)
 def update_role(role_id: int, payload: RoleUpdate, db: Session = Depends(get_db)):
     """Update role details (not menus — use the menu assignment endpoints for that)."""
     role = db.query(Role).filter(Role.id == role_id).first()
@@ -234,7 +267,11 @@ def update_role(role_id: int, payload: RoleUpdate, db: Session = Depends(get_db)
     db.commit()
     db.expire(role, ["role_menus"])
     db.refresh(role)
-    return role
+    return {
+        "status": True,
+        "message": "Role updated successfully",
+        "data": role
+    }
 
 
 @router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -249,7 +286,7 @@ def delete_role(role_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
-@router.post("/roles/{role_id}/menus", response_model=RoleResponse, response_model_exclude_none=True)
+@router.post("/roles/{role_id}/menus", response_model=StandardResponse[RoleResponse], response_model_exclude_none=True)
 def assign_menus_to_role(
     role_id: int,
     payload: List[RoleMenuAssign],
@@ -281,7 +318,11 @@ def assign_menus_to_role(
     db.commit()
     db.expire(role, ["role_menus"])
     db.refresh(role)
-    return role
+    return {
+        "status": True,
+        "message": "Menus assigned to role successfully",
+        "data": role
+    }
 
 
 @router.delete("/roles/{role_id}/menus/{menu_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -307,7 +348,7 @@ def remove_menu_from_role(role_id: int, menu_id: int, db: Session = Depends(get_
 
 # ── Users ─────────────────────────────────────────────────────────────────────
 
-@router.get("/users", response_model=UserListResponse)
+@router.get("/users", response_model=StandardResponse[UserListResponse])
 def list_users(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
@@ -339,25 +380,33 @@ def list_users(
     offset = (page - 1) * page_size
     users = q.order_by(User.full_name).offset(offset).limit(page_size).all()
 
-    return UserListResponse(
-        total=total,
-        page=page,
-        page_size=page_size,
-        total_pages=total_pages,
-        rows=[_build_user_detail(u) for u in users],
-    )
+    return {
+        "status": True,
+        "message": "Users retrieved successfully",
+        "data": UserListResponse(
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            rows=[_build_user_detail(u) for u in users],
+        )
+    }
 
 
-@router.get("/users/{user_id}", response_model=UserDetailResponse)
+@router.get("/users/{user_id}", response_model=StandardResponse[UserDetailResponse])
 def get_user(user_id: int, db: Session = Depends(get_db)):
     """Get a single user with their role and menu permissions."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")
-    return _build_user_detail(user)
+    return {
+        "status": True,
+        "message": "User retrieved successfully",
+        "data": _build_user_detail(user)
+    }
 
 
-@router.put("/users/{user_id}", response_model=UserDetailResponse)
+@router.put("/users/{user_id}", response_model=StandardResponse[UserDetailResponse])
 def update_user(user_id: int, payload: UserUpdateRequest, db: Session = Depends(get_db)):
     """
     Update user details including role assignment.
@@ -390,10 +439,14 @@ def update_user(user_id: int, payload: UserUpdateRequest, db: Session = Depends(
 
     db.commit()
     db.refresh(user)
-    return _build_user_detail(user)
+    return {
+        "status": True,
+        "message": "User updated successfully",
+        "data": _build_user_detail(user)
+    }
 
 
-@router.post("/users/{user_id}/activate", response_model=UserDetailResponse)
+@router.post("/users/{user_id}/activate", response_model=StandardResponse[UserDetailResponse])
 def activate_user(user_id: int, db: Session = Depends(get_db)):
     """Activate a deactivated user account."""
     user = db.query(User).filter(User.id == user_id).first()
@@ -402,10 +455,14 @@ def activate_user(user_id: int, db: Session = Depends(get_db)):
     user.is_active = True
     db.commit()
     db.refresh(user)
-    return _build_user_detail(user)
+    return {
+        "status": True,
+        "message": "User activated successfully",
+        "data": _build_user_detail(user)
+    }
 
 
-@router.post("/users/{user_id}/deactivate", response_model=UserDetailResponse)
+@router.post("/users/{user_id}/deactivate", response_model=StandardResponse[UserDetailResponse])
 def deactivate_user(user_id: int, db: Session = Depends(get_db)):
     """Deactivate a user account (soft delete)."""
     user = db.query(User).filter(User.id == user_id).first()
@@ -414,10 +471,14 @@ def deactivate_user(user_id: int, db: Session = Depends(get_db)):
     user.is_active = False
     db.commit()
     db.refresh(user)
-    return _build_user_detail(user)
+    return {
+        "status": True,
+        "message": "User deactivated successfully",
+        "data": _build_user_detail(user)
+    }
 
 
-@router.post("/users/{user_id}/change-password", response_model=UserDetailResponse)
+@router.post("/users/{user_id}/change-password", response_model=StandardResponse[UserDetailResponse])
 def change_password(
     user_id: int,
     payload: ChangePasswordRequest,
@@ -434,10 +495,14 @@ def change_password(
     user.hashed_password = hash_password(payload.new_password)
     db.commit()
     db.refresh(user)
-    return _build_user_detail(user)
+    return {
+        "status": True,
+        "message": "Password changed successfully",
+        "data": _build_user_detail(user)
+    }
 
 
-@router.post("/users", response_model=UserDetailResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/users", response_model=StandardResponse[UserDetailResponse], status_code=status.HTTP_201_CREATED)
 def create_user(payload: UserRegisterRequest, db: Session = Depends(get_db)):
     """Create a new user account."""
     if payload.password != payload.confirm_password:
@@ -464,7 +529,11 @@ def create_user(payload: UserRegisterRequest, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
-    return _build_user_detail(user)
+    return {
+        "status": True,
+        "message": "User created successfully",
+        "data": _build_user_detail(user)
+    }
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -479,7 +548,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
 
 # ─── Alert Causes CRUD ────────────────────────────────────────────────────────
 
-@router.post("/causes", response_model=AlertCauseResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/causes", response_model=StandardResponse[AlertCauseResponse], status_code=status.HTTP_201_CREATED)
 def create_cause(payload: AlertCauseCreate, db: Session = Depends(get_db)):
     """Create a new Alert Cause."""
     existing = db.query(AlertCauseMaster).filter(AlertCauseMaster.cause_code == payload.cause_code.upper()).first()
@@ -506,10 +575,14 @@ def create_cause(payload: AlertCauseCreate, db: Session = Depends(get_db)):
     db.add(cause)
     db.commit()
     db.refresh(cause)
-    return cause
+    return {
+        "status": True,
+        "message": "Alert cause created successfully",
+        "data": cause
+    }
 
 
-@router.get("/causes", response_model=AlertCauseListResponse)
+@router.get("/causes", response_model=StandardResponse[AlertCauseListResponse])
 def list_causes(
     asset_type_id: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
@@ -526,16 +599,20 @@ def list_causes(
     offset = (page - 1) * page_size
     causes = q.order_by(AlertCauseMaster.cause_code).offset(offset).limit(page_size).all()
 
-    return AlertCauseListResponse(
-        total=total,
-        page=page,
-        page_size=page_size,
-        total_pages=total_pages,
-        rows=causes
-    )
+    return {
+        "status": True,
+        "message": "Alert causes retrieved successfully",
+        "data": AlertCauseListResponse(
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            rows=causes
+        )
+    }
 
 
-@router.put("/causes/{cause_code}", response_model=AlertCauseResponse)
+@router.put("/causes/{cause_code}", response_model=StandardResponse[AlertCauseResponse])
 def update_cause(cause_code: str, payload: AlertCauseUpdate, db: Session = Depends(get_db)):
     """Update an existing Alert Cause."""
     cause = db.query(AlertCauseMaster).filter(AlertCauseMaster.cause_code == cause_code.upper()).first()
@@ -560,7 +637,11 @@ def update_cause(cause_code: str, payload: AlertCauseUpdate, db: Session = Depen
 
     db.commit()
     db.refresh(cause)
-    return cause
+    return {
+        "status": True,
+        "message": "Alert cause updated successfully",
+        "data": cause
+    }
 
 
 @router.delete("/causes/{cause_code}", status_code=status.HTTP_204_NO_CONTENT)
@@ -576,14 +657,14 @@ def delete_cause(cause_code: str, db: Session = Depends(get_db)):
     db.commit()
 
 
-@router.post("/seed-db")
+@router.post("/seed-db", response_model=StandardResponse[None])
 def seed_database():
     """Trigger seed() execution manually."""
     from seed import seed
     try:
         seed()
-        return {"status": True, "message": "Database seeded successfully!"}
+        return {"status": True, "message": "Database seeded successfully!", "data": None}
     except Exception as e:
-        return {"status": False, "message": f"Seeding failed: {str(e)}"}
+        return {"status": False, "message": f"Seeding failed: {str(e)}", "data": None}
 
 

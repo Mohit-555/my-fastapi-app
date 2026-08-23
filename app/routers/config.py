@@ -1,15 +1,16 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException
-from typing import List, Optional
+from typing import List, Optional, Any
 
 from app.auth_utils import get_current_user
 from app.services.parameter_config_service import param_config_service
 from app.models.database_models import ParameterConfig
+from app.models.schemas import StandardResponse
 
 logger = logging.getLogger("config_router")
 router = APIRouter(prefix="/api/config", tags=["Configuration"])
 
-@router.get("/parameters")
+@router.get("/parameters", response_model=StandardResponse[Any])
 async def get_parameter_configs(
     asset_type_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
@@ -21,11 +22,15 @@ async def get_parameter_configs(
         configs = list(param_config_service.config_cache.values())
     
     return {
-        "count": len(configs),
-        "configurations": [config.dict() for config in configs]
+        "status": True,
+        "message": "Parameter configurations retrieved successfully",
+        "data": {
+            "count": len(configs),
+            "configurations": [config.dict() for config in configs]
+        }
     }
 
-@router.get("/parameters/{para_id}")
+@router.get("/parameters/{para_id}", response_model=StandardResponse[Any])
 async def get_parameter_config(
     para_id: str,
     current_user: dict = Depends(get_current_user)
@@ -34,9 +39,13 @@ async def get_parameter_config(
     config = param_config_service.get_parameter_config(para_id)
     if not config:
         raise HTTPException(status_code=404, detail="Parameter not found")
-    return config.dict()
+    return {
+        "status": True,
+        "message": "Parameter configuration retrieved successfully",
+        "data": config.dict()
+    }
 
-@router.post("/parameters")
+@router.post("/parameters", response_model=StandardResponse[Any])
 async def create_parameter_config(
     config: ParameterConfig,
     current_user: dict = Depends(get_current_user)
@@ -44,7 +53,12 @@ async def create_parameter_config(
     """Create or update a parameter configuration"""
     try:
         param_config_service.register_parameter(config.dict())
-        return {"status": "success", "message": "Configuration saved"}
+        return {
+            "status": True,
+            "message": "Configuration saved successfully",
+            "data": None
+        }
     except Exception as e:
         logger.error(f"Error saving parameter config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+

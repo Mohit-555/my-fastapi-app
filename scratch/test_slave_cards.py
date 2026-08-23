@@ -10,6 +10,15 @@ class TestSlaveCardCRUD(unittest.TestCase):
         cls.client = TestClient(app)
         cls.db = SessionLocal()
 
+        # Clean up existing test records if any from previous dirty run
+        cls.db.query(AssetParameter).filter(AssetParameter.para_id == "99999999").delete()
+        cls.db.query(SlaveCard).filter(SlaveCard.card_address.in_(["81", "82", "83"])).delete()
+        cls.db.query(Gateway).filter(Gateway.stngw_id == "BBBBGG01").delete()
+        cls.db.query(Station).filter(Station.station_code == "TSS").delete()
+        cls.db.query(Division).filter(Division.division_code == "TSD").delete()
+        cls.db.query(Zone).filter(Zone.zone_code == "TSZ").delete()
+        cls.db.commit()
+
         # Create a test Zone -> Division -> Station hierarchy
         cls.zone = Zone(zone_name="TEST SLAVE ZONE", zone_code="TSZ", zone_id_hex="BB")
         cls.db.add(cls.zone)
@@ -67,7 +76,7 @@ class TestSlaveCardCRUD(unittest.TestCase):
         }
         r = self.client.post("/slave-cards", json=valid_payload, headers=self.headers)
         self.assertEqual(r.status_code, 201)
-        card_data = r.json()
+        card_data = r.json()["data"]
         self.assertEqual(card_data["card_address"], "81")
         self.assertEqual(card_data["card_type"], "Voltage")
         card_id = card_data["id"]
@@ -79,12 +88,12 @@ class TestSlaveCardCRUD(unittest.TestCase):
         # 4. Get the created Slave Card
         r = self.client.get(f"/slave-cards/{card_id}", headers=self.headers)
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["card_type"], "Voltage")
+        self.assertEqual(r.json()["data"]["card_type"], "Voltage")
 
         # 5. List Slave Cards with filtering by gateway_id
         r = self.client.get(f"/slave-cards?gateway_id={self.gateway.id}", headers=self.headers)
         self.assertEqual(r.status_code, 200)
-        list_data = r.json()
+        list_data = r.json()["data"]
         self.assertGreaterEqual(list_data["total"], 1)
         self.assertEqual(list_data["rows"][0]["id"], card_id)
 
@@ -95,8 +104,8 @@ class TestSlaveCardCRUD(unittest.TestCase):
         }
         r = self.client.put(f"/slave-cards/{card_id}", json=update_payload, headers=self.headers)
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["card_address"], "82")
-        self.assertEqual(r.json()["card_type"], "Analog")
+        self.assertEqual(r.json()["data"]["card_address"], "82")
+        self.assertEqual(r.json()["data"]["card_type"], "Analog")
 
         # 7. Create another card to test update conflict
         other_payload = {
@@ -106,7 +115,7 @@ class TestSlaveCardCRUD(unittest.TestCase):
         }
         r = self.client.post("/slave-cards", json=other_payload, headers=self.headers)
         self.assertEqual(r.status_code, 201)
-        other_card_id = r.json()["id"]
+        other_card_id = r.json()["data"]["id"]
 
         # Attempt to update second card to address "82"/Analog (should fail with 409)
         conflict_update = {

@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from typing import Any
 
 from app.database import get_db
 from app.models.models import Zone, Division, Station
-from app.models.schemas import GatewayDecodeResponse, ParaDecodeResponse
+from app.models.schemas import GatewayDecodeResponse, ParaDecodeResponse, StandardResponse
 from app.constants import ASSET_TYPE_MAP, PARAMETER_TYPE_MAP, PARAMETER_REPR_MAP
 
 router = APIRouter(prefix="/decode", tags=["Decode IDs"])
@@ -25,7 +26,7 @@ def _validate_hex_length(value: str, expected_len: int, label: str):
         )
 
 
-@router.get("/stngw/{stngw_id}", response_model=GatewayDecodeResponse)
+@router.get("/stngw/{stngw_id}", response_model=StandardResponse[GatewayDecodeResponse])
 def decode_gateway_id(stngw_id: str, db: Session = Depends(get_db)):
     """
     Decode an 8-character hex stngw_id into zone, division, station, and gateway number.
@@ -63,22 +64,26 @@ def decode_gateway_id(stngw_id: str, db: Session = Depends(get_db)):
             Station.station_id_hex == station_hex
         ).first()
 
-    return GatewayDecodeResponse(
-        stngw_id=stngw_id,
-        zone_id_hex=zone_hex,
-        division_id_hex=div_hex,
-        station_id_hex=station_hex,
-        gateway_number_hex=gw_num_hex,
-        zone_name=zone.zone_name if zone else None,
-        zone_code=zone.zone_code if zone else None,
-        division_name=division.division_name if division else None,
-        division_code=division.division_code if division else None,
-        station_name=station.station_name if station else None,
-        station_code=station.station_code if station else None,
-    )
+    return {
+        "status": True,
+        "message": "Gateway ID decoded successfully",
+        "data": GatewayDecodeResponse(
+            stngw_id=stngw_id,
+            zone_id_hex=zone_hex,
+            division_id_hex=div_hex,
+            station_id_hex=station_hex,
+            gateway_number_hex=gw_num_hex,
+            zone_name=zone.zone_name if zone else None,
+            zone_code=zone.zone_code if zone else None,
+            division_name=division.division_name if division else None,
+            division_code=division.division_code if division else None,
+            station_name=station.station_name if station else None,
+            station_code=station.station_code if station else None,
+        )
+    }
 
 
-@router.get("/para/{para_id}", response_model=ParaDecodeResponse)
+@router.get("/para/{para_id}", response_model=StandardResponse[ParaDecodeResponse])
 def decode_para_id(para_id: str):
     """
     Decode an 8-character hex para_id into asset type, asset number,
@@ -103,21 +108,25 @@ def decode_para_id(para_id: str):
     param_info  = PARAMETER_TYPE_MAP.get(param_type_hex)
     repr_info   = PARAMETER_REPR_MAP.get(param_repr_hex)
 
-    return ParaDecodeResponse(
-        para_id=para_id,
-        asset_type_id_hex=asset_type_hex,
-        asset_number_id_hex=asset_num_hex,
-        parameter_type_id_hex=param_type_hex,
-        parameter_representation_id_hex=param_repr_hex,
-        asset_type_name=asset_info[1] if asset_info else None,
-        asset_type_code=asset_info[0] if asset_info else None,
-        parameter_name=param_info[1] if param_info else None,
-        parameter_unit=param_info[2] if param_info else None,
-        representation=repr_info[1] if repr_info else None,
-    )
+    return {
+        "status": True,
+        "message": "Parameter ID decoded successfully",
+        "data": ParaDecodeResponse(
+            para_id=para_id,
+            asset_type_id_hex=asset_type_hex,
+            asset_number_id_hex=asset_num_hex,
+            parameter_type_id_hex=param_type_hex,
+            parameter_representation_id_hex=param_repr_hex,
+            asset_type_name=asset_info[1] if asset_info else None,
+            asset_type_code=asset_info[0] if asset_info else None,
+            parameter_name=param_info[1] if param_info else None,
+            parameter_unit=param_info[2] if param_info else None,
+            representation=repr_info[1] if repr_info else None,
+        )
+    }
 
 
-@router.get("/full/{stngw_id}/{para_id}")
+@router.get("/full/{stngw_id}/{para_id}", response_model=StandardResponse[Any])
 def decode_full(stngw_id: str, para_id: str, db: Session = Depends(get_db)):
     """
     Decode both stngw_id and para_id together — returns complete context
@@ -125,10 +134,14 @@ def decode_full(stngw_id: str, para_id: str, db: Session = Depends(get_db)):
 
     Example: /decode/full/05011200/50010A02
     """
-    gateway_info = decode_gateway_id(stngw_id, db)
-    para_info = decode_para_id(para_id)
+    gateway_res = decode_gateway_id(stngw_id, db)
+    para_res = decode_para_id(para_id)
 
     return {
-        "gateway": gateway_info,
-        "parameter": para_info,
+        "status": True,
+        "message": "Full IDs decoded successfully",
+        "data": {
+            "gateway": gateway_res["data"],
+            "parameter": para_res["data"],
+        }
     }

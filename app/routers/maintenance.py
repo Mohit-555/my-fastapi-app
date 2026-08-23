@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.models import MaintenanceMode, Station, Division, Zone, Asset, AlertEvent, AssetTypeMaster
-from app.models.schemas import MaintenanceModeRequest, MaintenanceModeResponse, MaintenanceModeListResponse, AlertEventResponse
+from app.models.schemas import MaintenanceModeRequest, MaintenanceModeResponse, MaintenanceModeListResponse, AlertEventResponse, StandardResponse
 from app.constants import ASSET_TYPE_MAP, ASSET_TYPE_DISPLAY_GROUPS
 
 router = APIRouter(prefix="/maintenance", tags=["Maintenance"])
@@ -137,7 +137,7 @@ def _base_query(
     return q.order_by(MaintenanceMode.created_at.desc(), MaintenanceMode.id.desc())
 
 
-@router.get("", response_model=MaintenanceModeListResponse)
+@router.get("", response_model=StandardResponse[MaintenanceModeListResponse])
 def list_maintenance_modes(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
@@ -159,16 +159,20 @@ def list_maintenance_modes(
     rows = q.offset(offset).limit(page_size).all()
     total_pages = (total + page_size - 1) // page_size if total else 0
 
-    return MaintenanceModeListResponse(
-        total=total,
-        page=page,
-        page_size=page_size,
-        total_pages=total_pages,
-        rows=[_build_response_row(r, idx + offset + 1) for idx, r in enumerate(rows)]
-    )
+    return {
+        "status": True,
+        "message": "Maintenance modes retrieved successfully",
+        "data": {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "rows": [_build_response_row(r, idx + offset + 1) for idx, r in enumerate(rows)]
+        }
+    }
 
 
-@router.post("", response_model=MaintenanceModeResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=StandardResponse[MaintenanceModeResponse], status_code=status.HTTP_201_CREATED)
 def activate_maintenance_mode(payload: MaintenanceModeRequest, db: Session = Depends(get_db)):
     """Activate maintenance mode for a specific asset."""
     station = db.query(Station).filter(Station.id == payload.station_id).first()
@@ -207,7 +211,11 @@ def activate_maintenance_mode(payload: MaintenanceModeRequest, db: Session = Dep
     db.add(record)
     db.commit()
     db.refresh(record)
-    return _build_response_row(record, 1)
+    return {
+        "status": True,
+        "message": "Maintenance mode activated successfully",
+        "data": _build_response_row(record, 1)
+    }
 
 
 @router.get("/download")
@@ -254,7 +262,7 @@ def download_maintenance_modes(
     )
 
 
-@router.post("/{id}/clear", response_model=MaintenanceModeResponse)
+@router.post("/{id}/clear", response_model=StandardResponse[MaintenanceModeResponse])
 def clear_maintenance_mode(id: int, db: Session = Depends(get_db)):
     """Manually clear/terminate an active or scheduled maintenance mode early."""
     record = db.query(MaintenanceMode).filter(MaintenanceMode.id == id).first()
@@ -265,10 +273,14 @@ def clear_maintenance_mode(id: int, db: Session = Depends(get_db)):
     record.cleared_at = datetime.utcnow()
     db.commit()
     db.refresh(record)
-    return _build_response_row(record, 1)
+    return {
+        "status": True,
+        "message": "Maintenance mode cleared successfully",
+        "data": _build_response_row(record, 1)
+    }
 
 
-@router.post("/check-reminders", response_model=List[AlertEventResponse])
+@router.post("/check-reminders", response_model=StandardResponse[List[AlertEventResponse]])
 def check_maintenance_reminders(db: Session = Depends(get_db)):
     """
     Check all active maintenance modes and generate reminder alerts if they exceed:
@@ -325,10 +337,14 @@ def check_maintenance_reminders(db: Session = Depends(get_db)):
         for alert in generated_alerts:
             db.refresh(alert)
 
-    return generated_alerts
+    return {
+        "status": True,
+        "message": "Maintenance reminders checked successfully",
+        "data": generated_alerts
+    }
 
 
-@router.put("/{id}", response_model=MaintenanceModeResponse)
+@router.put("/{id}", response_model=StandardResponse[MaintenanceModeResponse])
 def update_maintenance_mode(id: int, payload: MaintenanceModeRequest, db: Session = Depends(get_db)):
     """Modify a scheduled maintenance mode before activation."""
     record = db.query(MaintenanceMode).filter(MaintenanceMode.id == id).first()
@@ -372,7 +388,11 @@ def update_maintenance_mode(id: int, payload: MaintenanceModeRequest, db: Sessio
 
     db.commit()
     db.refresh(record)
-    return _build_response_row(record, 1)
+    return {
+        "status": True,
+        "message": "Maintenance mode updated successfully",
+        "data": _build_response_row(record, 1)
+    }
 
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
