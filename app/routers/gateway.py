@@ -308,7 +308,7 @@ def get_gateway_telemetry(
     )
     return {
         "status": True,
-        "message": "Gateway telemetry retrieved successfully",
+        "message": "Success",
         "data": rows
     }
 
@@ -339,7 +339,7 @@ def link_gateway_station(stngw_id: str, db: Session = Depends(get_db)):
     safe_notify_dashboard("gateway_updated")
     return {
         "status": True,
-        "message": "Gateway station linked successfully",
+        "message": "Success",
         "data": gateway
     }
 
@@ -359,7 +359,7 @@ def list_gateways(
     
     return {
         "status": True,
-        "message": "Gateways retrieved successfully",
+        "message": "Success",
         "data": {
             "total": total,
             "page": page,
@@ -380,6 +380,6 @@ def get_gateway_info(stngw_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Gateway '{stngw_id}' not found")
     return {
         "status": True,
-        "message": "Gateway info retrieved successfully",
+        "message": "Success",
         "data": gateway
     }

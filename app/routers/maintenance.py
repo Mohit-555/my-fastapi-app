@@ -161,7 +161,7 @@ def list_maintenance_modes(
 
     return {
         "status": True,
-        "message": "Maintenance modes retrieved successfully",
+        "message": "Success",
         "data": {
             "total": total,
             "page": page,
@@ -213,7 +213,7 @@ def activate_maintenance_mode(payload: MaintenanceModeRequest, db: Session = Dep
     db.refresh(record)
     return {
         "status": True,
-        "message": "Maintenance mode activated successfully",
+        "message": "Success",
         "data": _build_response_row(record, 1)
     }
 
@@ -275,7 +275,7 @@ def clear_maintenance_mode(id: int, db: Session = Depends(get_db)):
     db.refresh(record)
     return {
         "status": True,
-        "message": "Maintenance mode cleared successfully",
+        "message": "Success",
         "data": _build_response_row(record, 1)
     }
 
@@ -339,7 +339,7 @@ def check_maintenance_reminders(db: Session = Depends(get_db)):
 
     return {
         "status": True,
-        "message": "Maintenance reminders checked successfully",
+        "message": "Success",
         "data": generated_alerts
     }
 
@@ -390,7 +390,7 @@ def update_maintenance_mode(id: int, payload: MaintenanceModeRequest, db: Sessio
     db.refresh(record)
     return {
         "status": True,
-        "message": "Maintenance mode updated successfully",
+        "message": "Success",
         "data": _build_response_row(record, 1)
     }
 

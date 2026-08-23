@@ -73,7 +73,7 @@ def register(request: Request, payload: UserRegisterRequest, db: Session = Depen
     db.refresh(user)
     return {
         "status": True,
-        "message": "User registered successfully",
+        "message": "Success",
         "data": user
     }
 
@@ -141,7 +141,7 @@ def refresh(request: Request, payload: RefreshTokenRequest, db: Session = Depend
     tokens = _issue_tokens(user, db, remember_me=refresh_token.remember_me)
     return {
         "status": True,
-        "message": "Tokens refreshed successfully",
+        "message": "Success",
         "data": tokens
     }
 
@@ -157,7 +157,7 @@ def logout(payload: LogoutRequest, db: Session = Depends(get_db)):
 
     return {
         "status": True,
-        "message": "Logged out successfully",
+        "message": "Success",
         "data": LogoutResponse(message="Logged out successfully")
     }
 
@@ -168,7 +168,7 @@ def get_me(
 ):
     return {
         "status": True,
-        "message": "User info retrieved successfully",
+        "message": "Success",
         "data": {
             "id": current_user.id,
             "full_name": current_user.full_name,

@@ -113,7 +113,7 @@ def list_menus(
         q = q.filter(Menu.is_active == True)
     return {
         "status": True,
-        "message": "Menus retrieved successfully",
+        "message": "Success",
         "data": q.order_by(Menu.sort_order, Menu.name).all()
     }
 
@@ -130,7 +130,7 @@ def list_menu_tree(
     menus = q.order_by(Menu.sort_order, Menu.name).all()
     return {
         "status": True,
-        "message": "Menu tree retrieved successfully",
+        "message": "Success",
         "data": _build_menu_tree(menus)
     }
 
@@ -141,7 +141,7 @@ def seed_default_menus(db: Session = Depends(get_db)):
     ensure_default_menus(db)
     return {
         "status": True,
-        "message": "Default menus seeded successfully",
+        "message": "Success",
         "data": db.query(Menu).filter(Menu.is_active == True).order_by(Menu.sort_order, Menu.name).all()
     }
 
@@ -157,7 +157,7 @@ def create_menu(payload: MenuCreate, db: Session = Depends(get_db)):
     db.refresh(menu)
     return {
         "status": True,
-        "message": "Menu created successfully",
+        "message": "Success",
         "data": menu
     }
 
@@ -174,7 +174,7 @@ def update_menu(menu_id: int, payload: MenuUpdate, db: Session = Depends(get_db)
     db.refresh(menu)
     return {
         "status": True,
-        "message": "Menu updated successfully",
+        "message": "Success",
         "data": menu
     }
 
@@ -196,7 +196,7 @@ def list_roles(db: Session = Depends(get_db)):
     """List all roles with their assigned menus."""
     return {
         "status": True,
-        "message": "Roles retrieved successfully",
+        "message": "Success",
         "data": db.query(Role).order_by(Role.level).all()
     }
 
@@ -208,7 +208,7 @@ def get_role(role_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Role {role_id} not found")
     return {
         "status": True,
-        "message": "Role retrieved successfully",
+        "message": "Success",
         "data": role
     }
 
@@ -251,7 +251,7 @@ def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
     db.refresh(role)
     return {
         "status": True,
-        "message": "Role created successfully",
+        "message": "Success",
         "data": role
     }
 
@@ -269,7 +269,7 @@ def update_role(role_id: int, payload: RoleUpdate, db: Session = Depends(get_db)
     db.refresh(role)
     return {
         "status": True,
-        "message": "Role updated successfully",
+        "message": "Success",
         "data": role
     }
 
@@ -320,7 +320,7 @@ def assign_menus_to_role(
     db.refresh(role)
     return {
         "status": True,
-        "message": "Menus assigned to role successfully",
+        "message": "Success",
         "data": role
     }
 
@@ -382,7 +382,7 @@ def list_users(
 
     return {
         "status": True,
-        "message": "Users retrieved successfully",
+        "message": "Success",
         "data": UserListResponse(
             total=total,
             page=page,
@@ -401,7 +401,7 @@ def get_user(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")
     return {
         "status": True,
-        "message": "User retrieved successfully",
+        "message": "Success",
         "data": _build_user_detail(user)
     }
 
@@ -441,7 +441,7 @@ def update_user(user_id: int, payload: UserUpdateRequest, db: Session = Depends(
     db.refresh(user)
     return {
         "status": True,
-        "message": "User updated successfully",
+        "message": "Success",
         "data": _build_user_detail(user)
     }
 
@@ -457,7 +457,7 @@ def activate_user(user_id: int, db: Session = Depends(get_db)):
     db.refresh(user)
     return {
         "status": True,
-        "message": "User activated successfully",
+        "message": "Success",
         "data": _build_user_detail(user)
     }
 
@@ -473,7 +473,7 @@ def deactivate_user(user_id: int, db: Session = Depends(get_db)):
     db.refresh(user)
     return {
         "status": True,
-        "message": "User deactivated successfully",
+        "message": "Success",
         "data": _build_user_detail(user)
     }
 
@@ -497,7 +497,7 @@ def change_password(
     db.refresh(user)
     return {
         "status": True,
-        "message": "Password changed successfully",
+        "message": "Success",
         "data": _build_user_detail(user)
     }
 
@@ -531,7 +531,7 @@ def create_user(payload: UserRegisterRequest, db: Session = Depends(get_db)):
     db.refresh(user)
     return {
         "status": True,
-        "message": "User created successfully",
+        "message": "Success",
         "data": _build_user_detail(user)
     }
 
@@ -577,7 +577,7 @@ def create_cause(payload: AlertCauseCreate, db: Session = Depends(get_db)):
     db.refresh(cause)
     return {
         "status": True,
-        "message": "Alert cause created successfully",
+        "message": "Success",
         "data": cause
     }
 
@@ -601,7 +601,7 @@ def list_causes(
 
     return {
         "status": True,
-        "message": "Alert causes retrieved successfully",
+        "message": "Success",
         "data": AlertCauseListResponse(
             total=total,
             page=page,
@@ -639,7 +639,7 @@ def update_cause(cause_code: str, payload: AlertCauseUpdate, db: Session = Depen
     db.refresh(cause)
     return {
         "status": True,
-        "message": "Alert cause updated successfully",
+        "message": "Success",
         "data": cause
     }
 
@@ -663,7 +663,7 @@ def seed_database():
     from seed import seed
     try:
         seed()
-        return {"status": True, "message": "Database seeded successfully!", "data": None}
+        return {"status": True, "message": "Success", "data": None}
     except Exception as e:
         return {"status": False, "message": f"Seeding failed: {str(e)}", "data": None}
 

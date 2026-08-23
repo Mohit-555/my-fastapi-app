@@ -37,7 +37,7 @@ async def get_live_telemetry(
     if not gateway:
         return {
             "status": True,
-            "message": "No gateway found for station",
+            "message": "Success",
             "data": {
                 "station_code": station_code,
                 "timestamp": datetime.now().isoformat(),
@@ -68,7 +68,7 @@ async def get_live_telemetry(
     
     return {
         "status": True,
-        "message": "Live telemetry retrieved successfully",
+        "message": "Success",
         "data": {
             "station_code": station_code,
             "station_name": station.station_name,
@@ -116,7 +116,7 @@ async def get_telemetry_history(
     
     return {
         "status": True,
-        "message": "Telemetry history retrieved successfully",
+        "message": "Success",
         "data": {
             "para_id": para_id,
             "station_code": station_code,
@@ -282,7 +282,7 @@ async def get_dashboard_data(
     
     return {
         "status": True,
-        "message": "Dashboard data retrieved successfully",
+        "message": "Success",
         "data": {
             "station_code": station_code,
             "station_name": station.station_name,
@@ -356,7 +356,7 @@ async def get_asset_status(
     
     return {
         "status": True,
-        "message": "Asset status retrieved successfully",
+        "message": "Success",
         "data": {
             "station_code": station_code,
             "asset_number_code": asset.asset_number_code,

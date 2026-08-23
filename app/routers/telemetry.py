@@ -232,12 +232,12 @@ def query_telemetry(
     if station_ids is not None:
         if not station_ids:
             # Location filter matched nothing
-            return {"status": True, "message": "No telemetry data found", "data": _empty}
+            return {"status": True, "message": "Success", "data": _empty}
         gw_query = gw_query.filter(Gateway.station_id.in_(station_ids))
 
     gateways = gw_query.all()
     if not gateways:
-        return {"status": True, "message": "No telemetry data found", "data": _empty}
+        return {"status": True, "message": "Success", "data": _empty}
 
     gateway_ids = [g.id for g in gateways]
     gateway_map = {g.id: g for g in gateways}
@@ -314,7 +314,7 @@ def query_telemetry(
     )
     return {
         "status": True,
-        "message": "Telemetry data retrieved successfully",
+        "message": "Success",
         "data": response_data
     }
 
@@ -683,7 +683,7 @@ def get_telemetry_history(
         )
         return {
             "status": True,
-            "message": "No telemetry history found",
+            "message": "Success",
             "data": empty_response
         }
 
@@ -735,7 +735,7 @@ def get_telemetry_history(
     )
     return {
         "status": True,
-        "message": "Telemetry history retrieved successfully",
+        "message": "Success",
         "data": response_data
     }
 

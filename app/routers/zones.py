@@ -16,7 +16,7 @@ def get_all_zones(db: Session = Depends(get_db)):
     zones = db.query(Zone).order_by(Zone.zone_name).all()
     return {
         "status": True,
-        "message": "Zones retrieved successfully",
+        "message": "Success",
         "data": zones
     }
 
@@ -31,7 +31,7 @@ def get_zones_dropdown(db: Session = Depends(get_db)):
     ]
     return {
         "status": True,
-        "message": "Zone dropdown options retrieved successfully",
+        "message": "Success",
         "data": {
             "zones": options
         }
@@ -46,7 +46,7 @@ def get_zone(zone_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Zone with id {zone_id} not found")
     return {
         "status": True,
-        "message": "Zone retrieved successfully",
+        "message": "Success",
         "data": zone
     }
 
@@ -77,7 +77,7 @@ def create_zone(payload: ZoneCreate, db: Session = Depends(get_db)):
     safe_notify_dashboard("zone_updated")
     return {
         "status": True,
-        "message": "Zone created successfully",
+        "message": "Success",
         "data": zone
     }
 
@@ -97,7 +97,7 @@ def update_zone(zone_id: int, payload: ZoneUpdate, db: Session = Depends(get_db)
     safe_notify_dashboard("zone_updated")
     return {
         "status": True,
-        "message": "Zone updated successfully",
+        "message": "Success",
         "data": zone
     }
 

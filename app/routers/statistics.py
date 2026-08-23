@@ -27,7 +27,7 @@ async def get_alert_statistics(
     
     return {
         "status": True,
-        "message": "Alert statistics retrieved successfully",
+        "message": "Success",
         "data": {
             "period": {
                 "start": start_date.isoformat(),
@@ -56,7 +56,7 @@ async def get_performance_metrics(
     
     return {
         "status": True,
-        "message": "Performance metrics retrieved successfully",
+        "message": "Success",
         "data": {
             "stngw_id": stngw_id,
             "period": {
@@ -88,7 +88,7 @@ async def get_asset_availability(
     
     return {
         "status": True,
-        "message": "Asset availability retrieved successfully",
+        "message": "Success",
         "data": {
             "stngw_id": stngw_id,
             "asset_number_code": asset_number_code,

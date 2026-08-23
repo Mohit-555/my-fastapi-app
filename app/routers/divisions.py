@@ -16,7 +16,7 @@ def get_all_divisions(db: Session = Depends(get_db)):
     divisions = db.query(Division).order_by(Division.division_name).all()
     return {
         "status": True,
-        "message": "Divisions retrieved successfully",
+        "message": "Success",
         "data": divisions
     }
 
@@ -31,7 +31,7 @@ def get_divisions_by_zone(zone_id: int, db: Session = Depends(get_db)):
     divisions = db.query(Division).filter(Division.zone_id == zone_id).order_by(Division.division_name).all()
     return {
         "status": True,
-        "message": "Divisions retrieved successfully",
+        "message": "Success",
         "data": divisions
     }
 
@@ -50,7 +50,7 @@ def get_divisions_dropdown(zone_id: int, db: Session = Depends(get_db)):
     ]
     return {
         "status": True,
-        "message": "Division dropdown options retrieved successfully",
+        "message": "Success",
         "data": {
             "divisions": options
         }
@@ -65,7 +65,7 @@ def get_division(division_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Division with id {division_id} not found")
     return {
         "status": True,
-        "message": "Division retrieved successfully",
+        "message": "Success",
         "data": division
     }
 
@@ -109,7 +109,7 @@ def create_division(payload: DivisionCreate, db: Session = Depends(get_db)):
     safe_notify_dashboard("division_updated")
     return {
         "status": True,
-        "message": "Division created successfully",
+        "message": "Success",
         "data": division
     }
 
@@ -143,7 +143,7 @@ def update_division(division_id: int, payload: DivisionUpdate, db: Session = Dep
     safe_notify_dashboard("division_updated")
     return {
         "status": True,
-        "message": "Division updated successfully",
+        "message": "Success",
         "data": division
     }
 

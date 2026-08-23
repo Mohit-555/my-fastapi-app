@@ -51,7 +51,7 @@ async def get_asset_telemetry(
             "dc": dc,
             "sc": sc,
             "telemetry_data": [],
-            "message": "No gateway found for station"
+            "message": "Success"
         }
     
     # Parse para_ids

@@ -94,7 +94,7 @@ def list_slave_cards(
 
     return {
         "status": True,
-        "message": "Slave cards retrieved successfully",
+        "message": "Success",
         "data": SlaveCardListResponse(
             total=total,
             page=calc_page,
@@ -113,7 +113,7 @@ def get_slave_card(slave_card_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Slave Card {slave_card_id} not found")
     return {
         "status": True,
-        "message": "Slave card retrieved successfully",
+        "message": "Success",
         "data": card
     }
 
@@ -160,7 +160,7 @@ def create_slave_card(payload: SlaveCardCreate, db: Session = Depends(get_db)):
     db.refresh(card)
     return {
         "status": True,
-        "message": "Slave card created successfully",
+        "message": "Success",
         "data": card
     }
 
@@ -217,7 +217,7 @@ def update_slave_card(
     db.refresh(card)
     return {
         "status": True,
-        "message": "Slave card updated successfully",
+        "message": "Success",
         "data": card
     }
 

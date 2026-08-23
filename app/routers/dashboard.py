@@ -794,7 +794,7 @@ async def get_performance_report(
     
     return {
         "status": True,
-        "message": "Performance report retrieved successfully",
+        "message": "Success",
         "data": {
             "avg_failure_alert_accuracy": avg_fail_acc,
             "avg_predictive_alert_accuracy": avg_pred_acc,
@@ -1179,7 +1179,7 @@ async def get_dashboard_overview(
 
         return {
             "status": True,
-            "message": "Dashboard overview retrieved successfully",
+            "message": "Success",
             "data": {
                 "assetCounts": asset_counts,
                 "totalAssets": total_assets_dict,
@@ -1270,7 +1270,7 @@ def get_performance_overview(
 
     return {
         "status": True,
-        "message": "Performance overview retrieved successfully",
+        "message": "Success",
         "data": PerformanceOverviewResponse(
             confirmed_failure_percentage=82.0,
             confirmed_predictive_percentage=71.0,
@@ -1343,7 +1343,7 @@ def get_mobile_dashboard_summary(
 
     return {
         "status": True,
-        "message": "Mobile summary retrieved successfully",
+        "message": "Success",
         "data": MobileDashboardSummaryResponse(
             zone_code=zone_code or "NR",
             division_code=division_code or "PRYJ",

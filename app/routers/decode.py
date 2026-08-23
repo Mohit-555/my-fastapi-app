@@ -66,7 +66,7 @@ def decode_gateway_id(stngw_id: str, db: Session = Depends(get_db)):
 
     return {
         "status": True,
-        "message": "Gateway ID decoded successfully",
+        "message": "Success",
         "data": GatewayDecodeResponse(
             stngw_id=stngw_id,
             zone_id_hex=zone_hex,
@@ -110,7 +110,7 @@ def decode_para_id(para_id: str):
 
     return {
         "status": True,
-        "message": "Parameter ID decoded successfully",
+        "message": "Success",
         "data": ParaDecodeResponse(
             para_id=para_id,
             asset_type_id_hex=asset_type_hex,
@@ -139,7 +139,7 @@ def decode_full(stngw_id: str, para_id: str, db: Session = Depends(get_db)):
 
     return {
         "status": True,
-        "message": "Full IDs decoded successfully",
+        "message": "Success",
         "data": {
             "gateway": gateway_res["data"],
             "parameter": para_res["data"],

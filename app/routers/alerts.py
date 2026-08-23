@@ -511,7 +511,7 @@ def list_alert_types():
     """
     return {
         "status": True,
-        "message": "Alert types retrieved successfully",
+        "message": "Success",
         "data": [
             AlertFilterOption(id=1, label="All", value="ALL"),
             AlertFilterOption(id=2, label="Predictive", value="Predictive"),
@@ -589,7 +589,7 @@ def list_alert_asset_numbers(
     ]
     return {
         "status": True,
-        "message": "Asset numbers retrieved successfully",
+        "message": "Success",
         "data": options
     }
 
@@ -650,7 +650,7 @@ def list_alert_causes(
     ]
     return {
         "status": True,
-        "message": "Causes retrieved successfully",
+        "message": "Success",
         "data": options
     }
 
@@ -684,7 +684,7 @@ def get_alert_live(
     )
     return {
         "status": True,
-        "message": "Live alerts retrieved successfully",
+        "message": "Success",
         "data": response_data
     }
 
@@ -732,7 +732,7 @@ def get_alert_summary(
     )
     return {
         "status": True,
-        "message": "Alert summary report retrieved successfully",
+        "message": "Success",
         "data": response_data
     }
 
@@ -835,7 +835,7 @@ def get_alert_history(
     )
     return {
         "status": True,
-        "message": "Alert history report retrieved successfully",
+        "message": "Success",
         "data": response_data
     }
 
@@ -1285,7 +1285,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
     )
     return {
         "status": True,
-        "message": "Alert filters retrieved successfully",
+        "message": "Success",
         "data": response_data
     }
 
@@ -1331,7 +1331,7 @@ def list_alert_events(
     )
     return {
         "status": True,
-        "message": "Alert events retrieved successfully",
+        "message": "Success",
         "data": response_data
     }
 
@@ -1429,7 +1429,7 @@ def create_alert_event(payload: AlertEventCreate, db: Session = Depends(get_db))
     _broadcast_alert_update(record)
     return {
         "status": True,
-        "message": "Alert event created successfully",
+        "message": "Success",
         "data": record
     }
 
@@ -1464,7 +1464,7 @@ def update_alert_feedback(event_id: int, payload: AlertFeedbackUpdate, db: Sessi
     _broadcast_alert_update(record)
     return {
         "status": True,
-        "message": "Alert feedback updated successfully",
+        "message": "Success",
         "data": record
     }
 
@@ -1482,7 +1482,7 @@ def update_alert_remark(event_id: int, payload: AlertRemarkUpdate, db: Session =
     _broadcast_alert_update(record)
     return {
         "status": True,
-        "message": "Alert remark updated successfully",
+        "message": "Success",
         "data": record
     }
 
@@ -1502,7 +1502,7 @@ def acknowledge_alert(event_id: int, db: Session = Depends(get_db)):
     _broadcast_alert_update(record)
     return {
         "status": True,
-        "message": "Alert acknowledged successfully",
+        "message": "Success",
         "data": record
     }
 
@@ -1539,7 +1539,7 @@ def update_alert_rectification(
     _broadcast_alert_update(record)
     return {
         "status": True,
-        "message": "Alert rectification updated successfully",
+        "message": "Success",
         "data": record
     }
 
@@ -1568,7 +1568,7 @@ def update_alert_event(event_id: int, payload: AlertEventUpdate, db: Session = D
     db.refresh(record)
     return {
         "status": True,
-        "message": "Alert event updated successfully",
+        "message": "Success",
         "data": record
     }
 

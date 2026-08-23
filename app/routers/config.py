@@ -23,7 +23,7 @@ async def get_parameter_configs(
     
     return {
         "status": True,
-        "message": "Parameter configurations retrieved successfully",
+        "message": "Success",
         "data": {
             "count": len(configs),
             "configurations": [config.dict() for config in configs]
@@ -41,7 +41,7 @@ async def get_parameter_config(
         raise HTTPException(status_code=404, detail="Parameter not found")
     return {
         "status": True,
-        "message": "Parameter configuration retrieved successfully",
+        "message": "Success",
         "data": config.dict()
     }
 
@@ -55,7 +55,7 @@ async def create_parameter_config(
         param_config_service.register_parameter(config.dict())
         return {
             "status": True,
-            "message": "Configuration saved successfully",
+            "message": "Success",
             "data": None
         }
     except Exception as e:

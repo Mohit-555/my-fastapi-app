@@ -125,7 +125,7 @@ def list_asset_types(db: Session = Depends(get_db)):
         ))
     return {
         "status": True,
-        "message": "Asset types retrieved successfully",
+        "message": "Success",
         "data": result
     }
 
@@ -165,7 +165,7 @@ def list_asset_types_grouped(db: Session = Depends(get_db)):
         group_id += 1
     return {
         "status": True,
-        "message": "Grouped asset types retrieved successfully",
+        "message": "Success",
         "data": groups
     }
 
@@ -201,7 +201,7 @@ def list_parameter_types(
     sorted_result = sorted(result, key=lambda x: x.hex_id)
     return {
         "status": True,
-        "message": "Parameter types retrieved successfully",
+        "message": "Success",
         "data": sorted_result
     }
 
@@ -218,7 +218,7 @@ def list_representations():
     ]
     return {
         "status": True,
-        "message": "Representations retrieved successfully",
+        "message": "Success",
         "data": options
     }
 
@@ -336,7 +336,7 @@ def get_asset_detail(
     )
     return {
         "status": True,
-        "message": "Asset details retrieved successfully",
+        "message": "Success",
         "data": response_data
     }
 
@@ -411,7 +411,7 @@ def list_asset_makes(
     ]
     return {
         "status": True,
-        "message": "Asset makes retrieved successfully",
+        "message": "Success",
         "data": options
     }
 
@@ -612,7 +612,7 @@ def get_asset_filters(db: Session = Depends(get_db)):
     )
     return {
         "status": True,
-        "message": "Asset filters retrieved successfully",
+        "message": "Success",
         "data": response_data
     }
 
@@ -640,7 +640,7 @@ def list_asset_inventory(
     rows = q.order_by(AssetInventory.station_id, AssetInventory.asset_type_hex, AssetInventory.asset_make).all()
     return {
         "status": True,
-        "message": "Asset inventory retrieved successfully",
+        "message": "Success",
         "data": rows
     }
 
@@ -677,7 +677,7 @@ def create_asset_inventory(payload: AssetInventoryCreate, db: Session = Depends(
     db.refresh(record)
     return {
         "status": True,
-        "message": "Asset inventory record created successfully",
+        "message": "Success",
         "data": record
     }
 
@@ -724,7 +724,7 @@ def update_asset_inventory(
     db.refresh(record)
     return {
         "status": True,
-        "message": "Asset inventory record updated successfully",
+        "message": "Success",
         "data": record
     }
 
@@ -764,7 +764,7 @@ def list_thresholds(
     rows = q.order_by(Threshold.asset_type_hex, Threshold.parameter_type_hex).all()
     return {
         "status": True,
-        "message": "Thresholds retrieved successfully",
+        "message": "Success",
         "data": rows
     }
 
@@ -776,7 +776,7 @@ def get_threshold(threshold_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Threshold {threshold_id} not found")
     return {
         "status": True,
-        "message": "Threshold retrieved successfully",
+        "message": "Success",
         "data": t
     }
 
@@ -837,7 +837,7 @@ def create_threshold(payload: ThresholdCreate, db: Session = Depends(get_db)):
     safe_notify_dashboard("threshold_updated")
     return {
         "status": True,
-        "message": "Threshold created successfully",
+        "message": "Success",
         "data": t
     }
 
@@ -857,7 +857,7 @@ def update_threshold(threshold_id: int, payload: ThresholdUpdate, db: Session = 
     safe_notify_dashboard("threshold_updated")
     return {
         "status": True,
-        "message": "Threshold updated successfully",
+        "message": "Success",
         "data": t
     }
 
@@ -905,7 +905,7 @@ def resolve_threshold(
 
     return {
         "status": True,
-        "message": "Threshold resolved successfully" if t else "No threshold configured",
+        "message": "Success",
         "data": t
     }
 
@@ -1034,7 +1034,7 @@ def get_asset_utilization(
     
     return {
         "status": True,
-        "message": "Asset utilization retrieved successfully",
+        "message": "Success",
         "data": {
             "total_records": total_records,
             "page": page,
@@ -1147,7 +1147,7 @@ def list_assets(
     )
     return {
         "status": True,
-        "message": "Assets retrieved successfully",
+        "message": "Success",
         "data": response_data
     }
 
@@ -1160,7 +1160,7 @@ def get_asset(asset_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} not found")
     return {
         "status": True,
-        "message": "Asset retrieved successfully",
+        "message": "Success",
         "data": _build_response(record)
     }
 
@@ -1224,7 +1224,7 @@ def create_asset(payload: AssetCreate, db: Session = Depends(get_db)):
     safe_notify_dashboard("asset_created")
     return {
         "status": True,
-        "message": "Asset created successfully",
+        "message": "Success",
         "data": _build_response(record)
     }
 
@@ -1320,7 +1320,7 @@ def create_assets_bulk(payload: List[AssetCreate], db: Session = Depends(get_db)
     safe_notify_dashboard("asset_created")
     return {
         "status": True,
-        "message": f"{len(created_assets)} assets created successfully",
+        "message": "Success",
         "data": [_build_response(a) for a in created_assets]
     }
 
@@ -1380,7 +1380,7 @@ def update_asset(
     safe_notify_dashboard("asset_updated")
     return {
         "status": True,
-        "message": "Asset updated successfully",
+        "message": "Success",
         "data": _build_response(record)
     }
 
@@ -1478,7 +1478,7 @@ def list_asset_parameters(
     )
     return {
         "status": True,
-        "message": "Asset parameters retrieved successfully",
+        "message": "Success",
         "data": response_data
     }
 
@@ -1491,7 +1491,7 @@ def get_asset_parameter(asset_parameter_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Asset parameter {asset_parameter_id} not found")
     return {
         "status": True,
-        "message": "Asset parameter retrieved successfully",
+        "message": "Success",
         "data": _build_asset_parameter_response(ap)
     }
 
@@ -1539,7 +1539,7 @@ def assign_asset_parameter(
     safe_notify_dashboard("parameter_assigned")
     return {
         "status": True,
-        "message": "Asset parameter assigned successfully",
+        "message": "Success",
         "data": _build_asset_parameter_response(ap)
     }
 

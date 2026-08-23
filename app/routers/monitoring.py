@@ -54,7 +54,7 @@ async def system_health(
     all_healthy = all([db_healthy, redis_healthy, alert_processor_healthy])
     return {
         "status": True,
-        "message": "System is healthy" if all_healthy else "System is degraded",
+        "message": "Success",
         "data": {
             "health_status": "healthy" if all_healthy else "degraded",
             "timestamp": datetime.now().isoformat(),

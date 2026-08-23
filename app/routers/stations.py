@@ -16,7 +16,7 @@ def get_all_stations(db: Session = Depends(get_db)):
     stations = db.query(Station).order_by(Station.station_name).all()
     return {
         "status": True,
-        "message": "Stations retrieved successfully",
+        "message": "Success",
         "data": stations
     }
 
@@ -31,7 +31,7 @@ def get_stations_by_division(division_id: int, db: Session = Depends(get_db)):
     stations = db.query(Station).filter(Station.division_id == division_id).order_by(Station.station_name).all()
     return {
         "status": True,
-        "message": "Stations retrieved successfully",
+        "message": "Success",
         "data": stations
     }
 
@@ -50,7 +50,7 @@ def get_stations_dropdown(division_id: int, db: Session = Depends(get_db)):
     ]
     return {
         "status": True,
-        "message": "Station dropdown options retrieved successfully",
+        "message": "Success",
         "data": {
             "stations": options
         }
@@ -65,7 +65,7 @@ def get_station(station_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Station with id {station_id} not found")
     return {
         "status": True,
-        "message": "Station retrieved successfully",
+        "message": "Success",
         "data": station
     }
 
@@ -110,7 +110,7 @@ def create_station(payload: StationCreate, db: Session = Depends(get_db)):
     safe_notify_dashboard("station_updated")
     return {
         "status": True,
-        "message": "Station created successfully",
+        "message": "Success",
         "data": station
     }
 
@@ -144,7 +144,7 @@ def update_station(station_id: int, payload: StationUpdate, db: Session = Depend
     safe_notify_dashboard("station_updated")
     return {
         "status": True,
-        "message": "Station updated successfully",
+        "message": "Success",
         "data": station
     }
 

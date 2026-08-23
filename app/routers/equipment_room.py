@@ -165,7 +165,7 @@ def get_live_equipment_rooms(
 
     return {
         "status": True,
-        "message": "Live equipment rooms retrieved successfully",
+        "message": "Success",
         "data": response_data
     }
 
@@ -192,7 +192,7 @@ def get_equipment_room_history(
 
     return {
         "status": True,
-        "message": "Equipment room history retrieved successfully",
+        "message": "Success",
         "data": {
             "total": total,
             "page": page,

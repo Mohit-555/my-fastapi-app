@@ -85,7 +85,7 @@ async def get_performance_module_report(
     
     return {
         "status": True,
-        "message": "Performance module report retrieved successfully",
+        "message": "Success",
         "data": {
             "avg_failure_alert_accuracy": avg_fail_acc,
             "avg_predictive_alert_accuracy": avg_pred_acc,
