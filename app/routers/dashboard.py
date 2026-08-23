@@ -150,7 +150,7 @@ def _resolve_location_ids(
 
 # ============ 1. Alert Summary Report ============
 
-@router.post("/alert_summary")
+@router.post("/alert_summary", response_model=StandardResponse[Any])
 async def get_alert_summary_report(
     start_date: Optional[str] = Query(None, description="Start date DD/MM/YYYY (or use JSON body)"),
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
@@ -281,7 +281,7 @@ async def get_alert_summary_report(
     
     return {
         "status": True,
-        "message": "Alert summary report retrieved successfully",
+        "message": "Success",
         "data": {
             "vendor_code": settings.VENDOR_CODE,
             "vendor_name": settings.VENDOR_NAME,
@@ -300,7 +300,7 @@ async def get_alert_summary_report(
 
 # ============ 2. Alert History Report ============
 
-@router.post("/alert_history")
+@router.post("/alert_history", response_model=StandardResponse[Any])
 async def get_alert_history_report(
     start_date: Optional[str] = Query(None, description="Start date DD/MM/YYYY (or use JSON body)"),
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
@@ -433,7 +433,7 @@ async def get_alert_history_report(
     
     return {
         "status": True,
-        "message": "Alert history report retrieved successfully",
+        "message": "Success",
         "data": {
             "vendor_code": settings.VENDOR_CODE,
             "vendor_name": settings.VENDOR_NAME,
@@ -452,7 +452,7 @@ async def get_alert_history_report(
 
 # ============ 3. Telemetry History Report ============
 
-@router.post("/telemetry_history")
+@router.post("/telemetry_history", response_model=StandardResponse[Any])
 async def get_telemetry_history_report(
     start_date: Optional[str] = Query(None, description="Start date DD/MM/YYYY (or use JSON body)"),
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
@@ -584,7 +584,7 @@ async def get_telemetry_history_report(
     
     return {
         "status": True,
-        "message": "Telemetry history report retrieved successfully",
+        "message": "Success",
         "data": {
             "vendor_code": settings.VENDOR_CODE,
             "vendor_name": settings.VENDOR_NAME,
@@ -603,7 +603,7 @@ async def get_telemetry_history_report(
 
 # ============ 4. Asset Detail Report ============
 
-@router.post("/asset_detail")
+@router.post("/asset_detail", response_model=StandardResponse[Any])
 async def get_asset_detail_report(
     zone: Optional[List[str]] = Query(None, description="Zone codes"),
     division: Optional[List[str]] = Query(None, description="Division codes"),
@@ -690,7 +690,7 @@ async def get_asset_detail_report(
     
     return {
         "status": True,
-        "message": "Asset detail report retrieved successfully",
+        "message": "Success",
         "data": {
             "vendor_code": settings.VENDOR_CODE,
             "vendor_name": settings.VENDOR_NAME,

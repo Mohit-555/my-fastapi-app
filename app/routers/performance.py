@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Any
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Query, Body, HTTPException
 from sqlalchemy.orm import Session
@@ -115,7 +115,7 @@ class ActualFailureCreate(BaseModel):
     cause: str = Field(..., description="Failure Cause detail")
 
 
-@router.post("/actual-failure")
+@router.post("/actual-failure", response_model=StandardResponse[Any])
 async def create_actual_failure_entry(
     payload: ActualFailureCreate,
     db: Session = Depends(get_db)
@@ -156,7 +156,7 @@ async def create_actual_failure_entry(
     
     return {
         "status": True,
-        "message": f"Actual failure entry saved for asset {payload.asset_no} at station {payload.station}",
+        "message": "Success",
         "data": {
             "id": event.id,
             "station": payload.station,

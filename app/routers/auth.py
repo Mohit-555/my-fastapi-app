@@ -92,7 +92,7 @@ def login(request: Request, payload: UserLoginRequest, db: Session = Depends(get
     tokens = _issue_tokens(user, db, payload.remember_me)
     return {
         "status": True,
-        "message": "Login successful",
+        "message": "Success",
         "data": {
             "token": tokens.access_token,
             "refresh_token": tokens.refresh_token,
@@ -193,7 +193,7 @@ def get_me(
 
 
 
-@router.post("/change-password")
+@router.post("/change-password", response_model=StandardResponse[None])
 @limiter.limit("5/minute")
 def change_my_password(
     request: Request,
@@ -209,5 +209,5 @@ def change_my_password(
     current_user.hashed_password = hash_password(payload.new_password)
     db.commit()
     db.refresh(current_user)
-    return {"status": True, "message": "Password updated successfully", "data": None}
+    return {"status": True, "message": "Success", "data": None}
 
