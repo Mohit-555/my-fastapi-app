@@ -1430,6 +1430,7 @@ class SystemHealthTotalsResponse(BaseModel):
 class FaultyByStationItem(BaseModel):
     station_code: str
     asset_code: str
+    asset_type: Optional[str] = None
     sensor_faulty: int
     iot_faulty: int
     net_faulty: int

@@ -100,13 +100,14 @@ async def get_faulty_by_station(
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
     asset_type: Optional[str] = Query(None),
+    asset_no: Optional[str] = Query(None, description="Filter by asset number"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(10, ge=1, le=100, description="Items per page"),
     db: Session = Depends(get_db),
 ):
-    """Return faulty counts grouped by station & asset with pagination."""
+    """Return faulty counts grouped by station & asset with pagination and filtering."""
     from sqlalchemy import or_
-    from app.models.models import AlertEvent, Station, Division
+    from app.models.models import AlertEvent, Station, Division, AssetTypeMaster
 
     query = db.query(AlertEvent).filter(
         or_(AlertEvent.alert_status == 'Active', AlertEvent.alert_status == 'Pending')
@@ -122,6 +123,9 @@ async def get_faulty_by_station(
     if asset_type:
         query = query.filter(AlertEvent.asset_type_hex == asset_type)
         
+    if asset_no:
+        query = query.filter(AlertEvent.asset_no.ilike(f"%{asset_no}%"))
+        
     alerts = query.all()
     
     # Group by (station, asset_no)
@@ -133,9 +137,29 @@ async def get_faulty_by_station(
         grouped[key].append(alert)
         
     all_rows = []
-    for (st_id, asset_no), alert_list in grouped.items():
+    for (st_id, a_no), alert_list in grouped.items():
         station = db.query(Station).filter(Station.id == st_id).first()
         station_code = station.station_code if station else "UNKNOWN"
+        
+        # Resolve asset type display name
+        asset_type_hex = alert_list[0].asset_type_hex
+        asset_type_name = "Point Machine"
+        if asset_type_hex == "00":
+            asset_type_name = "Point Machine"
+        elif asset_type_hex in ["20", "2D", "2E", "2F"]:
+            asset_type_name = "Track Circuit"
+        elif asset_type_hex in ["21", "22", "23", "24", "25", "26", "27", "28", "29", "2A", "2B", "2C"]:
+            asset_type_name = "Axle Counter"
+        elif asset_type_hex in ["10", "11", "12", "13"]:
+            asset_type_name = "Signal"
+        elif asset_type_hex in ["40", "41"]:
+            asset_type_name = "LC Gate"
+        else:
+            atm = db.query(AssetTypeMaster).filter(AssetTypeMaster.asset_type_id == asset_type_hex).first()
+            if atm:
+                asset_type_name = atm.asset_type_name
+            else:
+                asset_type_name = "Other"
         
         sensor_faulty = 0
         iot_faulty = 0
@@ -159,7 +183,8 @@ async def get_faulty_by_station(
         all_rows.append(
             FaultyByStationItem(
                 station_code=station_code,
-                asset_code=asset_no,
+                asset_code=a_no,
+                asset_type=asset_type_name,
                 sensor_faulty=sensor_faulty,
                 iot_faulty=iot_faulty,
                 net_faulty=net_faulty,
@@ -169,10 +194,11 @@ async def get_faulty_by_station(
         
     # If database yields nothing, provide mock fallback rows so the UI works nicely
     if not all_rows:
-        all_rows = [
+        fallback_rows = [
             FaultyByStationItem(
                 station_code="MJA",
                 asset_code="PT-04",
+                asset_type="Point Machine",
                 sensor_faulty=2,
                 iot_faulty=1,
                 net_faulty=0,
@@ -181,6 +207,7 @@ async def get_faulty_by_station(
             FaultyByStationItem(
                 station_code="GZB",
                 asset_code="TC-11",
+                asset_type="Track Circuit",
                 sensor_faulty=0,
                 iot_faulty=1,
                 net_faulty=1,
@@ -189,12 +216,20 @@ async def get_faulty_by_station(
             FaultyByStationItem(
                 station_code="DHN",
                 asset_code="SIG-02",
+                asset_type="Signal",
                 sensor_faulty=3,
                 iot_faulty=0,
                 net_faulty=0,
                 gw_faulty=1,
             ),
         ]
+        # Filter fallback rows if parameters are provided
+        for row in fallback_rows:
+            if asset_no and asset_no.lower() not in row.asset_code.lower():
+                continue
+            if asset_type and asset_type.lower() not in (row.asset_type or "").lower():
+                continue
+            all_rows.append(row)
         
     total_count = len(all_rows)
     
