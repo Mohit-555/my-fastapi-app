@@ -304,6 +304,9 @@ def get_health_summary(
         d_code = st.division.division_code if st.division else "LKO"
         s_code = st.station_code
         avail_pct = sample_availabilities[(idx - 1) % len(sample_availabilities)]
+        avail_iots_val = min(round(avail_pct - 0.6 if idx % 2 == 0 else avail_pct + 0.8, 1), 100.0)
+        avail_network_val = min(round(95.0 + (idx % 6) * 0.9, 1), 100.0)
+        avail_gateway_val = 100.0 if idx % 4 != 0 else 98.0
         
         rows.append({
             "sr_no": idx,
@@ -313,7 +316,15 @@ def get_health_summary(
             "asset_type": asset_type or "ALL",
             "total_sensors": 80,
             "avail_sensors_pct": f"{avail_pct}%",
-            "total_iots": 20
+            "total_iots": 20,
+            "avail_iots_pct": f"{avail_iots_val}%",
+            "avail_iots": f"{avail_iots_val}%",
+            "total_network": 5,
+            "avail_network_pct": f"{avail_network_val}%",
+            "avail_network": f"{avail_network_val}%",
+            "total_gateway": 1,
+            "avail_gateway_pct": f"{avail_gateway_val}%",
+            "avail_gateway": f"{avail_gateway_val}%"
         })
 
     total_records = len(rows)
@@ -358,12 +369,21 @@ def download_health_summary(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["SR", "ZONE", "DIVISION", "STATION", "ASSET TYPE", "TOTAL SENSORS", "% AVAIL. SENSORS", "TOTAL IOTS"])
+    writer.writerow([
+        "SR", "ZONE", "DIVISION", "STATION", "ASSET TYPE",
+        "TOTAL SENSORS", "% AVAIL. SENSORS",
+        "TOTAL IOTS", "% AVAIL. IOTS",
+        "TOTAL NETWORK", "% AVAIL. NETWORK",
+        "TOTAL GATEWAY", "% AVAIL. GATEWAY"
+    ])
 
     for r in res.get("data", {}).get("rows", []):
         writer.writerow([
             r["sr_no"], r["zone"], r["division"], r["station"],
-            r["asset_type"], r["total_sensors"], r["avail_sensors_pct"], r["total_iots"]
+            r["asset_type"], r["total_sensors"], r["avail_sensors_pct"],
+            r["total_iots"], r["avail_iots_pct"],
+            r["total_network"], r["avail_network_pct"],
+            r["total_gateway"], r["avail_gateway_pct"]
         ])
 
     output.seek(0)
