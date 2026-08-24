@@ -1,14 +1,15 @@
 import json
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List
 
 from app.database import get_db
 from app.services.websocket_manager import safe_notify_dashboard
-from app.models.models import Gateway, Telemetry, Zone, Division, Station, AssetParameter
+from app.models.models import Gateway, Telemetry, Zone, Division, Station, AssetParameter, User
 from app.models.schemas import GatewayDataPayload, TelemetryResponse, GatewayResponse, GatewayListResponse, StandardResponse
+from app.auth_utils import get_current_user
 
 router = APIRouter(prefix="/gateway", tags=["Gateway Telemetry"])
 
@@ -71,6 +72,57 @@ def _resolve_station_from_stngw_id(stngw_id: str, db: Session) -> int | None:
         return station.id if station else None
     except Exception:
         return None
+
+
+def _check_stngw_id_access(stngw_id: str, user: User, db: Session, action: str = "read") -> Gateway | None:
+    """Verify user has access to a gateway/master card (by stngw_id) and check role levels."""
+    if action == "write" and user.role and user.role.level >= 7:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Guest and Auditor roles are not permitted to perform this action."
+        )
+
+    gateway = db.query(Gateway).filter(Gateway.stngw_id == stngw_id.upper()).first()
+    
+    # Check division/zone access
+    station_id = gateway.station_id if gateway else None
+    if station_id is None:
+        # Try to resolve station from stngw_id
+        station_id = _resolve_station_from_stngw_id(stngw_id.upper(), db)
+        
+    if station_id is not None:
+        station = db.query(Station).filter(Station.id == station_id).first()
+        if not station:
+            # If the resolved station isn't in DB, division/zone users shouldn't access it
+            if user.division_id is not None or user.zone_id is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: Station associated with this gateway not found."
+                )
+        else:
+            if user.division_id is not None:
+                if station.division_id != user.division_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Access denied: User division does not match the gateway station division."
+                    )
+            if user.zone_id is not None:
+                division = db.query(Division).filter(Division.id == station.division_id).first()
+                if not division or division.zone_id != user.zone_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Access denied: User zone does not match the gateway station zone."
+                    )
+    else:
+        # Gateway has no station and could not resolve one
+        if user.division_id is not None or user.zone_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: Non-admin users cannot access unassigned gateways."
+            )
+            
+    return gateway
+
 
 
 @router.post("/data", status_code=202)
@@ -280,14 +332,13 @@ def get_gateway_telemetry(
     para_id: str = None,
     limit: int = 100,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Fetch stored telemetry readings for a gateway.
     Optionally filter by para_id.
     """
-    gateway = db.query(Gateway).filter(
-        Gateway.stngw_id == stngw_id.upper()
-    ).first()
+    gateway = _check_stngw_id_access(stngw_id, current_user, db, action="read")
 
     if not gateway:
         raise HTTPException(
@@ -314,14 +365,16 @@ def get_gateway_telemetry(
 
 
 @router.post("/{stngw_id}/link-station", response_model=StandardResponse[GatewayResponse])
-def link_gateway_station(stngw_id: str, db: Session = Depends(get_db)):
+def link_gateway_station(
+    stngw_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Manually trigger station auto-assignment for an existing gateway.
     Useful for back-filling gateways registered before their station was added.
     """
-    gateway = db.query(Gateway).filter(
-        Gateway.stngw_id == stngw_id.upper()
-    ).first()
+    gateway = _check_stngw_id_access(stngw_id, current_user, db, action="write")
     if not gateway:
         raise HTTPException(status_code=404, detail=f"Gateway '{stngw_id}' not found")
 
@@ -348,10 +401,16 @@ def link_gateway_station(stngw_id: str, db: Session = Depends(get_db)):
 def list_gateways(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """List all registered gateways with pagination"""
     q = db.query(Gateway)
+    if current_user.division_id is not None:
+        q = q.join(Station, Gateway.station_id == Station.id).filter(Station.division_id == current_user.division_id)
+    elif current_user.zone_id is not None:
+        q = q.join(Station, Gateway.station_id == Station.id).join(Division, Station.division_id == Division.id).filter(Division.zone_id == current_user.zone_id)
+
     total = q.count()
     total_pages = (total + page_size - 1) // page_size if total else 0
     offset = (page - 1) * page_size
@@ -371,11 +430,13 @@ def list_gateways(
 
 
 @router.get("/{stngw_id}/info", response_model=StandardResponse[GatewayResponse])
-def get_gateway_info(stngw_id: str, db: Session = Depends(get_db)):
+def get_gateway_info(
+    stngw_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get gateway registration info"""
-    gateway = db.query(Gateway).filter(
-        Gateway.stngw_id == stngw_id.upper()
-    ).first()
+    gateway = _check_stngw_id_access(stngw_id, current_user, db, action="read")
     if not gateway:
         raise HTTPException(status_code=404, detail=f"Gateway '{stngw_id}' not found")
     return {

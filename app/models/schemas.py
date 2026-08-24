@@ -1377,7 +1377,7 @@ class AlertCauseListResponse(BaseModel):
 
 class SlaveCardBase(BaseModel):
     gateway_id: int = Field(..., validation_alias=AliasChoices('gateway_id', 'gatewayId'))
-    card_address: str = Field(..., max_length=2, validation_alias=AliasChoices('card_address', 'cardAddress'), description="1-byte hex card address, e.g. '81'")
+    card_address: str = Field(..., pattern=r"^[0-9A-Fa-f]{1,2}$", validation_alias=AliasChoices('card_address', 'cardAddress'), description="1-byte hex card address, e.g. '81'")
     card_type: Optional[str] = Field(None, max_length=20, validation_alias=AliasChoices('card_type', 'cardType'), description="e.g. 'Voltage', 'Analog', 'DI'")
 
 class SlaveCardCreate(SlaveCardBase):
@@ -1385,7 +1385,7 @@ class SlaveCardCreate(SlaveCardBase):
 
 class SlaveCardUpdate(BaseModel):
     gateway_id: Optional[int] = Field(None, validation_alias=AliasChoices('gateway_id', 'gatewayId'))
-    card_address: Optional[str] = Field(None, max_length=2, validation_alias=AliasChoices('card_address', 'cardAddress'))
+    card_address: Optional[str] = Field(None, pattern=r"^[0-9A-Fa-f]{1,2}$", validation_alias=AliasChoices('card_address', 'cardAddress'))
     card_type: Optional[str] = Field(None, max_length=20, validation_alias=AliasChoices('card_type', 'cardType'))
 
 class SlaveCardResponse(SlaveCardBase):
