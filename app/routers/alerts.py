@@ -13,7 +13,8 @@ from app.services.websocket_manager import websocket_manager, safe_notify_dashbo
 
 from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP, PARAMETER_TYPE_MAP
 from app.database import get_db
-from app.models.models import AlertEvent, Asset, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster, AssetInventory, MaintenanceMode, Role, SlaveCard, Gateway
+from app.models.models import AlertEvent, Asset, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster, AssetInventory, MaintenanceMode, Role, SlaveCard, Gateway, User
+from app.auth_utils import get_current_user
 from app.models.schemas import (
     AlertEventCreate,
     AlertEventResponse,
@@ -1472,6 +1473,39 @@ def create_alert_event(payload: AlertEventCreate, db: Session = Depends(get_db))
         "message": "Success",
         "data": record
     }
+def _verify_alert_authorization(record: AlertEvent, user: User, db: Session):
+    """
+    Verify that the user is authorized to perform modifications on this alert.
+    Raises HTTPException (403 Forbidden) if not permitted.
+    """
+    if user.role and user.role.level >= 7:
+        raise HTTPException(
+            status_code=403,
+            detail="Guest and Auditor roles are not permitted to perform this action."
+        )
+
+    station = db.query(Station).filter(Station.id == record.station_id).first()
+    if not station:
+        raise HTTPException(
+            status_code=404,
+            detail="Station associated with this alert does not exist."
+        )
+
+    if user.division_id is not None:
+        if station.division_id != user.division_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: User division does not match the alert station division."
+            )
+
+    if user.zone_id is not None:
+        division = db.query(Division).filter(Division.id == station.division_id).first()
+        if not division or division.zone_id != user.zone_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: User zone does not match the alert station zone."
+            )
+
 
 
 @router.post("/{event_id}/feedback", response_model=StandardResponse[AlertEventResponse])
@@ -1479,13 +1513,13 @@ def update_alert_feedback(
     event_id: int,
     payload: AlertFeedbackUpdate,
     db: Session = Depends(get_db),
-    # TODO: add authorization check — verify calling user is assigned to this
-    # alert's station or has a role permitted to submit feedback.
+    current_user: User = Depends(get_current_user),
 ):
     """Set operator feedback for an alert event."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
     if not record:
         raise HTTPException(status_code=404, detail=f"Alert event {event_id} not found")
+    _verify_alert_authorization(record, current_user, db)
     if payload.feedback.upper() not in {"T", "PT", "F", "M"}:
         raise HTTPException(status_code=400, detail="feedback must be one of T, PT, F, M")
 
@@ -1520,13 +1554,13 @@ def update_alert_remark(
     event_id: int,
     payload: AlertRemarkUpdate,
     db: Session = Depends(get_db),
-    # TODO: add authorization check — any authenticated user can currently remark
-    # on any alert regardless of zone/station ownership.
+    current_user: User = Depends(get_current_user),
 ):
     """Set or replace remarks for an alert event."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
     if not record:
         raise HTTPException(status_code=404, detail=f"Alert event {event_id} not found")
+    _verify_alert_authorization(record, current_user, db)
 
     record.remark = payload.remark
     db.commit()
@@ -1543,13 +1577,13 @@ def update_alert_remark(
 def acknowledge_alert(
     event_id: int,
     db: Session = Depends(get_db),
-    # TODO: add authorization check — any authenticated user can currently
-    # acknowledge any alert regardless of zone/station ownership.
+    current_user: User = Depends(get_current_user),
 ):
     """Acknowledge a live alert without clearing/rectifying it."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
     if not record:
         raise HTTPException(status_code=404, detail=f"Alert event {event_id} not found")
+    _verify_alert_authorization(record, current_user, db)
 
     record.acknowledged = True
     if record.alert_status.lower() != "cleared":
@@ -1569,13 +1603,13 @@ def update_alert_rectification(
     event_id: int,
     payload: AlertRectificationUpdate,
     db: Session = Depends(get_db),
-    # TODO: add authorization check — any authenticated user can currently clear/
-    # rectify any alert regardless of role or zone/station ownership.
+    current_user: User = Depends(get_current_user),
 ):
     """Mark an alert as rectified/cleared and store maintainer details."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
     if not record:
         raise HTTPException(status_code=404, detail=f"Alert event {event_id} not found")
+    _verify_alert_authorization(record, current_user, db)
 
     record.alert_status = payload.alert_status.strip().title()
     record.rectification_time = payload.rectification_time or datetime.utcnow()
@@ -1624,13 +1658,13 @@ def update_alert_event(
     event_id: int,
     payload: AlertEventUpdate,
     db: Session = Depends(get_db),
-    # TODO: add authorization check — any authenticated user can currently edit
-    # any alert event regardless of role or zone/station ownership.
+    current_user: User = Depends(get_current_user),
 ):
     """Update a raw alert event."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
     if not record:
         raise HTTPException(status_code=404, detail=f"Alert event {event_id} not found")
+    _verify_alert_authorization(record, current_user, db)
     _validate_event_payload(payload, db)
 
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -1665,13 +1699,13 @@ def escalate_alert(
     event_id: int,
     target_level: Optional[str] = Query(None, regex="^(JE|SSE|ASTE|DSTE)$"),
     db: Session = Depends(get_db),
-    # TODO: add authorization check — any authenticated user can currently escalate
-    # any alert regardless of role or zone/station ownership.
+    current_user: User = Depends(get_current_user),
 ):
     """Escalate an alert event to the next hierarchy level (JE -> SSE -> ASTE -> DSTE)."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
     if not record:
         raise HTTPException(status_code=404, detail=f"Alert event {event_id} not found")
+    _verify_alert_authorization(record, current_user, db)
         
     hierarchy = ["JE", "SSE", "ASTE", "DSTE"]
     # NOTE: the isinstance check previously here was dead code — target_level is
