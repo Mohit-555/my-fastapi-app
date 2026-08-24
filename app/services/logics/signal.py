@@ -1,8 +1,11 @@
 from typing import Dict, List, Optional, Tuple
+import logging
 from sqlalchemy.orm import Session
 from app.models.models import Asset
 from app.services.alert_engine import AlertType
 from app.services.parameter_config_service import param_config_service
+
+logger = logging.getLogger("signal_logics")
 
 class SignalLogics:
     """
@@ -36,7 +39,8 @@ class SignalLogics:
             for aspect in SignalLogics._MAIN_ASPECTS:
                 if aspect in code:
                     return ("MAIN", aspect)
-            return None
+            logger.warning(f"Unknown aspect for MAIN signal parameter: {code}")
+            return ("MAIN", "UNKNOWN")
 
         if "COSIG" in code:
             return ("CALLING_ON", "ASPECT")
@@ -48,7 +52,8 @@ class SignalLogics:
             for aspect in SignalLogics._SHUNT_ASPECTS:
                 if aspect in code:
                     return ("SHUNT", aspect)
-            return None
+            logger.warning(f"Unknown aspect for SHUNT signal parameter: {code}")
+            return ("SHUNT", "UNKNOWN")
 
         return None
 
@@ -143,6 +148,10 @@ class SignalLogics:
             elif aspect == "RG":
                 alerts.append({"cause_code": "SIG_RG_VOLT_CURR_FAIL",
                                 "cause_detail": "Sig No. RG Aspect failed. HR DN. Signal blank in ON position.",
+                                "alert_type": AlertType.FAILURE})
+            else:
+                alerts.append({"cause_code": "SIG_UNKNOWN_VOLT_CURR_FAIL",
+                                "cause_detail": f"Sig No. Unknown Aspect failed. Aspect: {aspect}.",
                                 "alert_type": AlertType.FAILURE})
             return alerts
 
