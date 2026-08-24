@@ -124,16 +124,34 @@ class IPSLogics:
                 "VIPS DC BLOCK TEL DN": "IPS_DC_BLOCK_TEL_DN_VOLT_FAIL",
                 "VIPS DC DATALOG": "IPS_DC_DATALOG_VOLT_FAIL",
                 "VIPS DC EI": "IPS_DC_EI_VOLT_FAIL",
-                "IIPS BATT CHAR 110 DC": "IPS_BATT_CHAR_CURR_FAIL"
             }
             
-            for key, cause_code in cause_map.items():
-                if key in param_config.parameter_representation_code:
+            # Check for battery charging current failure (both under and over)
+            if "IIPS BATT CHAR" in param_config.parameter_representation_code:
+                # Under-current failure
+                if param_config.min_fail is not None and value < param_config.min_fail:
                     alerts.append({
-                        "cause_code": cause_code,
-                        "cause_detail": f"IPS failed. {key} failed.",
+                        "cause_code": "IPS_BATT_CHAR_CURR_FAIL",
+                        "cause_detail": "IPS failed. Battery Charging current low.",
                         "alert_type": AlertType.FAILURE
                     })
-                    break
+            else:
+                for key, cause_code in cause_map.items():
+                    if key in param_config.parameter_representation_code:
+                        alerts.append({
+                            "cause_code": cause_code,
+                            "cause_detail": f"IPS failed. {key} failed.",
+                            "alert_type": AlertType.FAILURE
+                        })
+                        break
+        
+        # Over-current failure check for battery charging current (if max_fail is defined)
+        elif "IIPS BATT CHAR" in param_config.parameter_representation_code:
+            if param_config.max_fail is not None and value > param_config.max_fail:
+                alerts.append({
+                    "cause_code": "IPS_BATT_CHAR_CURR_OVER",
+                    "cause_detail": "IPS failed. Battery Charging current excessively high.",
+                    "alert_type": AlertType.FAILURE
+                })
         
         return alerts

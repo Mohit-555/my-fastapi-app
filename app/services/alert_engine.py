@@ -122,7 +122,8 @@ class AlertEngine:
         self,
         asset_number_code: str,
         cause_code: str,
-        alert_type: AlertType
+        alert_type: AlertType,
+        db: Session
     ) -> bool:
         """Check if an alert should be generated (deduplication logic)"""
         key = f"{asset_number_code}:{cause_code}:{alert_type.value}"
@@ -130,6 +131,62 @@ class AlertEngine:
         # If alert already active, don't generate another
         if key in self.active_alerts:
             return False
+        
+        # If this is a FAILURE alert, check if there's an active PREDICTIVE alert
+        # for the same asset and matching cause. If so, resolve it.
+        if alert_type == AlertType.FAILURE:
+            FAILURE_TO_PREDICTIVE_MAP = {
+                # IPS
+                "IPS_110_DC_VOLT_FAIL": "IPS_110_DC_VOLT_LOW",
+                "IPS_110_AC_SIG_VOLT_FAIL": "IPS_110_AC_SIG_VOLT_LOW",
+                "IPS_110_AC_TR_VOLT_FAIL": "IPS_110_AC_TR_VOLT_LOW",
+                "IPS_IIP_VOLT_FAIL": "IPS_IIP_VOLT_LOW",
+                "IPS_SMR_1_VOLT_FAIL": "IPS_SMR_1_VOLT_LOW",
+                "IPS_DC_R_INT_VOLT_FAIL": "IPS_DC_R_INT_VOLT_LOW",
+                "IPS_DC_R_EXT_VOLT_FAIL": "IPS_DC_R_EXT_VOLT_LOW",
+                "IPS_DC_AXLE_C_VOLT_FAIL": "IPS_DC_AXLE_C_VOLT_LOW",
+                "IPS_DC_PAN_IND_VOLT_FAIL": "IPS_DC_PAN_IND_VOLT_LOW",
+                "IPS_DC_BLOCK_LOCAL_VOLT_FAIL": "IPS_DC_BLOCK_LOCAL_VOLT_LOW",
+                "IPS_DC_HKT_MAG_VOLT_FAIL": "IPS_DC_HKT_MAG_VOLT_LOW",
+                "IPS_DC_BLOCK_LINE_UP_VOLT_FAIL": "IPS_DC_BLOCK_LINE_UP_VOLT_LOW",
+                "IPS_DC_BLOCK_LINE_DN_VOLT_FAIL": "IPS_DC_BLOCK_LINE_DN_VOLT_LOW",
+                "IPS_DC_BLOCK_TEL_UP_VOLT_FAIL": "IPS_DC_BLOCK_TEL_UP_VOLT_LOW",
+                "IPS_DC_BLOCK_TEL_DN_VOLT_FAIL": "IPS_DC_BLOCK_TEL_DN_VOLT_LOW",
+                "IPS_DC_DATALOG_VOLT_FAIL": "IPS_DC_DATALOG_VOLT_LOW",
+                "IPS_DC_EI_VOLT_FAIL": "IPS_DC_EI_VOLT_LOW",
+                "IPS_BATT_CHAR_CURR_FAIL": "IPS_BATT_CHAR_CURR_LOW",
+                "IPS_BATT_CHAR_CURR_OVER": "IPS_BATT_CHAR_CURR_LOW",
+                
+                # Signal
+                "SIG_DG_VOLT_CURR_FAIL": "SIG_DG_VOLT_CURR_LOW",
+                "SIG_HG_VOLT_CURR_FAIL": "SIG_HG_VOLT_CURR_LOW",
+                "SIG_HHG_VOLT_CURR_FAIL": "SIG_HHG_VOLT_CURR_LOW",
+                "SIG_RG_VOLT_CURR_FAIL": "SIG_RG_VOLT_CURR_LOW",
+                "SIG_UNKNOWN_VOLT_CURR_FAIL": "SIG_UNKNOWN_VOLT_CURR_LOW",
+                
+                # Track Circuit
+                "TC_TFC_OP_VOLT_FAIL": "TC_TFC_OP_VOLT_LOW",
+                "TC_SHORT": "TC_TR_VOLT_LOW",
+                
+                # Point Machine
+                "PT_N_VOLT_CURR_FAIL": "PT_N_VOLT_CURR_LOW",
+                "PT_R_VOLT_CURR_FAIL": "PT_R_VOLT_CURR_LOW",
+                "PT_N_OBS": "PT_N_TIME_HIGH",
+                "PT_R_OBS": "PT_R_TIME_HIGH",
+            }
+            
+            pred_cause = FAILURE_TO_PREDICTIVE_MAP.get(cause_code)
+            if not pred_cause:
+                if cause_code.endswith("_FAIL"):
+                    pred_cause = cause_code[:-5] + "_LOW"
+                elif cause_code.endswith("_OVER"):
+                    pred_cause = cause_code[:-5] + "_LOW"
+                else:
+                    pred_cause = cause_code
+            
+            pred_key = f"{asset_number_code}:{pred_cause}:{AlertType.PREDICTIVE.value}"
+            if pred_key in self.active_alerts:
+                self._resolve_alert(pred_key, f"Escalated to Failure ({cause_code})", db)
         
         # Check if same cause was recently cleared
         if key in self.alert_history:
@@ -139,6 +196,33 @@ class AlertEngine:
                 return False
         
         return True
+
+    def _resolve_alert(self, key: str, reason: str, db: Session):
+        """Resolve an active alert and move it to history."""
+        if key in self.active_alerts:
+            alert_data = self.active_alerts.pop(key)
+            alert_id = alert_data.get("alert_id")
+            
+            # Track in history
+            self.alert_history[key] = datetime.now()
+            
+            if alert_id:
+                try:
+                    record = db.query(AlertEvent).filter(AlertEvent.id == alert_id).first()
+                    if record:
+                        record.alert_status = "Cleared"
+                        record.rectification_time = datetime.utcnow()
+                        record.remark = f"Auto-resolved: {reason}"
+                        db.commit()
+                        db.refresh(record)
+                        try:
+                            from app.routers.alerts import _broadcast_alert_update
+                            _broadcast_alert_update(record)
+                        except Exception as ex:
+                            logger.error(f"Failed to broadcast alert resolution: {ex}")
+                        logger.info(f"Alert {alert_id} resolved in DB: {reason}")
+                except Exception as e:
+                    logger.error(f"Error updating resolved alert in DB: {e}")
     
     def _generate_alert(
         self,
@@ -154,7 +238,7 @@ class AlertEngine:
     ) -> Optional[AlertEvent]:
         """Generate and store an alert using existing router"""
         
-        if not self._should_generate_alert(asset_number_code, cause_code, alert_type):
+        if not self._should_generate_alert(asset_number_code, cause_code, alert_type, db):
             return None
         
         # Import here to avoid circular imports
