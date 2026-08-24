@@ -91,6 +91,66 @@ def _resolve_station_ids(
     return None  # no filter → all
 
 
+def _parse_telemetry_datetime(dt_str: Optional[str], default: datetime) -> datetime:
+    if not dt_str:
+        return default
+    
+    dt_str_clean = dt_str.strip().rstrip('Z')
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"):
+        try:
+            return datetime.strptime(dt_str_clean, fmt)
+        except ValueError:
+            continue
+            
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(dt_str_clean, fmt)
+        except ValueError:
+            continue
+            
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            t = datetime.strptime(dt_str_clean, fmt).time()
+            return datetime.combine(datetime.now().date(), t)
+        except ValueError:
+            continue
+
+    try:
+        return datetime.fromisoformat(dt_str_clean)
+    except Exception:
+        return default
+
+
+def _resolve_station_ids_by_codes(
+    db: Session,
+    zone_code: Optional[str] = None,
+    division_code: Optional[str] = None,
+    station_code: Optional[str] = None,
+    station_id: Optional[int] = None,
+) -> Optional[List[int]]:
+    if station_id:
+        return [station_id]
+        
+    q = db.query(Station.id).join(Division).join(Zone)
+    has_filter = False
+    
+    if station_code:
+        q = q.filter(Station.station_code == station_code.upper())
+        has_filter = True
+    if division_code:
+        q = q.filter(Division.division_code == division_code.upper())
+        has_filter = True
+    if zone_code:
+        q = q.filter(Zone.zone_code == zone_code.upper())
+        has_filter = True
+        
+    if has_filter:
+        rows = q.all()
+        return [r.id for r in rows]
+        
+    return None
+
+
 def _get_threshold(
     db: Session,
     asset_type_hex: str,
@@ -437,9 +497,14 @@ async def _sse_event_generator(request: Request, station_id: int, asset_number: 
 
 @router.get("/live")
 async def live_telemetry_stream(
-    station_id: int,
-    asset_number: str,
     request: Request,
+    station_id: Optional[int] = Query(None),
+    station_code: Optional[str] = Query(None),
+    zone_code: Optional[str] = Query(None),
+    division_code: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),
+    asset_number: Optional[str] = Query(None),
+    asset_no: Optional[str] = Query(None),
     poll_interval: int = Query(5, ge=1, le=60, description="Polling interval in seconds (1–60)"),
     db: Session = Depends(get_db),
 ):
@@ -450,22 +515,57 @@ async def live_telemetry_stream(
       const es = new EventSource('/telemetry/live?station_id=1&asset_number=PT-101&poll_interval=5');
       es.onmessage = (e) => { const d = JSON.parse(e.data); ... };
     """
-    asset = (
-        db.query(Asset)
-        .filter(
-            Asset.station_id == station_id,
-            or_(
-                Asset.asset_number_code == asset_number,
-                Asset.smms_asset_code == asset_number
-            )
-        )
-        .first()
+    # Use asset_no if asset_number is not provided
+    eff_asset_no = asset_number or asset_no
+    if not eff_asset_no:
+        raise HTTPException(status_code=400, detail="asset_number or asset_no is required")
+
+    # Resolve station
+    stn_ids = _resolve_station_ids_by_codes(
+        db, zone_code=zone_code, division_code=division_code,
+        station_code=station_code, station_id=station_id
     )
+
+    # Search asset
+    asset_q = db.query(Asset)
+    if stn_ids:
+        asset_q = asset_q.filter(Asset.station_id.in_(stn_ids))
+    elif station_id is not None:
+        asset_q = asset_q.filter(Asset.station_id == station_id)
+
+    if asset_type:
+        asset_type_hexes = None
+        if asset_type in ASSET_TYPE_DISPLAY_GROUPS:
+            asset_type_hexes = ASSET_TYPE_DISPLAY_GROUPS[asset_type]
+        else:
+            at_master = db.query(AssetTypeMaster.asset_type_id).filter(
+                or_(
+                    AssetTypeMaster.asset_type_code == asset_type.upper(),
+                    AssetTypeMaster.asset_type_name == asset_type
+                )
+            ).all()
+            if at_master:
+                asset_type_hexes = [r.asset_type_id for r in at_master]
+            else:
+                asset_type_hexes = [asset_type]
+        if asset_type_hexes:
+            asset_q = asset_q.filter(Asset.asset_type_hex.in_(asset_type_hexes))
+
+    asset = asset_q.filter(
+        or_(
+            Asset.asset_number_code == eff_asset_no,
+            Asset.smms_asset_code == eff_asset_no
+        )
+    ).first()
+
     if not asset:
-        raise HTTPException(status_code=404, detail=f"Asset {asset_number} not found at station {station_id}")
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Asset '{eff_asset_no}' not found with the specified location/type filters"
+        )
 
     return StreamingResponse(
-        _sse_event_generator(request, station_id, asset_number, poll_interval),
+        _sse_event_generator(request, asset.station_id, asset.asset_number_code, poll_interval),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -479,7 +579,13 @@ async def live_telemetry_stream(
 def _fetch_history_data(
     db: Session,
     station_id: Optional[int],
+    station_code: Optional[str],
+    zone_code: Optional[str],
+    division_code: Optional[str],
+    asset_type: Optional[str],
+    asset_no: Optional[str],
     asset_number_hex: Optional[str],
+    parameter_type: Optional[str],
     parameter_type_hex: Optional[str],
     from_time: datetime,
     to_time: datetime,
@@ -488,10 +594,65 @@ def _fetch_history_data(
     """
     Shared data-fetch logic for history table and CSV download.
     Returns (gateway_map, grouped_rows).
-    grouped_rows: dict[(gateway_id, para_id)] → List[Telemetry] sorted asc by received_at
     """
-    station_ids = _resolve_station_ids(db, None, None, station_id)
+    # 1. Resolve Station IDs
+    station_ids = _resolve_station_ids_by_codes(
+        db, zone_code=zone_code, division_code=division_code,
+        station_code=station_code, station_id=station_id
+    )
 
+    # 2. Resolve Asset Type Hexes
+    asset_type_hexes = None
+    if asset_type:
+        if asset_type in ASSET_TYPE_DISPLAY_GROUPS:
+            asset_type_hexes = ASSET_TYPE_DISPLAY_GROUPS[asset_type]
+        else:
+            at_master = db.query(AssetTypeMaster.asset_type_id).filter(
+                or_(
+                    AssetTypeMaster.asset_type_code == asset_type.upper(),
+                    AssetTypeMaster.asset_type_name == asset_type
+                )
+            ).all()
+            if at_master:
+                asset_type_hexes = [r.asset_type_id for r in at_master]
+            else:
+                asset_type_hexes = [asset_type]
+
+    # 3. Resolve Asset Number Hexes
+    target_asset_number_hexes = None
+    eff_no = asset_no or asset_number_hex
+    if eff_no:
+        asset_q = db.query(Asset.asset_number_id)
+        if station_ids:
+            asset_q = asset_q.filter(Asset.station_id.in_(station_ids))
+        if asset_type_hexes:
+            asset_q = asset_q.filter(Asset.asset_type_hex.in_(asset_type_hexes))
+        
+        rows = asset_q.filter(
+            or_(
+                Asset.asset_number_code == eff_no,
+                Asset.smms_asset_code == eff_no
+            )
+        ).all()
+        if rows:
+            target_asset_number_hexes = [r.asset_number_id.upper() for r in rows]
+        else:
+            target_asset_number_hexes = [eff_no.upper()]
+
+    # 4. Resolve Parameter Type Hexes
+    target_parameter_type_hexes = None
+    eff_pt = parameter_type or parameter_type_hex
+    if eff_pt:
+        hexes = []
+        for hex_id, (code, name, unit) in PARAMETER_TYPE_MAP.items():
+            if eff_pt.upper() in (hex_id.upper(), code.upper(), name.upper()):
+                hexes.append(hex_id.upper())
+        if hexes:
+            target_parameter_type_hexes = hexes
+        else:
+            target_parameter_type_hexes = [eff_pt.upper()]
+
+    # Query gateways
     gw_query = db.query(Gateway)
     if station_ids is not None:
         if not station_ids:
@@ -505,13 +666,28 @@ def _fetch_history_data(
     gateway_ids = [g.id for g in gateways]
     gateway_map = {g.id: g for g in gateways}
 
+    # Fetch telemetry
+    telem_filter = [
+        Telemetry.gateway_id.in_(gateway_ids),
+        Telemetry.received_at >= from_time,
+        Telemetry.received_at <= to_time,
+    ]
+
+    if asset_type_hexes and len(asset_type_hexes) == 1:
+        at_h = asset_type_hexes[0]
+        if target_asset_number_hexes and len(target_asset_number_hexes) == 1:
+            an_h = target_asset_number_hexes[0]
+            if target_parameter_type_hexes and len(target_parameter_type_hexes) == 1:
+                pt_h = target_parameter_type_hexes[0]
+                telem_filter.append(Telemetry.para_id.like(f"{at_h}{an_h}{pt_h}%"))
+            else:
+                telem_filter.append(Telemetry.para_id.like(f"{at_h}{an_h}%"))
+        else:
+            telem_filter.append(Telemetry.para_id.like(f"{at_h}%"))
+
     rows_all = (
         db.query(Telemetry)
-        .filter(
-            Telemetry.gateway_id.in_(gateway_ids),
-            Telemetry.received_at >= from_time,
-            Telemetry.received_at <= to_time,
-        )
+        .filter(*telem_filter)
         .order_by(Telemetry.received_at.asc())
         .limit(limit)
         .all()
@@ -522,12 +698,15 @@ def _fetch_history_data(
         pid = row.para_id
         if len(pid) != 8:
             continue
+        at_hex = pid[0:2]
         an_hex = pid[2:4]
         pt_hex = pid[4:6]
 
-        if asset_number_hex and an_hex != asset_number_hex.upper():
+        if asset_type_hexes and at_hex not in asset_type_hexes:
             continue
-        if parameter_type_hex and pt_hex != parameter_type_hex.upper():
+        if target_asset_number_hexes and an_hex not in target_asset_number_hexes:
+            continue
+        if target_parameter_type_hexes and pt_hex not in target_parameter_type_hexes:
             continue
 
         key = (row.gateway_id, pid)
@@ -616,10 +795,18 @@ def _build_history_columns_and_rows(
 @router.get("/history", response_model=StandardResponse[TelemetryHistoryResponse])
 def get_telemetry_history(
     station_id:       Optional[int]      = Query(None),
+    station_code:     Optional[str]      = Query(None, description="Station code, e.g. 'LKO'"),
+    zone_code:        Optional[str]      = Query(None, description="Zone code, e.g. 'NR'"),
+    division_code:    Optional[str]      = Query(None, description="Division code, e.g. 'LKO'"),
+    asset_type:       Optional[str]      = Query(None, description="Asset type name or display group name"),
+    asset_no:         Optional[str]      = Query(None, description="Asset number code, e.g. 'PT-101'"),
     asset_number_hex: Optional[str]      = Query(None, description="Asset number hex, e.g. '01'"),
-    parameter_type_hex: Optional[str]    = Query(None, description="Filter to one parameter type"),
-    from_time:        Optional[datetime] = Query(None, description="ISO 8601 start time"),
-    to_time:          Optional[datetime] = Query(None, description="ISO 8601 end time. Defaults to now."),
+    parameter_type:   Optional[str]      = Query(None, description="Parameter type name or code"),
+    parameter_type_hex: Optional[str]    = Query(None, description="Filter to one parameter type hex"),
+    from_date:        Optional[str]      = Query(None, description="Start date DD/MM/YYYY or YYYY-MM-DD"),
+    from_time:        Optional[str]      = Query(None, description="Start time HH:MM:SS or ISO string"),
+    to_date:          Optional[str]      = Query(None, description="End date DD/MM/YYYY or YYYY-MM-DD"),
+    to_time:          Optional[str]      = Query(None, description="End time HH:MM:SS or ISO string"),
     page:             int                = Query(1, ge=1),
     page_size:        int                = Query(50, ge=1, le=500),
     db:               Session            = Depends(get_db),
@@ -629,31 +816,77 @@ def get_telemetry_history(
 
     Returns one row per timestamp with all parameter values as columns.
     Used by the Telemetry History screen with date/time range pickers.
-
-    Example:
-      GET /telemetry/history?station_id=1&asset_number_hex=01&from_time=2026-06-04T10:00:00
     """
-    now = datetime.utcnow()
-    if from_time is None:
-        from_time = now - timedelta(hours=24)
-    if to_time is None:
-        to_time = now
+    eff_from_dt = None
+    eff_to_dt = None
+    
+    if from_date:
+        if from_time:
+            if ":" in from_time and "T" not in from_time:
+                eff_from_dt = _parse_telemetry_datetime(f"{from_date} {from_time}", datetime.utcnow())
+            else:
+                eff_from_dt = _parse_telemetry_datetime(from_time, datetime.utcnow())
+        else:
+            eff_from_dt = _parse_telemetry_datetime(from_date, datetime.utcnow() - timedelta(hours=24))
+    else:
+        if from_time:
+            eff_from_dt = _parse_telemetry_datetime(from_time, datetime.utcnow() - timedelta(hours=24))
+        else:
+            eff_from_dt = datetime.utcnow() - timedelta(hours=24)
+
+    if to_date:
+        if to_time:
+            if ":" in to_time and "T" not in to_time:
+                eff_to_dt = _parse_telemetry_datetime(f"{to_date} {to_time}", datetime.utcnow())
+            else:
+                eff_to_dt = _parse_telemetry_datetime(to_time, datetime.utcnow())
+        else:
+            parsed_date = _parse_telemetry_datetime(to_date, datetime.utcnow())
+            eff_to_dt = datetime.combine(parsed_date.date(), datetime.max.time())
+    else:
+        if to_time:
+            eff_to_dt = _parse_telemetry_datetime(to_time, datetime.utcnow())
+        else:
+            eff_to_dt = datetime.utcnow()
 
     gateway_map, grouped = _fetch_history_data(
-        db, station_id,
-        asset_number_hex, parameter_type_hex,
-        from_time, to_time,
+        db=db,
+        station_id=station_id,
+        station_code=station_code,
+        zone_code=zone_code,
+        division_code=division_code,
+        asset_type=asset_type,
+        asset_no=asset_no,
+        asset_number_hex=asset_number_hex,
+        parameter_type=parameter_type,
+        parameter_type_hex=parameter_type_hex,
+        from_time=eff_from_dt,
+        to_time=eff_to_dt,
     )
 
-    if not grouped:
-        stn_name = None
-        if station_id:
-            stn = db.query(Station).filter(Station.id == station_id).first()
-            stn_name = stn.station_name if stn else None
+    resolved_zone = zone_code or "NR"
+    resolved_div = division_code or "PRYG"
+    resolved_stn_name = None
+    eff_station_id = station_id
+
+    stn = None
+    if station_id:
+        stn = db.query(Station).filter(Station.id == station_id).first()
+    elif station_code:
+        stn = db.query(Station).filter(Station.station_code == station_code.upper()).first()
         
+    if stn:
+        resolved_stn_name = stn.station_name
+        eff_station_id = stn.id
+        if stn.division:
+            resolved_div = stn.division.division_code
+            if stn.division.zone:
+                resolved_zone = stn.division.zone.zone_code
+
+    if not grouped:
         sample_live = [
             {
-                "time": now.strftime("%H:%M:%S"),
+                "time": eff_to_dt.strftime("%H:%M:%S"),
                 "Avg_Current": 3.18,
                 "Peak_Current": 7.50,
                 "Battery_Voltage": 12.39,
@@ -662,18 +895,18 @@ def get_telemetry_history(
             }
         ]
         empty_response = TelemetryHistoryResponse(
-            Zone="NR",
-            Division="PRYG",
-            Asset_Type="Point Machine",
-            Asset_No=asset_number_hex or "PT-101",
-            Time=now.strftime("%H:%M:%S"),
+            Zone=resolved_zone,
+            Division=resolved_div,
+            Asset_Type=asset_type or "Point Machine",
+            Asset_No=asset_no or asset_number_hex or "PT-101",
+            Time=eff_to_dt.strftime("%H:%M:%S"),
             Status="Predictive",
             live_data=sample_live,
-            station_id=station_id,
-            station_name=stn_name,
-            asset_number=asset_number_hex,
-            from_time=from_time.isoformat(),
-            to_time=to_time.isoformat(),
+            station_id=eff_station_id,
+            station_name=resolved_stn_name,
+            asset_number=asset_no or asset_number_hex,
+            from_time=eff_from_dt.isoformat(),
+            to_time=eff_to_dt.isoformat(),
             columns=[],
             total=0,
             page=page,
@@ -687,23 +920,12 @@ def get_telemetry_history(
             "data": empty_response
         }
 
-    columns, all_rows = _build_history_columns_and_rows(db, gateway_map, grouped, station_id)
+    columns, all_rows = _build_history_columns_and_rows(db, gateway_map, grouped, eff_station_id)
 
     total = len(all_rows)
     total_pages = (total + page_size - 1) // page_size if total else 0
     offset = (page - 1) * page_size
     paginated_rows = all_rows[offset: offset + page_size]
-
-    stn_name = None
-    zone_code = "NR"
-    div_code = "PRYG"
-    if station_id:
-        stn = db.query(Station).filter(Station.id == station_id).first()
-        stn_name = stn.station_name if stn else None
-        if stn and stn.division:
-            div_code = stn.division.division_code
-            if stn.division.zone:
-                zone_code = stn.division.zone.zone_code
 
     live_data_list = []
     for r in paginated_rows:
@@ -714,18 +936,18 @@ def get_telemetry_history(
         live_data_list.append(row_item)
 
     response_data = TelemetryHistoryResponse(
-        Zone=zone_code,
-        Division=div_code,
-        Asset_Type="Point Machine",
-        Asset_No=asset_number_hex or "PT-101",
+        Zone=resolved_zone,
+        Division=resolved_div,
+        Asset_Type=asset_type or "Point Machine",
+        Asset_No=asset_no or asset_number_hex or "PT-101",
         Time=datetime.now().strftime("%H:%M:%S"),
         Status="Predictive",
         live_data=live_data_list,
-        station_id=station_id,
-        station_name=stn_name,
-        asset_number=asset_number_hex,
-        from_time=from_time.isoformat(),
-        to_time=to_time.isoformat(),
+        station_id=eff_station_id,
+        station_name=resolved_stn_name,
+        asset_number=asset_no or asset_number_hex,
+        from_time=eff_from_dt.isoformat(),
+        to_time=eff_to_dt.isoformat(),
         columns=columns,
         total=total,
         page=page,
@@ -743,33 +965,81 @@ def get_telemetry_history(
 @router.get("/history/download")
 def download_telemetry_history(
     station_id:       Optional[int]      = Query(None),
-    asset_number_hex: Optional[str]      = Query(None),
-    parameter_type_hex: Optional[str]    = Query(None),
-    from_time:        Optional[datetime] = Query(None),
-    to_time:          Optional[datetime] = Query(None),
+    station_code:     Optional[str]      = Query(None, description="Station code, e.g. 'LKO'"),
+    zone_code:        Optional[str]      = Query(None, description="Zone code, e.g. 'NR'"),
+    division_code:    Optional[str]      = Query(None, description="Division code, e.g. 'LKO'"),
+    asset_type:       Optional[str]      = Query(None, description="Asset type name or display group name"),
+    asset_no:         Optional[str]      = Query(None, description="Asset number code, e.g. 'PT-101'"),
+    asset_number_hex: Optional[str]      = Query(None, description="Asset number hex, e.g. '01'"),
+    parameter_type:   Optional[str]      = Query(None, description="Parameter type name or code"),
+    parameter_type_hex: Optional[str]    = Query(None, description="Filter to one parameter type hex"),
+    from_date:        Optional[str]      = Query(None, description="Start date DD/MM/YYYY or YYYY-MM-DD"),
+    from_time:        Optional[str]      = Query(None, description="Start time HH:MM:SS or ISO string"),
+    to_date:          Optional[str]      = Query(None, description="End date DD/MM/YYYY or YYYY-MM-DD"),
+    to_time:          Optional[str]      = Query(None, description="End time HH:MM:SS or ISO string"),
     db:               Session            = Depends(get_db),
 ):
     """
     Download Telemetry History as CSV.
     Same filters as GET /telemetry/history — no pagination, returns all rows up to 20,000.
-
-    Used by the Download button on the Telemetry History screen.
     """
     from datetime import date as date_type
-    now = datetime.utcnow()
-    if from_time is None:
-        from_time = now - timedelta(hours=24)
-    if to_time is None:
-        to_time = now
+    
+    eff_from_dt = None
+    eff_to_dt = None
+    
+    if from_date:
+        if from_time:
+            if ":" in from_time and "T" not in from_time:
+                eff_from_dt = _parse_telemetry_datetime(f"{from_date} {from_time}", datetime.utcnow())
+            else:
+                eff_from_dt = _parse_telemetry_datetime(from_time, datetime.utcnow())
+        else:
+            eff_from_dt = _parse_telemetry_datetime(from_date, datetime.utcnow() - timedelta(hours=24))
+    else:
+        if from_time:
+            eff_from_dt = _parse_telemetry_datetime(from_time, datetime.utcnow() - timedelta(hours=24))
+        else:
+            eff_from_dt = datetime.utcnow() - timedelta(hours=24)
+
+    if to_date:
+        if to_time:
+            if ":" in to_time and "T" not in to_time:
+                eff_to_dt = _parse_telemetry_datetime(f"{to_date} {to_time}", datetime.utcnow())
+            else:
+                eff_to_dt = _parse_telemetry_datetime(to_time, datetime.utcnow())
+        else:
+            parsed_date = _parse_telemetry_datetime(to_date, datetime.utcnow())
+            eff_to_dt = datetime.combine(parsed_date.date(), datetime.max.time())
+    else:
+        if to_time:
+            eff_to_dt = _parse_telemetry_datetime(to_time, datetime.utcnow())
+        else:
+            eff_to_dt = datetime.utcnow()
 
     gateway_map, grouped = _fetch_history_data(
-        db, station_id,
-        asset_number_hex, parameter_type_hex,
-        from_time, to_time,
+        db=db,
+        station_id=station_id,
+        station_code=station_code,
+        zone_code=zone_code,
+        division_code=division_code,
+        asset_type=asset_type,
+        asset_no=asset_no,
+        asset_number_hex=asset_number_hex,
+        parameter_type=parameter_type,
+        parameter_type_hex=parameter_type_hex,
+        from_time=eff_from_dt,
+        to_time=eff_to_dt,
         limit=20000,
     )
 
-    columns, all_rows = _build_history_columns_and_rows(db, gateway_map, grouped, station_id)
+    eff_station_id = station_id
+    if not eff_station_id and station_code:
+        stn = db.query(Station.id).filter(Station.station_code == station_code.upper()).first()
+        if stn:
+            eff_station_id = stn.id
+
+    columns, all_rows = _build_history_columns_and_rows(db, gateway_map, grouped, eff_station_id)
 
     output = io.StringIO()
     writer = csv.writer(output)
