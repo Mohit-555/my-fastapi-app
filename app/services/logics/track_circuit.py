@@ -1,9 +1,12 @@
+import logging
 from typing import Dict, List
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.models.models import Telemetry, Asset
 from app.services.alert_engine import AlertType
 from app.services.parameter_config_service import param_config_service
+
+logger = logging.getLogger(__name__)
 
 class TrackCircuitLogics:
     """Implementation of Track Circuit logics from Annexure C §2.3"""
@@ -51,7 +54,10 @@ class TrackCircuitLogics:
         
         # Logic 1: Track Circuit predictive Alert - TFC input voltage Low
         if param_config.parameter_representation_code == "VTC TFC IP":
-            threshold = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe if param_config.min_safe is not None else float('inf'))
+            if param_config.min_safe is None:
+                logger.debug("Track Circuit TFC IP: min_safe not configured, skipping alert")
+                return alerts
+            threshold = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe)
             if value < threshold:
                 alerts.append({
                     "cause_code": "TC_TFC_IP_VOLT_LOW",
@@ -61,7 +67,10 @@ class TrackCircuitLogics:
         
         # Logic 2: Track Circuit predictive Alert - TFC output voltage Low
         elif param_config.parameter_representation_code == "VTC TFC O/P":
-            threshold = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe if param_config.min_safe is not None else float('inf'))
+            if param_config.min_safe is None:
+                logger.debug("Track Circuit TFC O/P: min_safe not configured, skipping alert")
+                return alerts
+            threshold = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe)
             if value < threshold:
                 alerts.append({
                     "cause_code": "TC_TFC_OP_VOLT_LOW",
@@ -71,6 +80,9 @@ class TrackCircuitLogics:
         
         # Logic 3: Track Circuit predictive Alert - Battery charging current high/low
         elif param_config.parameter_representation_code == "ITC BATT CHARG":
+            if param_config.max_safe is None and param_config.min_safe is None:
+                logger.debug("Track Circuit ITC BATT CHARG: max_safe/min_safe not configured, skipping alert")
+                return alerts
             if param_config.max_safe is not None and value > param_config.max_safe:
                 alerts.append({
                     "cause_code": "TC_BT_CHG_CURR_HIGH",
@@ -86,8 +98,11 @@ class TrackCircuitLogics:
         
         # Logic 4 & 5: Track Circuit predictive Alert - Track Relay voltage low/high
         elif param_config.parameter_representation_code == "VTC TR":
+            if param_config.min_safe is None or param_config.max_safe is None:
+                logger.debug("Track Circuit VTC TR: min_safe/max_safe not configured, skipping alert")
+                return alerts
             # Low check
-            threshold_low = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe if param_config.min_safe is not None else float('inf'))
+            threshold_low = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe)
             if value < threshold_low:
                 alerts.append({
                     "cause_code": "TC_TR_VOLT_LOW",
@@ -95,7 +110,7 @@ class TrackCircuitLogics:
                     "alert_type": AlertType.PREDICTIVE
                 })
             # High check
-            threshold_high = max(avg_value * (TrackCircuitLogics.HD1 / 100), param_config.max_safe if param_config.max_safe is not None else 0.0)
+            threshold_high = max(avg_value * (TrackCircuitLogics.HD1 / 100), param_config.max_safe)
             if value > threshold_high:
                 alerts.append({
                     "cause_code": "TC_TR_OVER_ENERIZATION",

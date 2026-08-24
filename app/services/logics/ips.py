@@ -1,9 +1,12 @@
+import logging
 from typing import Dict, List
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.models.models import Telemetry, Asset
 from app.services.alert_engine import AlertType
 from app.services.parameter_config_service import param_config_service
+
+logger = logging.getLogger(__name__)
 
 class IPSLogics:
     """Implementation of IPS logics from Annexure C §2.1"""
@@ -45,7 +48,10 @@ class IPSLogics:
         
         # Check all IPS voltage outputs
         if "VIPS" in param_config.parameter_representation_code or "IIPS" in param_config.parameter_representation_code:
-            threshold = min(avg_value * (IPSLogics.LD / 100), param_config.min_safe if param_config.min_safe is not None else float('inf'))
+            if param_config.min_safe is None:
+                logger.debug("IPS: min_safe not configured, skipping alert")
+                return alerts
+            threshold = min(avg_value * (IPSLogics.LD / 100), param_config.min_safe)
             if value < threshold:
                 # Map to appropriate cause code
                 cause_map = {

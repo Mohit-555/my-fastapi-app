@@ -1,9 +1,12 @@
+import logging
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.models.models import Telemetry, Asset
 from app.services.alert_engine import AlertType
 from app.services.parameter_config_service import param_config_service
+
+logger = logging.getLogger(__name__)
 
 class PointMachineLogics:
     """Implementation of Point Machine logics from Annexure C §2.2"""
@@ -51,7 +54,10 @@ class PointMachineLogics:
         if para_id.startswith("0001") or param_config.parameter_representation_code in ["VPT 110 DC LOC N", "IPT N"]:
             # Check for normal operation voltage/current low
             if param_config.parameter_representation_code in ["VPT 110 DC LOC N", "IPT N"]:
-                threshold = min(avg_value * (PointMachineLogics.LD1 / 100), param_config.min_safe if param_config.min_safe is not None else float('inf'))
+                if param_config.min_safe is None:
+                    logger.debug("Point Machine IPT/N: min_safe not configured, skipping alert")
+                    return alerts
+                threshold = min(avg_value * (PointMachineLogics.LD1 / 100), param_config.min_safe)
                 
                 if value < threshold:
                     alerts.append({
@@ -62,7 +68,10 @@ class PointMachineLogics:
             
             # Logic 2: Predictive Alert - Reverse Voltage/Current Low at Loc
             elif param_config.parameter_representation_code in ["VPT 110 DC LOC R", "IPT R"]:
-                threshold = min(avg_value * (PointMachineLogics.LD1 / 100), param_config.min_safe if param_config.min_safe is not None else float('inf'))
+                if param_config.min_safe is None:
+                    logger.debug("Point Machine IPT/R: min_safe not configured, skipping alert")
+                    return alerts
+                threshold = min(avg_value * (PointMachineLogics.LD1 / 100), param_config.min_safe)
                 
                 if value < threshold:
                     alerts.append({
