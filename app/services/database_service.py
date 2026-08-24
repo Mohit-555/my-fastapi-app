@@ -72,9 +72,9 @@ class DatabaseService:
                 db.add_all(records)
                 db.commit()
                 logger.debug(f"Stored {len(values)} values for {para_id}")
-            except Exception as e:
+            except Exception:
                 db.rollback()
-                logger.error(f"Error storing parameter history for {para_id}: {e}")
+                logger.exception(f"Error storing parameter history for {para_id}")
                 raise
     
     # ============ Alerts ============
@@ -116,9 +116,9 @@ class DatabaseService:
                 db.refresh(db_alert)
                 logger.info(f"Stored alert {db_alert.id}: {alert.cause_code}")
                 return db_alert.id
-            except Exception as e:
+            except Exception:
                 db.rollback()
-                logger.error(f"Error storing alert: {e}")
+                logger.exception("Error storing alert")
                 raise
     
     async def update_alert_feedback(
@@ -141,9 +141,9 @@ class DatabaseService:
                     logger.info(f"Updated alert {alert_id} with feedback: {feedback.value}")
                 else:
                     logger.warning(f"Alert {alert_id} not found for updating feedback")
-            except Exception as e:
+            except Exception:
                 db.rollback()
-                logger.error(f"Error updating alert {alert_id}: {e}")
+                logger.exception(f"Error updating alert {alert_id}")
                 raise
     
     async def get_active_alerts(
@@ -186,8 +186,8 @@ class DatabaseService:
                         "maintainer_mobile": row.mobile
                     })
                 return results
-            except Exception as e:
-                logger.error(f"Error getting active alerts: {e}")
+            except Exception:
+                logger.exception("Error getting active alerts")
                 return []
     
     # ============ Asset Management ============
@@ -214,8 +214,8 @@ class DatabaseService:
                             "prloc": asset.prloc
                         }
                 return None
-            except Exception as e:
-                logger.error(f"Error getting asset for para_id {para_id}: {e}")
+            except Exception:
+                logger.exception(f"Error getting asset for para_id {para_id}")
                 return None
     
     # ============ Health ============
@@ -236,8 +236,8 @@ class DatabaseService:
                 # Keep gateway's associated information updated
                 db.commit()
                 logger.debug(f"Updated gateway health for {stngw_id}: {is_healthy}")
-            except Exception as e:
-                logger.error(f"Error updating gateway health {stngw_id}: {e}")
+            except Exception:
+                logger.exception(f"Error updating gateway health {stngw_id}")
     
     async def update_sensor_health(
         self, 

@@ -90,8 +90,8 @@ class StatisticsService:
                 
                 return stats
                 
-            except Exception as e:
-                logger.error(f"Error calculating alert statistics: {e}")
+            except Exception:
+                logger.exception("Error calculating alert statistics")
                 return {}
     
     async def calculate_asset_availability(
@@ -146,8 +146,8 @@ class StatisticsService:
                 availability = ((total_seconds - downtime_seconds) / total_seconds) * 100
                 return max(0.0, min(100.0, availability))
                 
-            except Exception as e:
-                logger.error(f"Error calculating asset availability: {e}")
+            except Exception:
+                logger.exception("Error calculating asset availability")
                 return 0.0
     
     async def calculate_mtbf(
@@ -191,8 +191,8 @@ class StatisticsService:
                 mtbf = total_time / (len(rows) - 1)
                 return mtbf / 3600  # Convert to hours
                 
-            except Exception as e:
-                logger.error(f"Error calculating MTBF: {e}")
+            except Exception:
+                logger.exception("Error calculating MTBF")
                 return 0.0
     
     async def calculate_performance_metrics(
@@ -238,8 +238,8 @@ class StatisticsService:
                 "availability": avg_availability
             }
             
-        except Exception as e:
-            logger.error(f"Error calculating performance metrics: {e}")
+        except Exception:
+            logger.exception("Error calculating performance metrics")
             return {
                 "fail_alert_per": 0.0,
                 "pred_alert_per": 0.0,

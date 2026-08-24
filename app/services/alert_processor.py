@@ -44,8 +44,8 @@ class AlertProcessor:
                 await asyncio.sleep(self.processing_interval)
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error(f"Error in alert processor: {e}")
+            except Exception:
+                logger.exception("Error in alert processor daemon loop")
                 await asyncio.sleep(30)  # Wait before retry
     
     async def stop(self):
@@ -138,15 +138,15 @@ class AlertProcessor:
                             try:
                                 from app.routers.alerts import _broadcast_alert_update
                                 _broadcast_alert_update(alert)
-                            except Exception as e:
-                                logger.error(f"Error broadcasting alert {alert.id}: {e}")
+                            except Exception:
+                                logger.exception(f"Error broadcasting alert {alert.id}")
                     
                     # Mark as processed
                     telemetry.is_processed = True
                     processed_count += 1
                     
-                except Exception as e:
-                    logger.error(f"Error processing telemetry {telemetry.id}: {e}")
+                except Exception:
+                    logger.exception(f"Error processing telemetry {telemetry.id}")
                     # Mark as processed to prevent infinite loops on malformed rows
                     telemetry.is_processed = True
             
@@ -158,8 +158,8 @@ class AlertProcessor:
             if processed_count > 0:
                 logger.info(f"Processed {processed_count} telemetry records, generated {alert_count} alerts")
             
-        except Exception as e:
-            logger.error(f"Error in alert processor batch: {e}")
+        except Exception:
+            logger.exception("Error in alert processor batch execution")
             db.rollback()
         finally:
             db.close()
