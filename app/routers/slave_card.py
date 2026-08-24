@@ -6,10 +6,85 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
-from app.models.models import SlaveCard, Gateway, Station, Division, Zone, AssetParameter
+from app.models.models import SlaveCard, Gateway, Station, Division, Zone, AssetParameter, User
 from app.models.schemas import SlaveCardCreate, SlaveCardUpdate, SlaveCardResponse, SlaveCardListResponse, StandardResponse
+from app.auth_utils import get_current_user
 
 router = APIRouter(prefix="/slave-cards", tags=["Slave Card Management"])
+
+
+def _check_slave_card_ownership(slave_card_id: int, user: User, db: Session, action: str = "read") -> SlaveCard:
+    """Fetch slave card and verify user has division/zone station access and write permission."""
+    card = db.query(SlaveCard).filter(SlaveCard.id == slave_card_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail=f"Slave Card {slave_card_id} not found")
+
+    # If action is write, block Guest / Auditor roles (level >= 7)
+    if action == "write" and user.role and user.role.level >= 7:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Guest and Auditor roles are not permitted to perform this action."
+        )
+
+    # Check division/zone access
+    gateway = db.query(Gateway).filter(Gateway.id == card.gateway_id).first()
+    if not gateway:
+        raise HTTPException(status_code=404, detail="Gateway associated with this slave card not found")
+
+    station = db.query(Station).filter(Station.id == gateway.station_id).first()
+    if not station:
+        raise HTTPException(status_code=404, detail="Station associated with this slave card not found")
+
+    if user.division_id is not None:
+        if station.division_id != user.division_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: User division does not match the slave card station division."
+            )
+
+    if user.zone_id is not None:
+        division = db.query(Division).filter(Division.id == station.division_id).first()
+        if not division or division.zone_id != user.zone_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: User zone does not match the slave card station zone."
+            )
+
+    return card
+
+
+def _check_gateway_ownership(gateway_id: int, user: User, db: Session, action: str = "read"):
+    """Verify user is authorized to access/modify a gateway/master card."""
+    # If action is write, block Guest / Auditor roles (level >= 7)
+    if action == "write" and user.role and user.role.level >= 7:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Guest and Auditor roles are not permitted to perform this action."
+        )
+
+    gateway = db.query(Gateway).filter(Gateway.id == gateway_id).first()
+    if not gateway:
+        raise HTTPException(status_code=404, detail=f"Gateway with ID {gateway_id} not found")
+
+    station = db.query(Station).filter(Station.id == gateway.station_id).first()
+    if not station:
+        raise HTTPException(status_code=404, detail="Station associated with this gateway not found")
+
+    if user.division_id is not None:
+        if station.division_id != user.division_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: User division does not match the gateway station division."
+            )
+
+    if user.zone_id is not None:
+        division = db.query(Division).filter(Division.id == station.division_id).first()
+        if not division or division.zone_id != user.zone_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: User zone does not match the gateway station zone."
+            )
+
 
 @router.get("", response_model=StandardResponse[SlaveCardListResponse])
 def list_slave_cards(
@@ -27,28 +102,50 @@ def list_slave_cards(
     limit: Optional[int] = Query(None, ge=1, le=500, description="Alias for page_size"),
     offset: Optional[int] = Query(None, ge=0, description="Row offset for pagination"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """List all configured Slave Cards with comprehensive filtering and pagination."""
     q_db = db.query(SlaveCard)
 
     search_term = search or q
 
-    # Determine if joins are needed
-    need_gateway_join = (
-        stngw_id is not None or
-        station_id is not None or
-        division_id is not None or
-        zone_id is not None or
-        search_term is not None
-    )
+    joined_gateway = False
+    joined_station = False
+    joined_division = False
 
-    if need_gateway_join:
-        q_db = q_db.join(Gateway, SlaveCard.gateway_id == Gateway.id)
+    def join_gateway():
+        nonlocal q_db, joined_gateway
+        if not joined_gateway:
+            q_db = q_db.join(Gateway, SlaveCard.gateway_id == Gateway.id)
+            joined_gateway = True
+
+    def join_station():
+        nonlocal q_db, joined_station
+        join_gateway()
+        if not joined_station:
+            q_db = q_db.join(Station, Gateway.station_id == Station.id)
+            joined_station = True
+
+    def join_division():
+        nonlocal q_db, joined_division
+        join_station()
+        if not joined_division:
+            q_db = q_db.join(Division, Station.division_id == Division.id)
+            joined_division = True
+
+    # First restrict list to user division/zone
+    if current_user.division_id is not None:
+        join_station()
+        q_db = q_db.filter(Station.division_id == current_user.division_id)
+    elif current_user.zone_id is not None:
+        join_division()
+        q_db = q_db.filter(Division.zone_id == current_user.zone_id)
 
     if gateway_id is not None:
         q_db = q_db.filter(SlaveCard.gateway_id == gateway_id)
 
     if stngw_id:
+        join_gateway()
         q_db = q_db.filter(Gateway.stngw_id.ilike(f"%{stngw_id.strip()}%"))
 
     if card_address:
@@ -58,17 +155,19 @@ def list_slave_cards(
         q_db = q_db.filter(SlaveCard.card_type.ilike(f"%{card_type.strip()}%"))
 
     if station_id is not None:
+        join_gateway()
         q_db = q_db.filter(Gateway.station_id == station_id)
 
-    if division_id is not None or zone_id is not None:
-        q_db = q_db.join(Station, Gateway.station_id == Station.id)
-        if division_id is not None:
-            q_db = q_db.filter(Station.division_id == division_id)
-        if zone_id is not None:
-            q_db = q_db.join(Division, Station.division_id == Division.id)
-            q_db = q_db.filter(Division.zone_id == zone_id)
+    if division_id is not None:
+        join_station()
+        q_db = q_db.filter(Station.division_id == division_id)
+
+    if zone_id is not None:
+        join_division()
+        q_db = q_db.filter(Division.zone_id == zone_id)
 
     if search_term:
+        join_gateway()
         term = f"%{search_term.strip()}%"
         q_db = q_db.filter(
             or_(
@@ -106,27 +205,29 @@ def list_slave_cards(
 
 
 @router.get("/{slave_card_id}", response_model=StandardResponse[SlaveCardResponse])
-def get_slave_card(slave_card_id: int, db: Session = Depends(get_db)):
+def get_slave_card(
+    slave_card_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Retrieve details of a single Slave Card."""
-    card = db.query(SlaveCard).filter(SlaveCard.id == slave_card_id).first()
-    if not card:
-        raise HTTPException(status_code=404, detail=f"Slave Card {slave_card_id} not found")
+    card = _check_slave_card_ownership(slave_card_id, current_user, db, action="read")
     return {
         "status": True,
         "message": "Success",
         "data": card
     }
 
+
 @router.post("", response_model=StandardResponse[SlaveCardResponse], status_code=status.HTTP_201_CREATED)
-def create_slave_card(payload: SlaveCardCreate, db: Session = Depends(get_db)):
+def create_slave_card(
+    payload: SlaveCardCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Add/configure a new Slave Card under a Master Card/Gateway."""
-    # 1. Validate Gateway exists
-    gw = db.query(Gateway).filter(Gateway.id == payload.gateway_id).first()
-    if not gw:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Gateway with ID {payload.gateway_id} not found"
-        )
+    # 1. Validate Gateway exists and check user's ownership
+    _check_gateway_ownership(payload.gateway_id, current_user, db, action="write")
     
     # 2. Uppercase card address (e.g. "81" or "8A")
     card_addr = payload.card_address.strip().upper()
@@ -164,23 +265,21 @@ def create_slave_card(payload: SlaveCardCreate, db: Session = Depends(get_db)):
         "data": card
     }
 
+
 @router.put("/{slave_card_id}", response_model=StandardResponse[SlaveCardResponse])
 def update_slave_card(
     slave_card_id: int,
     payload: SlaveCardUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update configurations of a Slave Card."""
-    card = db.query(SlaveCard).filter(SlaveCard.id == slave_card_id).first()
-    if not card:
-        raise HTTPException(status_code=404, detail=f"Slave Card {slave_card_id} not found")
+    card = _check_slave_card_ownership(slave_card_id, current_user, db, action="write")
         
     data = payload.model_dump(exclude_unset=True)
     
     if "gateway_id" in data:
-        gw = db.query(Gateway).filter(Gateway.id == data["gateway_id"]).first()
-        if not gw:
-            raise HTTPException(status_code=404, detail=f"Gateway {data['gateway_id']} not found")
+        _check_gateway_ownership(data["gateway_id"], current_user, db, action="write")
             
     if "card_address" in data:
         data["card_address"] = data["card_address"].strip().upper()
@@ -221,12 +320,15 @@ def update_slave_card(
         "data": card
     }
 
+
 @router.delete("/{slave_card_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_slave_card(slave_card_id: int, db: Session = Depends(get_db)):
+def delete_slave_card(
+    slave_card_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Permanently delete a Slave Card. Referenced Channels will have their slave_card_id set to NULL."""
-    card = db.query(SlaveCard).filter(SlaveCard.id == slave_card_id).first()
-    if not card:
-        raise HTTPException(status_code=404, detail=f"Slave Card {slave_card_id} not found")
+    card = _check_slave_card_ownership(slave_card_id, current_user, db, action="write")
         
     # Unlink Channels referencing this slave card
     db.query(AssetParameter).filter(AssetParameter.slave_card_id == slave_card_id).update(
@@ -235,3 +337,4 @@ def delete_slave_card(slave_card_id: int, db: Session = Depends(get_db)):
     
     db.delete(card)
     db.commit()
+
