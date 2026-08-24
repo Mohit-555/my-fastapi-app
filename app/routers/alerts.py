@@ -49,6 +49,32 @@ ALERT_TYPE_ALIASES = {
 }
 
 
+# ---------------------------------------------------------------------------
+# CSV safety helpers
+# ---------------------------------------------------------------------------
+_FORMULA_CHARS = frozenset("=+-@\t\r")
+
+
+def _csv_safe(value: Optional[str]) -> str:
+    """Prefix formula-trigger characters so Excel/Sheets won't evaluate them."""
+    if not value:
+        return value or ""
+    if value[0] in _FORMULA_CHARS:
+        return "'" + value
+    return value
+
+
+# ---------------------------------------------------------------------------
+# LIKE wildcard escaping helper
+# ---------------------------------------------------------------------------
+def _escape_like(value: str) -> str:
+    """Escape SQL LIKE wildcards (%, _) in user-supplied search strings."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+# ---------------------------------------------------------------------------
+# Shared string utilities
+# ---------------------------------------------------------------------------
 def _blank_to_none(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
@@ -216,7 +242,7 @@ def _base_summary_query(
             q = q.filter(AlertEvent.asset_type_hex.in_(asset_hexes))
 
     if asset_no:
-        q = q.filter(func.lower(AlertEvent.asset_no).like(f"%{asset_no.lower()}%"))
+        q = q.filter(func.lower(AlertEvent.asset_no).like(f"%{_escape_like(asset_no.lower())}%", escape="\\"))
     if cause:
         q = q.filter(func.lower(AlertEvent.cause) == cause.lower())
 
@@ -358,7 +384,7 @@ def _base_history_query(
             q = q.filter(AlertEvent.asset_type_hex.in_(asset_hexes))
 
     if asset_no:
-        q = q.filter(func.lower(AlertEvent.asset_no).like(f"%{asset_no.lower()}%"))
+        q = q.filter(func.lower(AlertEvent.asset_no).like(f"%{_escape_like(asset_no.lower())}%", escape="\\"))
     if cause:
         q = q.filter(func.lower(AlertEvent.cause) == cause.lower())
     if feedback:
@@ -753,7 +779,8 @@ def _download_alert_summary_response(rows: List[AlertSummaryRow]) -> StreamingRe
             row.alert_type,
             row.asset_type,
             row.asset_no,
-            row.cause,
+            # Sanitize user-controllable free-text fields against CSV formula injection
+            _csv_safe(row.cause),
             row.total,
             row.true,
             row.partially_true,
@@ -846,8 +873,7 @@ def download_alert_history(
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
     alert_type: Optional[str] = Query(None),
-    asset_type_hex: Optional[str] = Query(None),
-    asset_type: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),  # Resolved via _resolve_asset_types_to_hex
     asset_no: Optional[str] = Query(None),
     cause: Optional[str] = Query(None),
     feedback: Optional[str] = Query(None),
@@ -859,10 +885,21 @@ def download_alert_history(
     limit: int = Query(5000, le=20000),
     db: Session = Depends(get_db),
 ):
-    """Download the Alert History report as CSV."""
+    """Download the Alert History report as CSV.
+
+    Bug fix: previously passed 18 positional args (asset_type_hex + asset_type) to
+    _base_history_query which only accepts 17, shifting every downstream arg by one
+    slot and causing a TypeError on every call. Fixed by resolving asset_type to a
+    hex string first (matching all other history/summary endpoints) and passing
+    exactly 17 args in the correct positions.
+    """
+    # Resolve display-group / hex / DB-id to a raw hex string, consistent with
+    # every other endpoint in this file.
+    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
+
     raw_rows = _base_history_query(
         db, zone_id, division_id, station_id, None, None, None, alert_type,
-        asset_type_hex, asset_type, asset_no, cause, feedback, alert_status,
+        asset_type_hex, asset_no, cause, feedback, alert_status,
         from_date, from_time, to_date, to_time,
     ).limit(limit).all()
     rows = _history_rows(raw_rows)
@@ -876,6 +913,9 @@ def download_alert_history(
         "MAINTAINER NAME", "DESIGNATION", "MOBILE", "REMARKS",
     ])
     for row in rows:
+        # Sanitize user-controllable free-text fields against CSV formula injection.
+        # Fields written by operators (remark, maintainer_name, designation) may
+        # contain leading =, +, -, @ which Excel/Sheets interprets as formulas.
         writer.writerow([
             row.sr,
             row.zone,
@@ -885,16 +925,16 @@ def download_alert_history(
             row.asset_type,
             row.asset_no,
             row.alert_status,
-            row.cause,
-            row.feedback or "",
+            _csv_safe(row.cause),
+            _csv_safe(row.feedback) if row.feedback else "",
             row.incidence_date_time,
             row.rectification_date_time or "",
             row.duration_min if row.duration_min is not None else "",
             row.feedback_date_time or "",
-            row.maintainer_name or "",
-            row.designation or "",
+            _csv_safe(row.maintainer_name) if row.maintainer_name else "",
+            _csv_safe(row.designation) if row.designation else "",
             row.mobile or "",
-            row.remarks or "",
+            _csv_safe(row.remarks) if row.remarks else "",
         ])
     output.seek(0)
 
@@ -1316,7 +1356,7 @@ def list_alert_events(
         elif len(hex_list) > 1:
             q = q.filter(AlertEvent.asset_type_hex.in_(hex_list))
     if _blank_to_none(asset_no):
-        q = q.filter(func.lower(AlertEvent.asset_no).like(f"%{asset_no.lower()}%"))
+        q = q.filter(func.lower(AlertEvent.asset_no).like(f"%{_escape_like(asset_no.lower())}%", escape="\\"))
     if _blank_to_none(cause):
         q = q.filter(func.lower(AlertEvent.cause) == cause.lower())
     total = q.count()
@@ -1435,7 +1475,13 @@ def create_alert_event(payload: AlertEventCreate, db: Session = Depends(get_db))
 
 
 @router.post("/{event_id}/feedback", response_model=StandardResponse[AlertEventResponse])
-def update_alert_feedback(event_id: int, payload: AlertFeedbackUpdate, db: Session = Depends(get_db)):
+def update_alert_feedback(
+    event_id: int,
+    payload: AlertFeedbackUpdate,
+    db: Session = Depends(get_db),
+    # TODO: add authorization check — verify calling user is assigned to this
+    # alert's station or has a role permitted to submit feedback.
+):
     """Set operator feedback for an alert event."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
     if not record:
@@ -1470,7 +1516,13 @@ def update_alert_feedback(event_id: int, payload: AlertFeedbackUpdate, db: Sessi
 
 
 @router.post("/{event_id}/remark", response_model=StandardResponse[AlertEventResponse])
-def update_alert_remark(event_id: int, payload: AlertRemarkUpdate, db: Session = Depends(get_db)):
+def update_alert_remark(
+    event_id: int,
+    payload: AlertRemarkUpdate,
+    db: Session = Depends(get_db),
+    # TODO: add authorization check — any authenticated user can currently remark
+    # on any alert regardless of zone/station ownership.
+):
     """Set or replace remarks for an alert event."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
     if not record:
@@ -1488,7 +1540,12 @@ def update_alert_remark(event_id: int, payload: AlertRemarkUpdate, db: Session =
 
 
 @router.post("/{event_id}/acknowledge", response_model=StandardResponse[AlertEventResponse])
-def acknowledge_alert(event_id: int, db: Session = Depends(get_db)):
+def acknowledge_alert(
+    event_id: int,
+    db: Session = Depends(get_db),
+    # TODO: add authorization check — any authenticated user can currently
+    # acknowledge any alert regardless of zone/station ownership.
+):
     """Acknowledge a live alert without clearing/rectifying it."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
     if not record:
@@ -1512,6 +1569,8 @@ def update_alert_rectification(
     event_id: int,
     payload: AlertRectificationUpdate,
     db: Session = Depends(get_db),
+    # TODO: add authorization check — any authenticated user can currently clear/
+    # rectify any alert regardless of role or zone/station ownership.
 ):
     """Mark an alert as rectified/cleared and store maintainer details."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
@@ -1544,8 +1603,30 @@ def update_alert_rectification(
     }
 
 
+# Fields that are genuinely nullable on AlertEvent — only these may be set to
+# null via PATCH/PUT. Required DB columns (station_id, asset_no, alert_type, …)
+# are NOT in this set; sending null for them returns HTTP 400.
+_NULLABLE_ALERT_FIELDS = frozenset({
+    "feedback",
+    "remark",
+    "rectification_time",
+    "feedback_time",
+    "maintainer_name",
+    "designation",
+    "mobile",
+    "escalation_level",
+    "escalated_at",
+})
+
+
 @router.put("/events/{event_id}", response_model=StandardResponse[AlertEventResponse])
-def update_alert_event(event_id: int, payload: AlertEventUpdate, db: Session = Depends(get_db)):
+def update_alert_event(
+    event_id: int,
+    payload: AlertEventUpdate,
+    db: Session = Depends(get_db),
+    # TODO: add authorization check — any authenticated user can currently edit
+    # any alert event regardless of role or zone/station ownership.
+):
     """Update a raw alert event."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
     if not record:
@@ -1554,6 +1635,12 @@ def update_alert_event(event_id: int, payload: AlertEventUpdate, db: Session = D
 
     for field, value in payload.model_dump(exclude_unset=True).items():
         if value is None:
+            # Guard: prevent nulling required (NOT NULL) database columns.
+            if field not in _NULLABLE_ALERT_FIELDS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Field '{field}' is required and cannot be set to null.",
+                )
             setattr(record, field, value)
         elif field in {"alert_type", "alert_status"}:
             setattr(record, field, value.strip().title())
@@ -1577,7 +1664,9 @@ def update_alert_event(event_id: int, payload: AlertEventUpdate, db: Session = D
 def escalate_alert(
     event_id: int,
     target_level: Optional[str] = Query(None, regex="^(JE|SSE|ASTE|DSTE)$"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    # TODO: add authorization check — any authenticated user can currently escalate
+    # any alert regardless of role or zone/station ownership.
 ):
     """Escalate an alert event to the next hierarchy level (JE -> SSE -> ASTE -> DSTE)."""
     record = db.query(AlertEvent).filter(AlertEvent.id == event_id).first()
@@ -1585,9 +1674,9 @@ def escalate_alert(
         raise HTTPException(status_code=404, detail=f"Alert event {event_id} not found")
         
     hierarchy = ["JE", "SSE", "ASTE", "DSTE"]
-    
-    if target_level and not isinstance(target_level, str):
-        target_level = None
+    # NOTE: the isinstance check previously here was dead code — target_level is
+    # typed Optional[str] with a regex validator so it can only ever be None or
+    # a valid string. Removed.
 
     if target_level:
         escalate_to = target_level
