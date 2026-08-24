@@ -28,6 +28,7 @@ async def get_performance_module_report(
     zone: Optional[List[str]] = Query(None, description="Zone codes"),
     division: Optional[List[str]] = Query(None, description="Division codes"),
     station: Optional[List[str]] = Query(None, description="Station codes"),
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_number: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=500, description="Page size"),
     db: Session = Depends(get_db)
@@ -36,6 +37,9 @@ async def get_performance_module_report(
     Performance Module API — /performance and /api/performance.
     Returns 3 KPI top average percentages and station-wise performance rows in one call.
     """
+    if page is not None:
+        page_number = page
+
     if not start_date:
         start_date = (datetime.now() - timedelta(days=30)).strftime("%d/%m/%Y")
 

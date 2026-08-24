@@ -53,6 +53,7 @@ class DashboardRequestFilters(BaseModel):
     cause: Optional[List[str]] = None
     feedback: Optional[List[str]] = None
     alert_status: Optional[List[str]] = None
+    page: Optional[int] = None
     page_number: Optional[int] = None
     page_size: Optional[int] = None
 
@@ -70,6 +71,11 @@ def _merge_envelope(body: Optional[DashboardEnvelopeBody], **query_values) -> di
     whatever came in via query params, so this is purely additive.
     """
     merged = dict(query_values)
+    
+    # If page was passed as a query param, map to page_number
+    if 'page' in merged and merged['page'] is not None:
+        merged['page_number'] = merged['page']
+
     if body is None:
         return merged
 
@@ -85,12 +91,16 @@ def _merge_envelope(body: Optional[DashboardEnvelopeBody], **query_values) -> di
     req = body.request
     if req is not None:
         for field in ('zone', 'division', 'station', 'alert_type', 'asset_type',
-                       'cause', 'feedback', 'alert_status', 'page_number', 'page_size'):
+                       'cause', 'feedback', 'alert_status', 'page', 'page_number', 'page_size'):
             val = getattr(req, field, None)
             if val is not None:
                 merged[field] = val
         if req.asset_number is not None:
             merged['asset_number'] = req.asset_number
+
+    # If page was passed in body envelope request, map to page_number
+    if merged.get('page') is not None:
+        merged['page_number'] = merged['page']
 
     return merged
 
@@ -166,6 +176,7 @@ async def get_alert_summary_report(
     alert_type: Optional[List[str]] = Query(None, description="Alert types"),
     asset_type: Optional[List[str]] = Query(None, description="Asset type codes"),
     cause: Optional[List[str]] = Query(None, description="Cause codes"),
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
     body: Optional[DashboardEnvelopeBody] = Body(None, description="Annexure F §1(a) JSON envelope — overrides query params when provided"),
@@ -183,7 +194,7 @@ async def get_alert_summary_report(
     m = _merge_envelope(body, start_date=start_date, start_time=start_time,
                          end_date=end_date, end_time=end_time, zone=zone,
                          division=division, station=station, alert_type=alert_type,
-                         asset_type=asset_type, cause=cause,
+                         asset_type=asset_type, cause=cause, page=page,
                          page_number=page_number, page_size=page_size)
     start_date, start_time, end_date, end_time = m['start_date'], m['start_time'], m['end_date'], m['end_time']
     zone, division, station = m['zone'], m['division'], m['station']
@@ -318,6 +329,7 @@ async def get_alert_history_report(
     cause: Optional[List[str]] = Query(None, description="Cause codes"),
     feedback: Optional[List[str]] = Query(None, description="Feedback types (T, PT, F, M)"),
     alert_status: Optional[List[str]] = Query(None, description="Alert status"),
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
     body: Optional[DashboardEnvelopeBody] = Body(None, description="Annexure F JSON envelope — overrides query params when provided"),
@@ -334,7 +346,7 @@ async def get_alert_history_report(
                          end_date=end_date, end_time=end_time, zone=zone,
                          division=division, station=station, alert_type=alert_type,
                          asset_type=asset_type, cause=cause, feedback=feedback,
-                         alert_status=alert_status, page_number=page_number, page_size=page_size)
+                         alert_status=alert_status, page=page, page_number=page_number, page_size=page_size)
     start_date, start_time, end_date, end_time = m['start_date'], m['start_time'], m['end_date'], m['end_time']
     zone, division, station = m['zone'], m['division'], m['station']
     alert_type, asset_type, cause = m['alert_type'], m['asset_type'], m['cause']
@@ -467,6 +479,7 @@ async def get_telemetry_history_report(
     station: Optional[List[str]] = Query(None, description="Station codes"),
     asset_type: Optional[List[str]] = Query(None, description="Asset type codes"),
     asset_number: Optional[str] = Query(None, description="JSON string list of asset numbers with station codes: '[{\"sc\": \"STN\", \"asset_number_code\": \"PT-101\"}]'"),
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
     body: Optional[DashboardEnvelopeBody] = Body(None, description="Annexure F JSON envelope — overrides query params when provided. asset_number here is a proper array of {sc, asset_number_code} objects, not a JSON string."),
@@ -482,7 +495,7 @@ async def get_telemetry_history_report(
     m = _merge_envelope(body, start_date=start_date, start_time=start_time,
                          end_date=end_date, end_time=end_time, zone=zone,
                          division=division, station=station, asset_type=asset_type,
-                         page_number=page_number, page_size=page_size)
+                         page=page, page_number=page_number, page_size=page_size)
     start_date, start_time, end_date, end_time = m['start_date'], m['start_time'], m['end_date'], m['end_time']
     zone, division, station, asset_type = m['zone'], m['division'], m['station'], m['asset_type']
     page_number, page_size = m['page_number'] or 1, m['page_size'] or 50
@@ -613,6 +626,7 @@ async def get_asset_detail_report(
     division: Optional[List[str]] = Query(None, description="Division codes"),
     station: Optional[List[str]] = Query(None, description="Station codes"),
     asset_type: Optional[List[str]] = Query(None, description="Asset type codes"),
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
     body: Optional[DashboardEnvelopeBody] = Body(None, description="Annexure F JSON envelope — overrides query params when provided"),
@@ -627,7 +641,7 @@ async def get_asset_detail_report(
     envelope (see alert_summary). This report has no date range.
     """
     m = _merge_envelope(body, zone=zone, division=division, station=station,
-                         asset_type=asset_type, page_number=page_number, page_size=page_size)
+                         asset_type=asset_type, page=page, page_number=page_number, page_size=page_size)
     zone, division, station, asset_type = m['zone'], m['division'], m['station'], m['asset_type']
     page_number, page_size = m['page_number'] or 1, m['page_size'] or 50
 
@@ -719,6 +733,7 @@ async def get_performance_report(
     zone: Optional[List[str]] = Query(None, description="Zone codes"),
     division: Optional[List[str]] = Query(None, description="Division codes"),
     station: Optional[List[str]] = Query(None, description="Station codes"),
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
     body: Optional[DashboardEnvelopeBody] = Body(None, description="Annexure F JSON envelope — overrides query params when provided"),
@@ -733,7 +748,7 @@ async def get_performance_report(
         start_date = (datetime.now() - timedelta(days=30)).strftime("%d/%m/%Y")
     m = _merge_envelope(body, start_date=start_date, start_time=start_time,
                          end_date=end_date, end_time=end_time, zone=zone,
-                         division=division, station=station,
+                         division=division, station=station, page=page,
                          page_number=page_number, page_size=page_size)
     start_date, start_time, end_date, end_time = m['start_date'], m['start_time'], m['end_date'], m['end_time']
     zone, division, station = m['zone'], m['division'], m['station']
