@@ -104,54 +104,52 @@ class IPSLogics:
         if not param_config:
             return alerts
         
-        if param_config.min_fail is not None and value < param_config.min_fail:
-            # Map to appropriate failure cause
-            cause_map = {
-                "VIPS IIP": "IPS_IIP_VOLT_FAIL",
-                "VIPS 110 DC": "IPS_110_DC_VOLT_FAIL",
-                "VIPS SIG-1 110 AC": "IPS_110_AC_SIG_VOLT_FAIL",
-                "VIPS TR-1 110 AC": "IPS_110_AC_TR_VOLT_FAIL",
-                "VIPS SMR-1 110 DC": "IPS_SMR_1_VOLT_FAIL",
-                "VIPS DC R INT": "IPS_DC_R_INT_VOLT_FAIL",
-                "VIPS DC R EXT": "IPS_DC_R_EXT_VOLT_FAIL",
-                "VIPS DC AXLE C": "IPS_DC_AXLE_C_VOLT_FAIL",
-                "VIPS DC PAN IND": "IPS_DC_PAN_IND_VOLT_FAIL",
-                "VIPS DC BLOCK LOCAL": "IPS_DC_BLOCK_LOCAL_VOLT_FAIL",
-                "VIPS DC HKT MAG": "IPS_DC_HKT_MAG_VOLT_FAIL",
-                "VIPS DC BLOCK LINE UP": "IPS_DC_BLOCK_LINE_UP_VOLT_FAIL",
-                "VIPS DC BLOCK LINE DN": "IPS_DC_BLOCK_LINE_DN_VOLT_FAIL",
-                "VIPS DC BLOCK TEL UP": "IPS_DC_BLOCK_TEL_UP_VOLT_FAIL",
-                "VIPS DC BLOCK TEL DN": "IPS_DC_BLOCK_TEL_DN_VOLT_FAIL",
-                "VIPS DC DATALOG": "IPS_DC_DATALOG_VOLT_FAIL",
-                "VIPS DC EI": "IPS_DC_EI_VOLT_FAIL",
-            }
-            
+        is_under = param_config.min_fail is not None and value < param_config.min_fail
+        is_over = param_config.max_fail is not None and value > param_config.max_fail
+        
+        if is_under or is_over:
             # Check for battery charging current failure (both under and over)
             if "IIPS BATT CHAR" in param_config.parameter_representation_code:
-                # Under-current failure
-                if param_config.min_fail is not None and value < param_config.min_fail:
+                if is_under:
                     alerts.append({
                         "cause_code": "IPS_BATT_CHAR_CURR_FAIL",
                         "cause_detail": "IPS failed. Battery Charging current low.",
                         "alert_type": AlertType.FAILURE
                     })
+                elif is_over:
+                    alerts.append({
+                        "cause_code": "IPS_BATT_CHAR_CURR_OVER",
+                        "cause_detail": "IPS failed. Battery Charging current excessively high.",
+                        "alert_type": AlertType.FAILURE
+                    })
             else:
+                cause_map = {
+                    "VIPS IIP": "IPS_IIP_VOLT_FAIL",
+                    "VIPS 110 DC": "IPS_110_DC_VOLT_FAIL",
+                    "VIPS SIG-1 110 AC": "IPS_110_AC_SIG_VOLT_FAIL",
+                    "VIPS TR-1 110 AC": "IPS_110_AC_TR_VOLT_FAIL",
+                    "VIPS SMR-1 110 DC": "IPS_SMR_1_VOLT_FAIL",
+                    "VIPS DC R INT": "IPS_DC_R_INT_VOLT_FAIL",
+                    "VIPS DC R EXT": "IPS_DC_R_EXT_VOLT_FAIL",
+                    "VIPS DC AXLE C": "IPS_DC_AXLE_C_VOLT_FAIL",
+                    "VIPS DC PAN IND": "IPS_DC_PAN_IND_VOLT_FAIL",
+                    "VIPS DC BLOCK LOCAL": "IPS_DC_BLOCK_LOCAL_VOLT_FAIL",
+                    "VIPS DC HKT MAG": "IPS_DC_HKT_MAG_VOLT_FAIL",
+                    "VIPS DC BLOCK LINE UP": "IPS_DC_BLOCK_LINE_UP_VOLT_FAIL",
+                    "VIPS DC BLOCK LINE DN": "IPS_DC_BLOCK_LINE_DN_VOLT_FAIL",
+                    "VIPS DC BLOCK TEL UP": "IPS_DC_BLOCK_TEL_UP_VOLT_FAIL",
+                    "VIPS DC BLOCK TEL DN": "IPS_DC_BLOCK_TEL_DN_VOLT_FAIL",
+                    "VIPS DC DATALOG": "IPS_DC_DATALOG_VOLT_FAIL",
+                    "VIPS DC EI": "IPS_DC_EI_VOLT_FAIL",
+                }
                 for key, cause_code in cause_map.items():
                     if key in param_config.parameter_representation_code:
+                        cond_str = "low" if is_under else "high"
                         alerts.append({
                             "cause_code": cause_code,
-                            "cause_detail": f"IPS failed. {key} failed.",
+                            "cause_detail": f"IPS failed. {key} failed ({cond_str}).",
                             "alert_type": AlertType.FAILURE
                         })
                         break
-        
-        # Over-current failure check for battery charging current (if max_fail is defined)
-        elif "IIPS BATT CHAR" in param_config.parameter_representation_code:
-            if param_config.max_fail is not None and value > param_config.max_fail:
-                alerts.append({
-                    "cause_code": "IPS_BATT_CHAR_CURR_OVER",
-                    "cause_detail": "IPS failed. Battery Charging current excessively high.",
-                    "alert_type": AlertType.FAILURE
-                })
         
         return alerts

@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime
 import logging
+import sqlalchemy.exc
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.services.alert_engine import alert_engine
@@ -145,6 +146,8 @@ class AlertProcessor:
                     telemetry.is_processed = True
                     processed_count += 1
                     
+                except sqlalchemy.exc.SQLAlchemyError:
+                    raise
                 except Exception:
                     logger.exception(f"Error processing telemetry {telemetry.id}")
                     # Mark as processed to prevent infinite loops on malformed rows
@@ -161,6 +164,7 @@ class AlertProcessor:
         except Exception:
             logger.exception("Error in alert processor batch execution")
             db.rollback()
+            raise
         finally:
             db.close()
 

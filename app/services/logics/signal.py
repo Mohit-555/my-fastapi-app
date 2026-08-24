@@ -88,7 +88,7 @@ class SignalLogics:
             "SHUNT": "SHSIG",
         }[signal_type]
 
-        label = f"{aspect}_" if aspect != "ASPECT" else ""
+        label = f"{aspect}_"
 
         if param_config.min_safe is not None and value < param_config.min_safe:
             alerts.append({
@@ -156,13 +156,13 @@ class SignalLogics:
             return alerts
 
         if signal_type == "CALLING_ON":
-            alerts.append({"cause_code": "COSIG_VOLT_CURR_FAIL",
+            alerts.append({"cause_code": "COSIG_ASPECT_VOLT_CURR_FAIL",
                             "cause_detail": "Calling ON Signal failed. Voltage or Current of Aspect failed.",
                             "alert_type": AlertType.FAILURE})
             return alerts
 
         if signal_type == "ROUTE":
-            alerts.append({"cause_code": "ROSIG_VOLT_CURR_FAIL",
+            alerts.append({"cause_code": "ROSIG_ASPECT_VOLT_CURR_FAIL",
                             "cause_detail": "Route Signal failed. Voltage or Current of Aspect failed.",
                             "alert_type": AlertType.FAILURE})
             return alerts

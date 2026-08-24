@@ -237,7 +237,14 @@ def test_ips_current_and_resolution_logics():
     }
     
     # Mock database query for AlertEvent update
-    db_mock.query().filter().first.return_value = pred_alert_mock
+    calls = []
+    def first_side_effect():
+        if not calls:
+            calls.append(True)
+            return None  # First query: checking if Failure alert is active (returns None)
+        return pred_alert_mock  # Second query: loading the predictive alert by ID inside _resolve_alert
+        
+    db_mock.query().filter().first.side_effect = first_side_effect
     
     # Trigger a failure alert check (which should check if predictive is active)
     # Failure cause code is PT_N_VOLT_CURR_FAIL. Since this is a failure alert, 
@@ -258,6 +265,80 @@ def test_ips_current_and_resolution_logics():
     
     print("IPS current and alert deduplication resolution logic works PERFECTLY!")
 
+def test_db_driven_deduplication_and_signal_aspects():
+    print("Verifying database-driven deduplication and signal aspect fallback...")
+    from unittest.mock import patch, MagicMock
+    from app.services.alert_engine import AlertEngine, AlertType
+    from app.models.models import AlertEvent
+    from app.services.logics.signal import SignalLogics
+
+    db_mock = MagicMock()
+    
+    # 1. Test database-driven predictive alert resolution (cache miss but DB hit)
+    engine = AlertEngine()
+    
+    pred_alert_mock = MagicMock(spec=AlertEvent)
+    pred_alert_mock.id = 456
+    pred_alert_mock.alert_status = "Active"
+    pred_alert_mock.remark = "Original remark"
+    
+    pred_key = "PT-101:PT_N_VOLT_CURR_LOW:Predictive"
+    assert pred_key not in engine.active_alerts
+    
+    calls = []
+    def first_side_effect():
+        calls.append(True)
+        if len(calls) == 1:
+            return None  # Failure alert check
+        elif len(calls) == 2:
+            return pred_alert_mock  # Predictive alert check
+        else:
+            return pred_alert_mock  # ID load check
+            
+    db_mock.query().filter().first.side_effect = first_side_effect
+    
+    result = engine._should_generate_alert(
+        asset_number_code="PT-101",
+        cause_code="PT_N_VOLT_CURR_FAIL",
+        alert_type=AlertType.FAILURE,
+        db=db_mock
+    )
+    
+    assert result is True, "Should allow generating the Failure alert"
+    assert pred_key not in engine.active_alerts
+    assert pred_key in engine.alert_history
+    assert pred_alert_mock.alert_status == "Cleared"
+    assert "Escalated to Failure" in pred_alert_mock.remark
+    
+    # 2. Test Signal Aspect fallback cause codes
+    class MockParamConfig:
+        def __init__(self, code, min_safe=None, max_safe=None, min_fail=None, max_fail=None):
+            self.parameter_representation_code = code
+            self.min_safe = min_safe
+            self.max_safe = max_safe
+            self.min_fail = min_fail
+            self.max_fail = max_fail
+
+    # Calling ON signal (COSIG ASPECT VOLT/CURR LOW)
+    with patch('app.services.parameter_config_service.param_config_service.get_parameter_config') as mock_get:
+        mock_get.return_value = MockParamConfig("COSIG ASPECT", min_safe=52.0)
+        alerts = SignalLogics.check_predictive_alerts(
+            gateway_id=1, stngw_id="ST1", para_id="10013030", value=50.0, timestamp="now", asset=None, db=db_mock
+        )
+        assert len(alerts) == 1
+        assert alerts[0]["cause_code"] == "COSIG_ASPECT_VOLT_CURR_LOW"
+
+    # Calling ON signal failure (COSIG ASPECT VOLT/CURR FAIL)
+    with patch('app.services.parameter_config_service.param_config_service.get_parameter_config') as mock_get:
+        mock_get.return_value = MockParamConfig("COSIG ASPECT", min_fail=52.0)
+        alerts = SignalLogics.check_failure_alerts(
+            gateway_id=1, stngw_id="ST1", para_id="10013030", value=50.0, timestamp="now", asset=None, db=db_mock
+        )
+        assert len(alerts) == 1
+        assert alerts[0]["cause_code"] == "COSIG_ASPECT_VOLT_CURR_FAIL"
+
+    print("Database-driven deduplication and signal aspect fallback checks passed PERFECTLY!")
+
 if __name__ == "__main__":
     test_parameter_configs()
     test_track_circuit_logics()
@@ -266,4 +347,5 @@ if __name__ == "__main__":
     test_none_thresholds_safety()
     test_signal_unknown_aspect_logics()
     test_ips_current_and_resolution_logics()
+    test_db_driven_deduplication_and_signal_aspects()
     print("ALL VERIFICATION TESTS PASSED SUCCESSFULLY!")

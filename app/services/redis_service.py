@@ -1,3 +1,4 @@
+import redis
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -49,7 +50,7 @@ class RedisService:
             try:
                 self.client.close()
                 logger.info("Redis connection closed.")
-            except Exception:
+            except redis.RedisError:
                 logger.debug("Failed to close Redis client", exc_info=True)
     
     # ============ Latest Parameter Values ============
@@ -75,7 +76,7 @@ class RedisService:
                 self.client.hset(key, mapping=data)
                 self.client.expire(key, ttl_seconds)
                 return
-            except Exception:
+            except redis.RedisError:
                 logger.exception(f"Error writing to Redis key {key}")
         
         self._in_memory_db[key] = {
@@ -103,7 +104,7 @@ class RedisService:
                         "timestamp": data.get("timestamp")
                     }
                 return None
-            except Exception:
+            except redis.RedisError:
                 logger.exception(f"Error reading from Redis key {key}")
         
         record = self._in_memory_db.get(key)
@@ -138,7 +139,7 @@ class RedisService:
                             "timestamp": data.get("timestamp")
                         }
                 return result
-            except Exception:
+            except redis.RedisError:
                 logger.exception("Error scanning from Redis")
         
         now = datetime.now().timestamp()
@@ -164,7 +165,7 @@ class RedisService:
                 self.client.hset(key, mapping=alert_data)
                 self.client.expire(key, 86400)  # 24 hours
                 return
-            except Exception:
+            except redis.RedisError:
                 logger.exception(f"Error storing active alert in Redis for key {alert_key}")
         
         self._in_memory_db[key] = {
@@ -179,7 +180,7 @@ class RedisService:
             try:
                 data = self.client.hgetall(key)
                 return data if data else None
-            except Exception:
+            except redis.RedisError:
                 logger.exception(f"Error getting active alert from Redis for key {alert_key}")
                 return None
         
@@ -198,7 +199,7 @@ class RedisService:
             try:
                 self.client.delete(key)
                 return
-            except Exception:
+            except redis.RedisError:
                 logger.exception(f"Error deleting active alert from Redis for key {alert_key}")
         
         if key in self._in_memory_db:
@@ -224,7 +225,7 @@ class RedisService:
                 self.client.hset(key, mapping=data)
                 self.client.expire(key, 3600)
                 return
-            except Exception:
+            except redis.RedisError:
                 logger.exception(f"Error storing gateway health in Redis for {stngw_id}")
         
         self._in_memory_db[key] = {
@@ -252,7 +253,7 @@ class RedisService:
                 self.client.hset(key, mapping=data)
                 self.client.expire(key, 3600)
                 return
-            except Exception:
+            except redis.RedisError:
                 logger.exception(f"Error storing sensor health in Redis for {stngw_id}:{para_id}")
         
         self._in_memory_db[key] = {
@@ -284,7 +285,7 @@ class RedisService:
                 self.client.hset(key, mapping=data)
                 self.client.expire(key, 86400)
                 return
-            except Exception:
+            except redis.RedisError:
                 logger.exception(f"Error registering gateway in Redis for {stngw_id}")
         
         self._in_memory_db[key] = {
@@ -300,7 +301,7 @@ class RedisService:
             try:
                 data = self.client.hgetall(key)
                 return data if data else None
-            except Exception:
+            except redis.RedisError:
                 logger.exception(f"Error getting gateway info from Redis for {stngw_id}")
                 return None
         
@@ -331,7 +332,7 @@ class RedisService:
                     "healthy": healthy,
                     "faulty": total - healthy
                 }
-            except Exception:
+            except redis.RedisError:
                 logger.exception(f"Error getting sensor health summary for {stngw_id}")
         
         # Fallback to in-memory
@@ -364,7 +365,7 @@ class RedisService:
             try:
                 data = self.client.hgetall(key)
                 return data if data else None
-            except Exception:
+            except redis.RedisError:
                 logger.exception(f"Error getting sensor health for {stngw_id}:{para_id}")
                 return None
         
@@ -395,7 +396,7 @@ class RedisService:
                     "healthy": healthy,
                     "faulty": total - healthy
                 }
-            except Exception:
+            except redis.RedisError:
                 logger.exception(f"Error getting IoT health summary for {stngw_id}")
         
         prefix = f"health:iot:{stngw_id}:"
@@ -435,7 +436,7 @@ class RedisService:
                 self.client.expire(key, 86400 * 7)  # Keep for 7 days
                 logger.info(f"Stored sync results in Redis: {results['success']} success, {results['failed']} failed")
                 return
-            except Exception:
+            except redis.RedisError:
                 logger.exception("Error storing sync results in Redis")
         
         self._in_memory_db[key] = {
@@ -456,7 +457,7 @@ class RedisService:
                 if data:
                     try:
                         data["details"] = json.loads(data.get("details", "[]"))
-                    except Exception:
+                    except (json.JSONDecodeError, TypeError):
                         data["details"] = []
                     for field in ["success", "failed", "created_total", "updated_total"]:
                         if field in data:
@@ -466,7 +467,7 @@ class RedisService:
                                 data[field] = 0
                     return data
                 return None
-            except Exception:
+            except redis.RedisError:
                 logger.exception(f"Error getting sync results from Redis for date {date}")
                 return None
         
@@ -478,7 +479,7 @@ class RedisService:
             data = dict(record["data"])
             try:
                 data["details"] = json.loads(data.get("details", "[]"))
-            except Exception:
+            except (json.JSONDecodeError, TypeError):
                 data["details"] = []
             for field in ["success", "failed", "created_total", "updated_total"]:
                 if field in data:

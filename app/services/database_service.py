@@ -188,7 +188,7 @@ class DatabaseService:
                 return results
             except Exception:
                 logger.exception("Error getting active alerts")
-                return []
+                raise
     
     # ============ Asset Management ============
     
@@ -216,7 +216,7 @@ class DatabaseService:
                 return None
             except Exception:
                 logger.exception(f"Error getting asset for para_id {para_id}")
-                return None
+                raise
     
     # ============ Health ============
     
@@ -238,6 +238,7 @@ class DatabaseService:
                 logger.debug(f"Updated gateway health for {stngw_id}: {is_healthy}")
             except Exception:
                 logger.exception(f"Error updating gateway health {stngw_id}")
+                raise
     
     async def update_sensor_health(
         self, 

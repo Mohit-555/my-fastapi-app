@@ -92,7 +92,7 @@ class StatisticsService:
                 
             except Exception:
                 logger.exception("Error calculating alert statistics")
-                return {}
+                raise
     
     async def calculate_asset_availability(
         self,
@@ -148,7 +148,7 @@ class StatisticsService:
                 
             except Exception:
                 logger.exception("Error calculating asset availability")
-                return 0.0
+                raise
     
     async def calculate_mtbf(
         self,
@@ -193,7 +193,7 @@ class StatisticsService:
                 
             except Exception:
                 logger.exception("Error calculating MTBF")
-                return 0.0
+                raise
     
     async def calculate_performance_metrics(
         self,
@@ -240,13 +240,7 @@ class StatisticsService:
             
         except Exception:
             logger.exception("Error calculating performance metrics")
-            return {
-                "fail_alert_per": 0.0,
-                "pred_alert_per": 0.0,
-                "actual_fail_alert_per": 0.0,
-                "mtbf_hours": 0.0,
-                "availability": 0.0
-            }
+            raise
 
 # Singleton instance
 statistics_service = StatisticsService()

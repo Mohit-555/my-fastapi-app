@@ -128,8 +128,21 @@ class AlertEngine:
         """Check if an alert should be generated (deduplication logic)"""
         key = f"{asset_number_code}:{cause_code}:{alert_type.value}"
         
-        # If alert already active, don't generate another
+        # If alert already active in memory, don't generate another
         if key in self.active_alerts:
+            return False
+        
+        # 1. Sync from DB if active alert exists but is not in memory cache (e.g. after a restart)
+        existing_db = db.query(AlertEvent).filter(
+            AlertEvent.asset_no == asset_number_code,
+            AlertEvent.cause == cause_code,
+            AlertEvent.alert_status == "Active"
+        ).first()
+        if existing_db:
+            self.active_alerts[key] = {
+                "alert_id": existing_db.id,
+                "timestamp": existing_db.alert_time
+            }
             return False
         
         # If this is a FAILURE alert, check if there's an active PREDICTIVE alert
@@ -163,6 +176,8 @@ class AlertEngine:
                 "SIG_HHG_VOLT_CURR_FAIL": "SIG_HHG_VOLT_CURR_LOW",
                 "SIG_RG_VOLT_CURR_FAIL": "SIG_RG_VOLT_CURR_LOW",
                 "SIG_UNKNOWN_VOLT_CURR_FAIL": "SIG_UNKNOWN_VOLT_CURR_LOW",
+                "COSIG_ASPECT_VOLT_CURR_FAIL": "COSIG_ASPECT_VOLT_CURR_LOW",
+                "ROSIG_ASPECT_VOLT_CURR_FAIL": "ROSIG_ASPECT_VOLT_CURR_LOW",
                 
                 # Track Circuit
                 "TC_TFC_OP_VOLT_FAIL": "TC_TFC_OP_VOLT_LOW",
@@ -185,8 +200,23 @@ class AlertEngine:
                     pred_cause = cause_code
             
             pred_key = f"{asset_number_code}:{pred_cause}:{AlertType.PREDICTIVE.value}"
+            
             if pred_key in self.active_alerts:
                 self._resolve_alert(pred_key, f"Escalated to Failure ({cause_code})", db)
+            else:
+                # Also look up in DB to resolve it if it exists active in DB
+                existing_pred = db.query(AlertEvent).filter(
+                    AlertEvent.asset_no == asset_number_code,
+                    AlertEvent.cause == pred_cause,
+                    AlertEvent.alert_status == "Active"
+                ).first()
+                if existing_pred:
+                    # Sync to memory first
+                    self.active_alerts[pred_key] = {
+                        "alert_id": existing_pred.id,
+                        "timestamp": existing_pred.alert_time
+                    }
+                    self._resolve_alert(pred_key, f"Escalated to Failure ({cause_code})", db)
         
         # Check if same cause was recently cleared
         if key in self.alert_history:
