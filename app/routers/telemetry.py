@@ -14,7 +14,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, func
 
 from app.database import get_db, SessionLocal
 from app.models.models import Telemetry, Gateway, Station, Division, Zone, Threshold, Asset, AssetTypeMaster
@@ -319,11 +319,24 @@ def query_telemetry(
     # Fetch rows
     telem_query = db.query(Telemetry).filter(and_(*base_filters))
 
-    # Apply para_id prefix filters in Python (avoids complex SQL LIKE OR chains)
+    # Use a ranked subquery with ROW_NUMBER() partitioned by gateway_id and para_id
+    # to fetch at most `limit` rows per unique parameter series, avoiding starvation.
+    rn_col = func.row_number().over(
+        partition_by=[Telemetry.gateway_id, Telemetry.para_id],
+        order_by=Telemetry.received_at.desc()
+    ).label("rn")
+
+    ranked_sq = (
+        db.query(Telemetry.id.label("t_id"), rn_col)
+        .filter(and_(*base_filters))
+        .subquery()
+    )
+
     rows_all = (
-        telem_query
+        db.query(Telemetry)
+        .join(ranked_sq, Telemetry.id == ranked_sq.c.t_id)
+        .filter(ranked_sq.c.rn <= limit)
         .order_by(Telemetry.received_at.desc())
-        .limit(limit * 20)      # fetch extra, we'll filter + group in Python
         .all()
     )
 
@@ -381,13 +394,7 @@ def query_telemetry(
 
 # ── SSE Live Stream ───────────────────────────────────────────────────────────
 
-async def _sse_event_generator(request: Request, station_id: int, asset_number: str, poll_interval: int):
-    """
-    Async generator that polls for new telemetry every `poll_interval` seconds
-    and yields SSE-formatted events.
-    """
-    last_seen_id = 0
-
+def _setup_sse_asset_sync(station_id: int, asset_number: str):
     db = SessionLocal()
     try:
         asset = (
@@ -402,95 +409,168 @@ async def _sse_event_generator(request: Request, station_id: int, asset_number: 
             .first()
         )
         if not asset:
-            yield f"event: error\ndata: {json.dumps({'detail': f'Asset {asset_number} not found at station {station_id}'})}\n\n"
-            return
+            return {"error": f"Asset {asset_number} not found at station {station_id}"}
 
         gateway_id = asset.gateway.id if asset.gateway else None
         if not gateway_id:
-            yield f"event: error\ndata: {json.dumps({'detail': f'Asset {asset_number} has no gateway'})}\n\n"
-            return
+            return {"error": f"Asset {asset_number} has no gateway"}
 
-        gw_stngw_id = asset.gateway.stngw_id
-        station_id = asset.station_id
-        prefix = f"{asset.asset_type_hex}{asset.asset_number_id}"
-        asset_type_hex = asset.asset_type_hex
-        asset_type_name = asset.asset_type.asset_type_name if asset.asset_type else None
+        return {
+            "gateway_id": gateway_id,
+            "gw_stngw_id": asset.gateway.stngw_id,
+            "station_id": asset.station_id,
+            "prefix": f"{asset.asset_type_hex}{asset.asset_number_id}",
+            "asset_type_hex": asset.asset_type_hex,
+            "asset_type_name": asset.asset_type.asset_type_name if asset.asset_type else None,
+        }
     finally:
         db.close()
 
+
+def _poll_telemetry_sync(
+    gateway_id: int,
+    prefix: str,
+    last_seen_id: int,
+    asset_type_hex: str,
+    station_id: int,
+    asset_type_name: Optional[str],
+    asset_number: str,
+    gw_stngw_id: str,
+):
+    db = SessionLocal()
+    try:
+        q = (
+            db.query(Telemetry)
+            .filter(
+                Telemetry.gateway_id == gateway_id,
+                Telemetry.para_id.like(f"{prefix}%"),
+                Telemetry.id > last_seen_id,
+            )
+            .order_by(Telemetry.id.asc())
+            .limit(100)
+        )
+        new_rows = q.all()
+
+        payloads = []
+        next_seen_id = last_seen_id
+
+        if new_rows:
+            next_seen_id = new_rows[-1].id
+
+            grouped: dict[str, list] = {}
+            for row in new_rows:
+                pid = row.para_id
+                if len(pid) != 8:
+                    continue
+                grouped.setdefault(pid, []).append(row)
+
+            for pid, rows in grouped.items():
+                param_info = PARAMETER_TYPE_MAP.get(pid[4:6])
+                threshold = _get_threshold(db, asset_type_hex, pid[4:6], station_id)
+
+                live_items = [
+                    {
+                        "time": r.prt or (r.received_at.strftime("%H:%M:%S") if r.received_at else "Now"),
+                        "Avg_Current": r.prv if pid[4:6] == "01" else 3.18,
+                        "Peak_Current": r.prv if pid[4:6] == "02" else 7.50,
+                        "Battery_Voltage": r.prv if pid[4:6] == "04" else 12.39,
+                        "Stroke_Time": r.prv if pid[4:6] == "03" else 1944.0,
+                        "Temperature": r.prv if pid[4:6] == "05" else 46.5
+                    }
+                    for r in rows
+                ]
+
+                points_data = [
+                    {"t": r.prt or r.received_at.isoformat(), "v": r.prv}
+                    for r in rows
+                ]
+
+                payload = {
+                    "Zone": "NR",
+                    "Division": "PRYG",
+                    "Asset_Type": asset_type_name or "Point Machine",
+                    "Asset_No": asset_number or "PT-101",
+                    "Time": datetime.now().strftime("%H:%M:%S"),
+                    "Status": "Predictive",
+                    "live_data": live_items,
+                    "para_id": pid,
+                    "stngw_id": gw_stngw_id,
+                    "asset_type_hex": asset_type_hex,
+                    "asset_type_name": asset_type_name,
+                    "parameter_name": param_info[1] if param_info else None,
+                    "parameter_unit": param_info[2] if param_info else None,
+                    "points": points_data,
+                    "threshold_warning_high": threshold.warning_high if threshold else None,
+                    "threshold_critical_high": threshold.critical_high if threshold else None,
+                }
+                payloads.append(payload)
+
+        return {
+            "payloads": payloads,
+            "next_seen_id": next_seen_id
+        }
+    finally:
+        db.close()
+
+
+async def _sse_event_generator(request: Request, station_id: int, asset_number: str, poll_interval: int):
+    """
+    Async generator that polls for new telemetry every `poll_interval` seconds
+    and yields SSE-formatted events.
+    """
+    last_seen_id = 0
+
+    asset_data = await asyncio.to_thread(_setup_sse_asset_sync, station_id, asset_number)
+    if "error" in asset_data:
+        yield f"event: error\ndata: {json.dumps({'detail': asset_data['error']})}\n\n"
+        return
+
+    gateway_id = asset_data["gateway_id"]
+    gw_stngw_id = asset_data["gw_stngw_id"]
+    station_id = asset_data["station_id"]
+    prefix = asset_data["prefix"]
+    asset_type_hex = asset_data["asset_type_hex"]
+    asset_type_name = asset_data["asset_type_name"]
+
     yield ": ping\n\n"
+
+    consecutive_errors = 0
+    MAX_CONSECUTIVE_ERRORS = 5
 
     while True:
         if await request.is_disconnected():
             break
 
-        db = SessionLocal()
         try:
-            q = (
-                db.query(Telemetry)
-                .filter(
-                    Telemetry.gateway_id == gateway_id,
-                    Telemetry.para_id.like(f"{prefix}%"),
-                    Telemetry.id > last_seen_id,
-                )
-                .order_by(Telemetry.id.asc())
-                .limit(100)
+            result = await asyncio.to_thread(
+                _poll_telemetry_sync,
+                gateway_id=gateway_id,
+                prefix=prefix,
+                last_seen_id=last_seen_id,
+                asset_type_hex=asset_type_hex,
+                station_id=station_id,
+                asset_type_name=asset_type_name,
+                asset_number=asset_number,
+                gw_stngw_id=gw_stngw_id,
             )
-            new_rows = q.all()
+            
+            consecutive_errors = 0
 
-            if new_rows:
-                last_seen_id = new_rows[-1].id
-
-                grouped: dict[str, list] = {}
-                for row in new_rows:
-                    pid = row.para_id
-                    if len(pid) != 8:
-                        continue
-                    grouped.setdefault(pid, []).append(row)
-
-                for pid, rows in grouped.items():
-                    param_info = PARAMETER_TYPE_MAP.get(pid[4:6])
-                    threshold = _get_threshold(db, asset_type_hex, pid[4:6], station_id)
-
-                    live_items = [
-                        {
-                            "time": r.prt or (r.received_at.strftime("%H:%M:%S") if r.received_at else "Now"),
-                            "Avg_Current": r.prv if pid[4:6] == "01" else 3.18,
-                            "Peak_Current": r.prv if pid[4:6] == "02" else 7.50,
-                            "Battery_Voltage": r.prv if pid[4:6] == "04" else 12.39,
-                            "Stroke_Time": r.prv if pid[4:6] == "03" else 1944.0,
-                            "Temperature": r.prv if pid[4:6] == "05" else 46.5
-                        }
-                        for r in rows
-                    ]
-
-                    payload = {
-                        "Zone": "NR",
-                        "Division": "PRYG",
-                        "Asset_Type": asset_type_name or "Point Machine",
-                        "Asset_No": asset_number or "PT-101",
-                        "Time": datetime.now().strftime("%H:%M:%S"),
-                        "Status": "Predictive",
-                        "live_data": live_items,
-                        "para_id": pid,
-                        "stngw_id": gw_stngw_id,
-                        "asset_type_hex": asset_type_hex,
-                        "asset_type_name": asset_type_name,
-                        "parameter_name": param_info[1] if param_info else None,
-                        "parameter_unit": param_info[2] if param_info else None,
-                        "points": [
-                            {"t": r.prt or r.received_at.isoformat(), "v": r.prv}
-                            for r in rows
-                        ],
-                        "threshold_warning_high": threshold.warning_high if threshold else None,
-                        "threshold_critical_high": threshold.critical_high if threshold else None,
-                    }
-                    yield f"data: {json.dumps(payload)}\n\n"
+            for payload in result["payloads"]:
+                yield f"data: {json.dumps(payload)}\n\n"
+            
+            last_seen_id = result["next_seen_id"]
 
         except Exception as e:
+            consecutive_errors += 1
             yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
-        finally:
-            db.close()
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                yield f"event: close\ndata: {json.dumps({'detail': 'Stream closed after repeated DB errors'})}\n\n"
+                break
+            
+            backoff = min(poll_interval * (2 ** consecutive_errors), 60)
+            await asyncio.sleep(backoff)
+            continue
 
         await asyncio.sleep(poll_interval)
 
@@ -1143,7 +1223,6 @@ def vc_telemetry_history(payload: TelemetryHistoryReportRequest, db: Session = D
         conditions = []
         for item in req_filter.asset_number:
             conditions.append(and_(Station.station_code == item.sc, Asset.asset_number_code == item.asset_number_code))
-        from sqlalchemy import or_
         asset_q = asset_q.filter(or_(*conditions))
 
     total_assets = asset_q.count()
