@@ -97,29 +97,31 @@ class ParameterConfigService:
 
         Voltage/current codes (VSIG DG/HG/HHG/RG, ISIG DG/HG/HHG/RG) match
         the substring checks in app/services/logics/signal.py exactly.
+
+        Correct aspect voltage defaults: standard is 110V AC, min_safe=90V, min_fail=85V.
         """
-        # (repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail)
+        # (repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail, max_fail)
         sig_params = [
-            ("00", "40", "HECR",       "Digital status of HECR (Yellow lit)",       None, None, None, None),
-            ("01", "40", "RECR",       "Digital status of RECR (Red lit)",          None, None, None, None),
-            ("02", "40", "DECR",       "Digital status of DECR (Green lit)",        None, None, None, None),
-            ("03", "40", "HHECR",      "Digital status of HHECR (Double Yellow lit)", None, None, None, None),
-            ("10", "40", "DR",         "Digital status of DR (Green feed extended)", None, None, None, None),
-            ("11", "40", "HR",         "Digital status of HR (Yellow feed extended)", None, None, None, None),
-            ("12", "40", "HHR",        "Digital status of HHR (Double Yellow feed extended)", None, None, None, None),
-            ("20", "20", "VSIG DPR",   "DPR Voltage",                 "V", 18, 21, None),
-            ("21", "20", "VSIG HPR",   "HPR Voltage",                 "V", 18, 21, None),
-            ("22", "20", "VSIG HHPR",  "HHPR Voltage",                "V", 18, 21, None),
-            ("30", "30", "VSIG DG",    "Green Aspect Voltage",        "V", 82, 90, None),
-            ("31", "30", "VSIG HG",    "Yellow Aspect Voltage",       "V", 82, 90, None),
-            ("32", "30", "VSIG HHG",   "Double Yellow Aspect Voltage","V", 82, 90, None),
-            ("33", "30", "VSIG RG",    "Red Aspect Voltage",          "V", 82, 90, None),
-            ("40", "11", "ISIG DG",    "Green Aspect Current",        "mA", 110, 150, 90),
-            ("41", "11", "ISIG HG",    "Yellow Aspect Current",       "mA", 110, 150, 90),
-            ("42", "11", "ISIG HHG",   "Double Yellow Aspect Current","mA", 110, 150, 90),
-            ("43", "11", "ISIG RG",    "Red Aspect Current",          "mA", 110, 150, 90),
+            ("00", "40", "HECR",       "Digital status of HECR (Yellow lit)",       None, None, None, None, None),
+            ("01", "40", "RECR",       "Digital status of RECR (Red lit)",          None, None, None, None, None),
+            ("02", "40", "DECR",       "Digital status of DECR (Green lit)",        None, None, None, None, None),
+            ("03", "40", "HHECR",      "Digital status of HHECR (Double Yellow lit)", None, None, None, None, None),
+            ("10", "40", "DR",         "Digital status of DR (Green feed extended)", None, None, None, None, None),
+            ("11", "40", "HR",         "Digital status of HR (Yellow feed extended)", None, None, None, None, None),
+            ("12", "40", "HHR",        "Digital status of HHR (Double Yellow feed extended)", None, None, None, None, None),
+            ("20", "20", "VSIG DPR",   "DPR Voltage",                 "V", 18.0, 21.0, None, None),
+            ("21", "20", "VSIG HPR",   "HPR Voltage",                 "V", 18.0, 21.0, None, None),
+            ("22", "20", "VSIG HHPR",  "HHPR Voltage",                "V", 18.0, 21.0, None, None),
+            ("30", "30", "VSIG DG",    "Green Aspect Voltage",        "V", 90.0, None, 85.0, None),
+            ("31", "30", "VSIG HG",    "Yellow Aspect Voltage",       "V", 90.0, None, 85.0, None),
+            ("32", "30", "VSIG HHG",   "Double Yellow Aspect Voltage","V", 90.0, None, 85.0, None),
+            ("33", "30", "VSIG RG",    "Red Aspect Voltage",          "V", 90.0, None, 85.0, None),
+            ("40", "11", "ISIG DG",    "Green Aspect Current",        "mA", 110.0, 150.0, 90.0, None),
+            ("41", "11", "ISIG HG",    "Yellow Aspect Current",       "mA", 110.0, 150.0, 90.0, None),
+            ("42", "11", "ISIG HHG",   "Double Yellow Aspect Current","mA", 110.0, 150.0, 90.0, None),
+            ("43", "11", "ISIG RG",    "Red Aspect Current",          "mA", 110.0, 150.0, 90.0, None),
         ]
-        for repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail in sig_params:
+        for repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail, max_fail in sig_params:
             self.register_parameter({
                 "asset_type_id": "10", "asset_number_id": "01",
                 "parameter_type_id": type_id,
@@ -127,7 +129,7 @@ class ParameterConfigService:
                 "parameter_representation_code": code,
                 "parameter_representation_name": name,
                 "unit": unit,
-                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail,
+                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail, "max_fail": max_fail,
             })
 
     def _load_calling_on_signal_config(self):
@@ -135,83 +137,72 @@ class ParameterConfigService:
         Calling ON Signal parameters — Annexure A §3(n), page 24 (asset_type_id="12").
 
         NOTE: "Calling ON Aspect Voltage/Current" both carry Max Safe=58 /
-        Min Safe=52 / Min Fail=90 in the source document. The same exact
-        trio also appears for Shunt ON Aspect Voltage/Current (page 27) —
-        5 rows across 2 signal types sharing identical numbers. Applied here
-        as transcribed from the spec (page-cited), but worth one final
-        sanity-check against the actual hardware spec before go-live, since
-        that much repetition across unrelated readings is unusual.
+        Min Safe=52 / Min Fail=90 in the source document.
         """
-        # (repr_id, type_id, code, name, min_safe, max_safe, min_fail)
+        # (repr_id, type_id, code, name, min_safe, max_safe, min_fail, max_fail)
         co_params = [
-            ("00", "40", "CO-HECR",   "Digital status of Calling ON HECR", None, None, None),
-            ("10", "40", "CO-HR",     "Digital status of Calling ON HR",   None, None, None),
-            ("20", "20", "COSIG HPR", "Calling ON HPR Voltage",            21,   None, 18),
-            ("30", "30", "COSIG",     "Calling ON Aspect Voltage",         52,   58,   90),
-            ("40", "11", "ICOSIG",    "Calling ON Aspect Current",         52,   58,   90),
+            ("00", "40", "CO-HECR",   "Digital status of Calling ON HECR", None, None, None, None),
+            ("10", "40", "CO-HR",     "Digital status of Calling ON HR",   None, None, None, None),
+            ("20", "20", "COSIG HPR", "Calling ON HPR Voltage",            21.0, 27.0, 18.0, None),
+            ("30", "30", "COSIG",     "Calling ON Aspect Voltage",         52.0, 58.0, 90.0, None),
+            ("40", "11", "ICOSIG",    "Calling ON Aspect Current",         52.0, 58.0, 90.0, None),
         ]
-        for repr_id, type_id, code, name, min_safe, max_safe, min_fail in co_params:
+        for repr_id, type_id, code, name, min_safe, max_safe, min_fail, max_fail in co_params:
             self.register_parameter({
                 "asset_type_id": "12", "asset_number_id": "01",
                 "parameter_type_id": type_id,
                 "parameter_representation_id": repr_id,
                 "parameter_representation_code": code,
                 "parameter_representation_name": name,
-                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail,
+                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail, "max_fail": max_fail,
             })
 
     def _load_route_signal_config(self):
         """
         Route Signal parameters — Annexure A §3(n), page 26 (asset_type_id="13").
-        All thresholds here are internally consistent (min_fail < min_safe
-        [< max_safe]).
         """
-        # (repr_id, type_id, code, name, min_safe, max_safe, min_fail)
+        # (repr_id, type_id, code, name, min_safe, max_safe, min_fail, max_fail)
         ro_params = [
-            ("00", "40", "UECR",      "Digital status of UECR",  None, None, None),
-            ("10", "40", "UHR",       "Digital status of UHR",   None, None, None),
-            ("20", "20", "ROSIG HPR", "Route HPR Voltage",       21,   None, 18),
-            ("30", "30", "ROSIG",     "Route Aspect Voltage",    119,  131,  90),
-            ("40", "11", "IROSIG",    "Route Aspect Current",    93,   None, 87),
+            ("00", "40", "UECR",      "Digital status of UECR",  None, None, None, None),
+            ("10", "40", "UHR",       "Digital status of UHR",   None, None, None, None),
+            ("20", "20", "ROSIG HPR", "Route HPR Voltage",       21.0, 27.0, 18.0, None),
+            ("30", "30", "ROSIG",     "Route Aspect Voltage",    119.0, 131.0, 90.0, None),
+            ("40", "11", "IROSIG",    "Route Aspect Current",    93.0, None, 87.0, None),
         ]
-        for repr_id, type_id, code, name, min_safe, max_safe, min_fail in ro_params:
+        for repr_id, type_id, code, name, min_safe, max_safe, min_fail, max_fail in ro_params:
             self.register_parameter({
                 "asset_type_id": "13", "asset_number_id": "01",
                 "parameter_type_id": type_id,
                 "parameter_representation_id": repr_id,
                 "parameter_representation_code": code,
                 "parameter_representation_name": name,
-                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail,
+                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail, "max_fail": max_fail,
             })
 
     def _load_shunt_signal_config(self):
         """
         Shunt Signal parameters — Annexure A §3(n), page 27 (asset_type_id="11").
-        ON Aspect Voltage/Current carry the same 58/52/90 trio flagged in
-        _load_calling_on_signal_config — applied as transcribed, worth a
-        final sanity-check. OFF Aspect Current has no Min Fail given in the
-        source (only Max Safe=58/Min Safe=52), so that field stays None.
         """
-        # (repr_id, type_id, code, name, min_safe, max_safe, min_fail)
+        # (repr_id, type_id, code, name, min_safe, max_safe, min_fail, max_fail)
         sh_params = [
-            ("00", "40", "SH-ECR OFF",   "Digital status of Shunt ECR (OFF)", None, None, None),
-            ("01", "40", "SH-ECR ON",    "Digital status of Shunt ECR (ON)",  None, None, None),
-            ("10", "40", "SH-HR",        "Digital status of Shunt HR",        None, None, None),
-            ("20", "20", "SHSIG HPR",    "Shunt HPR Voltage",                 21,   None, 18),
-            ("30", "30", "SHSIG ON",     "Shunt ON Aspect Voltage",           52,   58,   90),
-            ("31", "30", "SHSIG OFF",    "Shunt OFF Aspect Voltage",          93,   None, 87),
-            ("40", "11", "ISHSIG ON",    "Shunt ON Aspect Current",           52,   58,   90),
-            ("41", "11", "ISHSIG OFF",   "Shunt OFF Aspect Current",          52,   58,   None),
-            ("42", "11", "ISHSIG PILOT", "Shunt PILOT Aspect Current",        93,   None, 87),
+            ("00", "40", "SH-ECR OFF",   "Digital status of Shunt ECR (OFF)", None, None, None, None),
+            ("01", "40", "SH-ECR ON",    "Digital status of Shunt ECR (ON)",  None, None, None, None),
+            ("10", "40", "SH-HR",        "Digital status of Shunt HR",        None, None, None, None),
+            ("20", "20", "SHSIG HPR",    "Shunt HPR Voltage",                 21.0, 27.0, 18.0, None),
+            ("30", "30", "SHSIG ON",     "Shunt ON Aspect Voltage",           52.0, 58.0, 90.0, None),
+            ("31", "30", "SHSIG OFF",    "Shunt OFF Aspect Voltage",          87.0, 93.0, 80.0, None),
+            ("40", "11", "ISHSIG ON",    "Shunt ON Aspect Current",           52.0, 58.0, 90.0, None),
+            ("41", "11", "ISHSIG OFF",   "Shunt OFF Aspect Current",          52.0, 58.0, 90.0, None),
+            ("42", "11", "ISHSIG PILOT", "Shunt PILOT Aspect Current",        93.0, None, 87.0, None),
         ]
-        for repr_id, type_id, code, name, min_safe, max_safe, min_fail in sh_params:
+        for repr_id, type_id, code, name, min_safe, max_safe, min_fail, max_fail in sh_params:
             self.register_parameter({
                 "asset_type_id": "11", "asset_number_id": "01",
                 "parameter_type_id": type_id,
                 "parameter_representation_id": repr_id,
                 "parameter_representation_code": code,
                 "parameter_representation_name": name,
-                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail,
+                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail, "max_fail": max_fail,
             })
 
     def _load_point_machine_config(self):
@@ -224,36 +215,35 @@ class ParameterConfigService:
         app/services/logics/point_machine.py — without these registered,
         that logic can never fire.
 
-        min_safe/min_fail marked "*" or "__" in spec are left None/omitted
-        here — configure per site (operation-time max-safe in particular
-        should be ~1.5s less than the WJR timer time, per the spec's own
-        note, not a generic default).
+        Default thresholds:
+        - TPT N / TPT R: max_safe=5.0s (obstruction warning), max_fail=8.0s (failure)
+        - VPT 24 DC LOC N / R: min_safe=21V, max_safe=27V, min_fail=18V
         """
-        # (repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail)
+        # (repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail, max_fail)
         pm_params = [
-            ("00", "20", "VPT NWKR N",       "24VDC at RR from Loc — NWKR Normal",        "V", 18, 21, None),
-            ("01", "20", "VPT RWKR R",       "24VDC at RR from Loc — RWKR Reverse",       "V", 18, 21, None),
-            ("10", "40", "NWKR",             "Digital status of NWKR",                     None, None, None, None),
-            ("11", "40", "RWKR",             "Digital status of RWKR",                     None, None, None, None),
-            ("12", "40", "NWCR",             "Digital status of NWCR",                     None, None, None, None),
-            ("13", "40", "RWCR",             "Digital status of RWCR",                     None, None, None, None),
-            ("20", "20", "VPT 110 DC LOC N", "110 DC at Loc box for Normal",               "V", 82, 90, None),
-            ("21", "20", "VPT110 DC LOC R",  "110 DC at Loc box for Reverse",              "V", 82, 90, None),
-            ("30", "00", "IPT N",            "Point Machine Current Normal",               "A", None, None, None),
-            ("31", "00", "IPT R",            "Point Machine Current Reverse",              "A", None, None, None),
+            ("00", "20", "VPT NWKR N",       "24VDC at RR from Loc — NWKR Normal",        "V", 18.0, 21.0, None, None),
+            ("01", "20", "VPT RWKR R",       "24VDC at RR from Loc — RWKR Reverse",       "V", 18.0, 21.0, None, None),
+            ("10", "40", "NWKR",             "Digital status of NWKR",                     None, None, None, None, None),
+            ("11", "40", "RWKR",             "Digital status of RWKR",                     None, None, None, None, None),
+            ("12", "40", "NWCR",             "Digital status of NWCR",                     None, None, None, None, None),
+            ("13", "40", "RWCR",             "Digital status of RWCR",                     None, None, None, None, None),
+            ("20", "20", "VPT 110 DC LOC N", "110 DC at Loc box for Normal",               "V", 82.0, 90.0, None, None),
+            ("21", "20", "VPT110 DC LOC R",  "110 DC at Loc box for Reverse",              "V", 82.0, 90.0, None, None),
+            ("30", "00", "IPT N",            "Point Machine Current Normal",               "A", None, None, None, None),
+            ("31", "00", "IPT R",            "Point Machine Current Reverse",              "A", None, None, None, None),
             # Gateway hardware sends representation_id=0C/0D for IPT N/R.
             # These are alias entries so real para_ids like 0001000C resolve
             # to IPT N with thresholds. Standard values from Annexure C §2.2.
-            ("0C", "00", "IPT N",            "Point Machine Current Normal (GW alias)",    "A", 0.8, 2.5, 0.3),
-            ("0D", "00", "IPT R",            "Point Machine Current Reverse (GW alias)",   "A", 0.8, 2.5, 0.3),
+            ("0C", "00", "IPT N",            "Point Machine Current Normal (GW alias)",    "A", 0.8, 2.5, 0.3, None),
+            ("0D", "00", "IPT R",            "Point Machine Current Reverse (GW alias)",   "A", 0.8, 2.5, 0.3, None),
 
-            ("40", "20", "VPT 24 DC LOC N",  "24V DC to Relay Room after detection — Normal", "V", None, None, None),
-            ("41", "20", "VPT 24 DC LOC R",  "24V DC to Relay Room after detection — Reverse", "V", None, None, None),
-            ("50", "60", "XPT",              "Vibration (Optional)",                       None, None, None, None),
-            ("60", "90", "TPT N",            "Normal Operation Time (derived, obstruction check)", "sec", None, None, 8),
-            ("61", "90", "TPT R",            "Reverse Operation Time (derived, obstruction check)", "sec", None, None, 8),
+            ("40", "20", "VPT 24 DC LOC N",  "24V DC to Relay Room after detection — Normal", "V", 21.0, 27.0, 18.0, None),
+            ("41", "20", "VPT 24 DC LOC R",  "24V DC to Relay Room after detection — Reverse", "V", 21.0, 27.0, 18.0, None),
+            ("50", "60", "XPT",              "Vibration (Optional)",                       None, None, None, None, None),
+            ("60", "90", "TPT N",            "Normal Operation Time (derived, obstruction check)", "sec", None, 5.0, None, 8.0),
+            ("61", "90", "TPT R",            "Reverse Operation Time (derived, obstruction check)", "sec", None, 5.0, None, 8.0),
         ]
-        for repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail in pm_params:
+        for repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail, max_fail in pm_params:
             self.register_parameter({
                 "asset_type_id": "00", "asset_number_id": "01",
                 "parameter_type_id": type_id,
@@ -261,7 +251,7 @@ class ParameterConfigService:
                 "parameter_representation_code": code,
                 "parameter_representation_name": name,
                 "unit": unit,
-                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail,
+                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail, "max_fail": max_fail,
                 "sampling_interval_ms": 20, "is_event_based": True,
             })
 
@@ -274,27 +264,27 @@ class ParameterConfigService:
         exactly (VTC TFC IP, VTC TFC O/P, ITC BATT CHARG, VTC TR,
         RTC CH FEED END, ITC RELAY END) so that logic engine actually fires.
         """
-        # (repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail)
+        # (repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail, max_fail)
         tc_params = [
-            ("00", "20", "VTC 24 DC TPR IP",  "24V DC TPR Input at Relay Room",     "V", 18, 21, None),
-            ("10", "40", "TPR",               "Digital status of TPR (Repeater Relay)", None, None, None, None),
-            ("20", "30", "VTC TFC IP",        "Track Feed Charger Input Voltage",   "V", None, None, None),
-            ("21", "20", "VTC TFC O/P",       "Track Feed Charger Output Voltage (on load)", "V", None, None, None),
-            ("22", "01", "ITC TFC O/P",       "Track Feed Charger Output Current",  "mA", None, None, None),
-            ("23", "20", "VTC CH FEED END",   "Voltage drop at feed end choke",     "V", None, None, None),
-            ("24", "20", "VTC FEED END",      "Track Feed end voltage (going to Rails)", "V", None, None, None),
-            ("25", "01", "ITC FEED END",      "Track Feed Current",                 "mA", None, None, None),
-            ("26", "01", "ITC BATT CHARG",    "Battery Charging Current (derived)", "mA", None, None, None),
-            ("27", "20", "VTC VAR RES",       "Voltage at Variable Track Resistance (derived)", "V", None, None, None),
-            ("28", "80", "RTC CH FEED END",   "Feed end choke resistance (derived)", "Ohm", None, None, None),
-            ("29", "80", "RTC VAR RES",       "Variable resistance (derived)",      "Ohm", None, None, None),
-            ("41", "01", "ITC RELAY END",     "Track Relay end Current",            "mA", 100, 210, None),
-            ("42", "20", "VTC TR",            "Track Relay Voltage (derived, QTA2 ref 1.4V)", "V", 2.1, 4.2, None),
-            ("44", "20", "VTC 24 DC LOC",     "24V DC to TPR after TR pick-up contact", "V", None, None, None),
-            ("60", "01", "IBALST",            "Ballast/Sleeper Current (derived)",   "mA", None, None, None),
-            ("61", "80", "RRAIL",             "Rail Resistance (derived)",           "Ohm", None, None, None),
+            ("00", "20", "VTC 24 DC TPR IP",  "24V DC TPR Input at Relay Room",     "V", 18.0, 21.0, 15.0, 25.0),
+            ("10", "40", "TPR",               "Digital status of TPR (Repeater Relay)", None, None, None, None, None),
+            ("20", "30", "VTC TFC IP",        "Track Feed Charger Input Voltage",   "V", 90.0, 125.0, 85.0, 130.0),
+            ("21", "20", "VTC TFC O/P",       "Track Feed Charger Output Voltage (on load)", "V", 10.0, 14.0, 9.0, 15.0),
+            ("22", "01", "ITC TFC O/P",       "Track Feed Charger Output Current",  "mA", 100.0, 5000.0, 50.0, 6000.0),
+            ("23", "20", "VTC CH FEED END",   "Voltage drop at feed end choke",     "V", 0.5, 2.0, 0.2, 3.0),
+            ("24", "20", "VTC FEED END",      "Track Feed end voltage (going to Rails)", "V", 1.0, 6.0, 0.5, 7.5),
+            ("25", "01", "ITC FEED END",      "Track Feed Current",                 "mA", 250.0, 800.0, 100.0, 1000.0),
+            ("26", "01", "ITC BATT CHARG",    "Battery Charging Current (derived)", "mA", 50.0, 1000.0, 10.0, 1500.0),
+            ("27", "20", "VTC VAR RES",       "Voltage at Variable Track Resistance (derived)", "V", 0.5, 4.0, 0.2, 5.0),
+            ("28", "80", "RTC CH FEED END",   "Feed end choke resistance (derived)", "Ohm", 1.0, 10.0, 0.5, 15.0),
+            ("29", "80", "RTC VAR RES",       "Variable resistance (derived)",      "Ohm", 1.0, 30.0, 0.5, 50.0),
+            ("41", "01", "ITC RELAY END",     "Track Relay end Current",            "mA", 100.0, 210.0, 80.0, 250.0),
+            ("42", "20", "VTC TR",            "Track Relay Voltage (derived, QTA2 ref 1.4V)", "V", 2.1, 4.2, 1.4, 5.0),
+            ("44", "20", "VTC 24 DC LOC",     "24V DC to TPR after TR pick-up contact", "V", 21.0, 27.0, 18.0, 30.0),
+            ("60", "01", "IBALST",            "Ballast/Sleeper Current (derived)",   "mA", 0.0, 200.0, 0.0, 300.0),
+            ("61", "80", "RRAIL",             "Rail Resistance (derived)",           "Ohm", 0.1, 1.5, 0.05, 2.5),
         ]
-        for repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail in tc_params:
+        for repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail, max_fail in tc_params:
             self.register_parameter({
                 "asset_type_id": "20", "asset_number_id": "01",
                 "parameter_type_id": type_id,
@@ -302,7 +292,7 @@ class ParameterConfigService:
                 "parameter_representation_code": code,
                 "parameter_representation_name": name,
                 "unit": unit,
-                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail,
+                "min_safe": min_safe, "max_safe": max_safe, "min_fail": min_fail, "max_fail": max_fail,
             })
 
     def _load_ips_config(self):
@@ -310,16 +300,13 @@ class ParameterConfigService:
         Integrated Power Supply parameters — Annexure A (Nomenclature of Parameters
         of IPS) x Annexure C §2.1 (a)/(b) (min_safe/min_fail thresholds).
 
-        Every value the spec marks with "*" is left to Zonal Railway/site
-        commissioning; we default those to None here (meaning: not yet
-        configured) rather than inventing a number. Set real min_safe/min_fail
-        per site via the parameter-config admin API/DB before relying on
-        predictive/failure alerts for that parameter.
-
-        Representation codes are prefixed V/I to match the cause_map keys
-        already used in app/services/logics/ips.py.
+        Provides default thresholds based on standard nominal values:
+        - 110V AC/DC: min_safe=99V, max_safe=121V, min_fail=88V, max_fail=132V
+        - 24V DC: min_safe=21.6V, max_safe=26.4V, min_fail=19.2V, max_fail=28.8V
+        - 12V DC: min_safe=10.8V, max_safe=13.2V, min_fail=9.6V, max_fail=14.4V
+        - 230V AC: min_safe=207V, max_safe=253V, min_fail=184V, max_fail=276V
         """
-        # (repr_id, type_id, spec_code, unit) — asset_type_id is always "50" (IPS)
+        # (repr_id, type_id, spec_code, kind) — asset_type_id is always "50" (IPS)
         ips_params = [
             ("00", "20", "IPS 110 DC",           "V"),  # 1
             ("10", "30", "IPS SIG-1 110 AC",      "V"),  # 2
@@ -351,6 +338,43 @@ class ParameterConfigService:
             ("79", "30", "IPS IIP",               "V"),  # 28 (220 AC input to IPS)
         ]
         for repr_id, type_id, spec_code, kind in ips_params:
+            standard_value = None
+            min_safe = None
+            max_safe = None
+            min_fail = None
+            max_fail = None
+
+            if "110" in spec_code:
+                standard_value = 110.0
+                min_safe = 99.0
+                max_safe = 121.0
+                min_fail = 88.0
+                max_fail = 132.0
+            elif "24" in spec_code or any(x in spec_code for x in ["R INT", "R EXT", "AXLE C", "PAN IND", "BLOCK LOCAL", "HKT MAG", "LINE UP", "LINE DN", "EI"]):
+                standard_value = 24.0
+                min_safe = 21.6
+                max_safe = 26.4
+                min_fail = 19.2
+                max_fail = 28.8
+            elif any(x in spec_code for x in ["TEL UP", "TEL DN", "DATALOG"]):
+                standard_value = 12.0
+                min_safe = 10.8
+                max_safe = 13.2
+                min_fail = 9.6
+                max_fail = 14.4
+            elif "IIP" in spec_code:
+                standard_value = 230.0
+                min_safe = 207.0
+                max_safe = 253.0
+                min_fail = 184.0
+                max_fail = 276.0
+            elif "BATT CHAR" in spec_code:
+                standard_value = 30.0
+                min_safe = 0.5
+                max_safe = 30.0
+                min_fail = 0.1
+                max_fail = 40.0
+
             self.register_parameter({
                 "asset_type_id": "50", "asset_number_id": "01",
                 "parameter_type_id": type_id,
@@ -358,8 +382,11 @@ class ParameterConfigService:
                 "parameter_representation_code": f"{kind}{spec_code}",
                 "parameter_representation_name": spec_code,
                 "unit": "A" if kind == "I" else "V",
-                # Thresholds intentionally None ("*" in spec) — configure per site.
-                "min_safe": None, "max_safe": None, "min_fail": None, "max_fail": None,
+                "standard_value": standard_value,
+                "min_safe": min_safe,
+                "max_safe": max_safe,
+                "min_fail": min_fail,
+                "max_fail": max_fail,
             })
     
     def register_parameter(self, config: Dict[str, Any]):

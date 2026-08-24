@@ -45,7 +45,7 @@ class IPSLogics:
         
         # Check all IPS voltage outputs
         if "VIPS" in param_config.parameter_representation_code or "IIPS" in param_config.parameter_representation_code:
-            threshold = min(avg_value * (IPSLogics.LD / 100), param_config.min_safe or float('inf'))
+            threshold = min(avg_value * (IPSLogics.LD / 100), param_config.min_safe if param_config.min_safe is not None else float('inf'))
             if value < threshold:
                 # Map to appropriate cause code
                 cause_map = {

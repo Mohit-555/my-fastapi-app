@@ -51,7 +51,7 @@ class PointMachineLogics:
         if para_id.startswith("0001") or param_config.parameter_representation_code in ["VPT 110 DC LOC N", "IPT N"]:
             # Check for normal operation voltage/current low
             if param_config.parameter_representation_code in ["VPT 110 DC LOC N", "IPT N"]:
-                threshold = min(avg_value * (PointMachineLogics.LD1 / 100), param_config.min_safe or float('inf'))
+                threshold = min(avg_value * (PointMachineLogics.LD1 / 100), param_config.min_safe if param_config.min_safe is not None else float('inf'))
                 
                 if value < threshold:
                     alerts.append({
@@ -62,7 +62,7 @@ class PointMachineLogics:
             
             # Logic 2: Predictive Alert - Reverse Voltage/Current Low at Loc
             elif param_config.parameter_representation_code in ["VPT 110 DC LOC R", "IPT R"]:
-                threshold = min(avg_value * (PointMachineLogics.LD1 / 100), param_config.min_safe or float('inf'))
+                threshold = min(avg_value * (PointMachineLogics.LD1 / 100), param_config.min_safe if param_config.min_safe is not None else float('inf'))
                 
                 if value < threshold:
                     alerts.append({

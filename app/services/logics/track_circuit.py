@@ -51,7 +51,7 @@ class TrackCircuitLogics:
         
         # Logic 1: Track Circuit predictive Alert - TFC input voltage Low
         if param_config.parameter_representation_code == "VTC TFC IP":
-            threshold = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe or float('inf'))
+            threshold = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe if param_config.min_safe is not None else float('inf'))
             if value < threshold:
                 alerts.append({
                     "cause_code": "TC_TFC_IP_VOLT_LOW",
@@ -61,7 +61,7 @@ class TrackCircuitLogics:
         
         # Logic 2: Track Circuit predictive Alert - TFC output voltage Low
         elif param_config.parameter_representation_code == "VTC TFC O/P":
-            threshold = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe or float('inf'))
+            threshold = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe if param_config.min_safe is not None else float('inf'))
             if value < threshold:
                 alerts.append({
                     "cause_code": "TC_TFC_OP_VOLT_LOW",
@@ -84,20 +84,19 @@ class TrackCircuitLogics:
                     "alert_type": AlertType.PREDICTIVE
                 })
         
-        # Logic 4: Track Circuit predictive Alert - Track Relay voltage low
+        # Logic 4 & 5: Track Circuit predictive Alert - Track Relay voltage low/high
         elif param_config.parameter_representation_code == "VTC TR":
-            threshold = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe or float('inf'))
-            if value < threshold:
+            # Low check
+            threshold_low = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe if param_config.min_safe is not None else float('inf'))
+            if value < threshold_low:
                 alerts.append({
                     "cause_code": "TC_TR_VOLT_LOW",
                     "cause_detail": "Track Ckt predictive Alert: Track Relay Voltage Low/ Under energization.",
                     "alert_type": AlertType.PREDICTIVE
                 })
-        
-        # Logic 5: Track Circuit predictive Alert - Track Relay voltage high
-        elif param_config.parameter_representation_code == "VTC TR":
-            threshold = max(avg_value * (TrackCircuitLogics.HD1 / 100), param_config.max_safe or 0)
-            if value > threshold:
+            # High check
+            threshold_high = max(avg_value * (TrackCircuitLogics.HD1 / 100), param_config.max_safe if param_config.max_safe is not None else 0.0)
+            if value > threshold_high:
                 alerts.append({
                     "cause_code": "TC_TR_OVER_ENERIZATION",
                     "cause_detail": "Track Ckt predictive Alert: Track Relay Voltage high/Over energization.",
