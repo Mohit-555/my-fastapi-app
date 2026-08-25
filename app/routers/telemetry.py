@@ -579,8 +579,7 @@ async def live_telemetry_stream(
     zone_code: Optional[str] = Query(None),
     division_code: Optional[str] = Query(None),
     asset_type: Optional[str] = Query(None),
-    asset_number: Optional[str] = Query(None),
-    asset_no: Optional[str] = Query(None),
+    asset_no: Optional[str] = Query(None, description="Asset number code, e.g. 'PT-103' (Required)"),
     poll_interval: int = Query(5, ge=1, le=60, description="Polling interval in seconds (1–60)"),
     db: Session = Depends(get_db),
 ):
@@ -588,13 +587,19 @@ async def live_telemetry_stream(
     Server-Sent Events stream for live telemetry of a specific asset at a station.
 
     Connect with EventSource in the browser:
-      const es = new EventSource('/telemetry/live?station_id=1&asset_number=PT-101&poll_interval=5');
+      const es = new EventSource('/telemetry/live?station_id=1&asset_no=PT-101&poll_interval=5');
       es.onmessage = (e) => { const d = JSON.parse(e.data); ... };
     """
-    # Use asset_no if asset_number is not provided
-    eff_asset_no = asset_number or asset_no
+    # Clean the asset_no parameter to handle empty strings, whitespaces, "null", and "undefined"
+    clean_no = asset_no.strip() if asset_no and asset_no.strip().lower() not in ("null", "undefined") else None
+    
+    # Fallback to check if asset_number is provided in raw query parameters (for backward compatibility)
+    raw_asset_number = request.query_params.get("asset_number")
+    clean_number = raw_asset_number.strip() if raw_asset_number and raw_asset_number.strip().lower() not in ("null", "undefined") else None
+    
+    eff_asset_no = clean_no or clean_number
     if not eff_asset_no:
-        raise HTTPException(status_code=400, detail="asset_number or asset_no is required")
+        raise HTTPException(status_code=400, detail="asset_no is required")
 
     # Resolve station
     stn_ids = _resolve_station_ids_by_codes(
