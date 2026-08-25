@@ -56,11 +56,22 @@ def register(request: Request, payload: UserRegisterRequest, db: Session = Depen
     if db.query(User).filter(User.email == payload.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    # SECURITY: self-registration always creates a GUEST account. The
+    # client-supplied role_id is ignored — privilege changes must go through
+    # the admin user-management endpoints (require_admin gated).
+    from app.rbac_defaults import DEFAULT_ROLES
+    guest_role_id = next(
+        (r["id"] for r in DEFAULT_ROLES if r["name"] == "GUEST"), 7
+    )
+    from app.models.models import Role
+    if not db.query(Role).filter(Role.id == guest_role_id).first():
+        guest_role_id = None  # roles not seeded yet — create unprivileged user
+
     user = User(
     full_name=payload.full_name,
     employee_id=payload.employee_id,
     designation=payload.designation,
-    role_id=payload.role_id,
+    role_id=guest_role_id,
     zone_id=payload.zone_id,
     division_id=payload.division_id,
     mobile_number=payload.mobile_number,

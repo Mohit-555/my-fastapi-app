@@ -51,8 +51,10 @@ class SMMSClient:
             response.raise_for_status()
             
             data = response.json()
-            assets = data.get("assets", [])
-            
+            # Annexure B §5.1 wraps the asset list in "info"; older SMMS
+            # drafts/our own test doubles used "assets" — accept both.
+            assets = data.get("info", data.get("assets", []))
+
             logger.info(f"Fetched {len(assets)} assets from SMMS for {station_code}")
             return assets
     

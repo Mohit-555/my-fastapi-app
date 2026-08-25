@@ -3,8 +3,6 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Any
 from datetime import datetime, timedelta
-import random
-import hashlib
 import csv
 import io
 
@@ -65,33 +63,25 @@ def _generate_history_data(
     rows = []
     for ts in timestamps:
         for r in rooms:
-            # Stable seed based on room id, type and timestamp
-            seed_str = f"{r.id}-{r.room_type}-{ts.isoformat()}"
-            seed_val = int(hashlib.md5(seed_str.encode('utf-8')).hexdigest(), 16) % 1000000
-            local_rand = random.Random(seed_val)
-
-            # Different realistic ranges based on room type
-            if r.room_type == "RR":
-                temp = round(local_rand.uniform(38.0, 42.0), 1)
-                hum = round(local_rand.uniform(50.0, 60.0), 1)
-            elif r.room_type == "IPS":
-                temp = round(local_rand.uniform(30.0, 36.0), 1)
-                hum = round(local_rand.uniform(55.0, 65.0), 1)
-            else:  # BATT
-                temp = round(local_rand.uniform(25.0, 31.0), 1)
-                hum = round(local_rand.uniform(60.0, 70.0), 1)
+            # Use DB-stored values; if not set, default to None (caller handles)
+            temp = r.temperature
+            hum = r.humidity
 
             station = r.station
             division = station.division
             zone = division.zone
 
-            # door_status: OPEN if temp exceeds threshold for room type
-            if r.room_type == "RR":
-                door_status = "OPEN" if temp > 40.0 else "CLOSED"
-            elif r.room_type == "IPS":
-                door_status = "OPEN" if temp > 34.0 else "CLOSED"
-            else:  # BATT
-                door_status = "OPEN" if temp > 29.0 else "CLOSED"
+            # door_status from DB if available, else derived from temperature threshold
+            door = getattr(r, "door_status", None)
+            if door is None:
+                if r.room_type == "RR":
+                    door = "OPEN" if (temp or 0) > 40.0 else "CLOSED"
+                elif r.room_type == "IPS":
+                    door = "OPEN" if (temp or 0) > 34.0 else "CLOSED"
+                else:  # BATT
+                    door = "OPEN" if (temp or 0) > 29.0 else "CLOSED"
+            else:
+                door_status = door
 
             rows.append({
                 "id": f"{r.id}-{r.room_type}-{ts.strftime('%Y%m%d%H%M')}",
@@ -103,7 +93,7 @@ def _generate_history_data(
                 "room_type": r.room_type,
                 "temperature": temp,
                 "humidity": hum,
-                "door_status": door_status,
+                "door_status": door,
             })
     return rows
 
@@ -139,16 +129,10 @@ def get_live_equipment_rooms(
 
     response_data = []
     for r in rooms:
-        # Generate random live values if temperature or humidity is not set in DB
+        # Use DB-stored values as-is; missing values stay None so the UI
+        # shows real gaps instead of fabricated numbers.
         temp = r.temperature
         hum = r.humidity
-        if temp is None:
-            # Generate temperature between 28.0 and 42.0
-            temp = round(random.uniform(28.0, 42.0), 1)
-        if hum is None:
-            # Generate humidity between 50 and 75
-            hum = round(random.uniform(50.0, 75.0), 1)
-
         # Get parent details
         station = r.station
         division = station.division

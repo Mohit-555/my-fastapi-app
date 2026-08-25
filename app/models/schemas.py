@@ -727,6 +727,8 @@ class AlertLiveResponse(BaseModel):
 class AlertFeedbackUpdate(BaseModel):
     feedback: str
     feedback_time: Optional[datetime] = None
+    # Mandatory (Annexure D §6) when a JE/SSE+ modifies already-submitted feedback
+    remarks: Optional[str] = None
 
 
 class AlertRemarkUpdate(BaseModel):

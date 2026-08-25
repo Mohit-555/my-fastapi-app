@@ -1,6 +1,6 @@
 import csv
 import io
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -307,14 +307,19 @@ def check_maintenance_reminders(db: Session = Depends(get_db)):
 
         elapsed_minutes = (now - mode.from_time).total_seconds() / 60
         if elapsed_minutes > limit_minutes:
-            # Exceeded standard duration! Generate a reminder alert if not already generated.
-            # We look for an AlertEvent with cause='MAINT-EXCEED' for this asset and station
-            # that was created after the maintenance mode's from_time.
+            # Exceeded standard duration. Annexure D §5.7 requires a reminder
+            # EVERY interval until the mode is cleared — so only suppress if
+            # a reminder was generated within the last `limit_minutes`
+            # minutes (previously any past reminder suppressed all repeats).
+            repeat_window_start = max(
+                mode.from_time,
+                now - timedelta(minutes=limit_minutes),
+            )
             exists = db.query(AlertEvent).filter(
                 AlertEvent.station_id == mode.station_id,
                 AlertEvent.asset_no == mode.asset_no,
                 AlertEvent.cause == "MAINT-EXCEED",
-                AlertEvent.alert_time >= mode.from_time
+                AlertEvent.alert_time >= repeat_window_start
             ).first()
 
             if not exists:

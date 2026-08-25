@@ -5,7 +5,7 @@ from typing import Dict, Any
 from app.services.statistics_service import statistics_service
 from app.services.redis_service import redis_service
 from app.services.smms_client import smms_client
-from app.models.models import Station
+from app.models.models import Station, AlertEvent
 from app.database import SessionLocal
 
 logger = logging.getLogger("scheduler")
@@ -48,6 +48,12 @@ class TaskScheduler:
         self.tasks.append(
             asyncio.create_task(self._maintenance_reminder_task())
         )
+
+        # Escalation SLA timers (Annexure D §13) — auto-push alerts through
+        # the ESM→JE→SSE→ASTE/DSTE chain with configurable delays.
+        self.tasks.append(
+            asyncio.create_task(self._escalation_task())
+        )
     
     async def stop(self):
         """Stop all background tasks"""
@@ -72,9 +78,10 @@ class TaskScheduler:
                 
                 await asyncio.sleep(wait_seconds)
                 
-                # Process yesterday's data
-                yesterday = now - timedelta(days=1)
-                await self._aggregate_daily_stats(yesterday.date())
+                # Compute the date AFTER the sleep — capturing `now` before
+                # sleeping aggregates the wrong day (off-by-one).
+                yesterday = datetime.now().date() - timedelta(days=1)
+                await self._aggregate_daily_stats(yesterday)
                 
             except asyncio.CancelledError:
                 break
@@ -83,14 +90,31 @@ class TaskScheduler:
                 await asyncio.sleep(60)  # Wait before retry
     
     async def _hourly_health_check(self):
-        """Check health of all gateways"""
+        """Summarize gateway/sensor/IoT health from cached snapshots."""
+        from app.models.models import Gateway
         while self.is_running:
             try:
                 await asyncio.sleep(3600)  # Run every hour
-                
-                # Check all registered gateways
-                # (Can get gateways from DB/Cache to check last_seen if needed)
-                
+
+                db = SessionLocal()
+                try:
+                    gateways = db.query(Gateway).all()
+                    faulty = []
+                    for gw in gateways:
+                        try:
+                            sensors = await redis_service.get_sensor_health_summary(gw.stngw_id) or {}
+                            iot = await redis_service.get_iot_health_summary(gw.stngw_id) or {}
+                            if (sensors or {}).get("faulty", 0) or (iot or {}).get("faulty", 0):
+                                faulty.append(gw.stngw_id)
+                        except Exception:
+                            logger.debug(f"No health snapshot for gateway {gw.stngw_id}")
+                    if faulty:
+                        logger.warning(f"Hourly health check: {len(faulty)} gateway(s) with faulty components: {faulty}")
+                    else:
+                        logger.info(f"Hourly health check: all {len(gateways)} gateway(s) healthy")
+                finally:
+                    db.close()
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -98,13 +122,12 @@ class TaskScheduler:
                 await asyncio.sleep(60)
     
     async def _cleanup_task(self):
-        """Clean up old Redis keys"""
+        """Daily housekeeping — evict expired entries from the in-memory
+        fallback cache (real Redis expires keys by itself)."""
         while self.is_running:
             try:
                 await asyncio.sleep(86400)  # Run daily
-                
-                # Clean up old alert keys (older than 7 days)
-                
+                await redis_service.purge_expired()
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -112,8 +135,53 @@ class TaskScheduler:
                 await asyncio.sleep(60)
     
     async def _aggregate_daily_stats(self, date_val: date):
-        """Aggregate statistics for a specific date"""
+        """Aggregate statistics for a specific date.
+
+        Counts alerts raised on `date_val` grouped by type/status and stores
+        the summary in Redis under daily_stats:<date> (7-day retention) so
+        dashboards can show day-over-day history without re-querying.
+        """
+        from app.models.models import AlertEvent
+        from sqlalchemy import func
+        import json
+
         logger.info(f"Aggregating daily statistics for {date_val}")
+        db = SessionLocal()
+        try:
+            start = datetime(date_val.year, date_val.month, date_val.day)
+            end = start + timedelta(days=1)
+            rows = (
+                db.query(
+                    AlertEvent.alert_type,
+                    AlertEvent.alert_status,
+                    func.count(AlertEvent.id),
+                )
+                .filter(AlertEvent.alert_time >= start, AlertEvent.alert_time < end)
+                .group_by(AlertEvent.alert_type, AlertEvent.alert_status)
+                .all()
+            )
+            summary = {
+                f"{alert_type}:{status}": count
+                for alert_type, status, count in rows
+            }
+            total = sum(summary.values())
+            logger.info(f"Daily stats for {date_val}: {total} alert(s) — {summary}")
+
+            key = f"daily_stats:{date_val.isoformat()}"
+            payload = json.dumps(summary)
+            try:
+                if redis_service.is_fallback:
+                    redis_service._in_memory_db[key] = {
+                        "value": summary,
+                        "timestamp": datetime.now(),
+                        "expiry": datetime.now().timestamp() + 7 * 86400,
+                    }
+                else:
+                    redis_service.client.setex(key, 7 * 86400, payload)
+            except Exception as e:
+                logger.debug(f"Could not persist daily stats to Redis: {e}")
+        finally:
+            db.close()
 
     async def _asset_sync_task(self):
         """Synchronize assets from SMMS daily at 2:00 AM"""
@@ -164,6 +232,79 @@ class TaskScheduler:
                 break
             except Exception as e:
                 logger.error(f"Error in maintenance reminder task: {e}")
+                await asyncio.sleep(60)
+
+    async def _escalation_task(self):
+        """
+        Annexure D §13 — Escalation chain SLA timers.
+
+        Chain: ESM → JE/SE → SSE → ASTE/DSTE. Every 60s, active alerts that
+        have sat at their current escalation level longer than the configured
+        delay are pushed to the next level. Position is tracked on the
+        AlertEvent row (escalation_level / escalated_at) so the chain
+        survives restarts and is visible to the API.
+
+        Delays are read from env (ESCALATION_DELAY_<LEVEL>_MIN) with spec
+        defaults of 2/3/6 minutes.
+        """
+        import os
+
+        delays = {
+            "ESM": int(os.getenv("ESCALATION_DELAY_ESM_MIN", "2")),
+            "JE": int(os.getenv("ESCALATION_DELAY_JE_MIN", "3")),
+            "SSE": int(os.getenv("ESCALATION_DELAY_SSE_MIN", "6")),
+        }
+        next_level = {"ESM": "JE", "JE": "SSE", "SSE": "ASTE/DSTE"}
+
+        while self.is_running:
+            try:
+                await asyncio.sleep(60)
+
+                db = SessionLocal()
+                try:
+                    now = datetime.now()
+                    escalated = 0
+
+                    for level, delay_min in delays.items():
+                        cutoff = now - timedelta(minutes=delay_min)
+                        stale = (
+                            db.query(AlertEvent)
+                            .filter(
+                                AlertEvent.alert_status == "Active",
+                                AlertEvent.acknowledged == False,  # noqa: E712
+                                AlertEvent.feedback.notin_(["F"]),  # false feedback stops escalation
+                                (
+                                    (AlertEvent.escalation_level == level)
+                                    | (AlertEvent.escalation_level.is_(None) & (level == "ESM"))
+                                ),
+                                AlertEvent.alert_time <= cutoff,
+                            )
+                            .all()
+                        )
+                        for alert in stale:
+                            # Respect a previous manual/auto escalation time if set
+                            last_change = alert.escalated_at or alert.alert_time
+                            if last_change and last_change > cutoff:
+                                continue
+                            target = next_level[level]
+                            if alert.escalation_level == "ASTE/DSTE":
+                                continue  # terminal
+                            alert.escalation_level = target
+                            alert.escalated_at = now
+                            note = f"Auto-escalated to {target} after {delay_min} min at level {level}"
+                            alert.remark = f"{alert.remark} | {note}" if alert.remark else note
+                            escalated += 1
+
+                    if escalated:
+                        db.commit()
+                        logger.info(f"Escalated {escalated} alert(s) up the ESM→JE→SSE→ASTE chain")
+                finally:
+                    db.close()
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in escalation task: {e}")
                 await asyncio.sleep(60)
 
     async def _perform_asset_sync(self):

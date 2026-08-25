@@ -20,6 +20,16 @@ class AlertPriority(str, Enum):
     MEDIUM = "medium"
     LOW = "low"
 
+
+def build_alert_key(station_id, asset_number_code: str, cause_code: str, alert_type_value) -> str:
+    """Dedup/tracking key for an alert.
+
+    Station-scoped: identical asset numbers exist at different stations, so
+    keys without the station would cross-suppress alerts between stations.
+    Used consistently by alert_engine and routers/alerts.py.
+    """
+    return f"{station_id}:{asset_number_code}:{cause_code}:{alert_type_value}"
+
 class AlertEngine:
     def __init__(self):
         self.active_alerts = {}  # Track active alerts per asset
@@ -120,20 +130,22 @@ class AlertEngine:
     
     def _should_generate_alert(
         self,
+        station_id: int,
         asset_number_code: str,
         cause_code: str,
         alert_type: AlertType,
         db: Session
     ) -> bool:
         """Check if an alert should be generated (deduplication logic)"""
-        key = f"{asset_number_code}:{cause_code}:{alert_type.value}"
-        
+        key = build_alert_key(station_id, asset_number_code, cause_code, alert_type.value)
+
         # If alert already active in memory, don't generate another
         if key in self.active_alerts:
             return False
-        
+
         # 1. Sync from DB if active alert exists but is not in memory cache (e.g. after a restart)
         existing_db = db.query(AlertEvent).filter(
+            AlertEvent.station_id == station_id,
             AlertEvent.asset_no == asset_number_code,
             AlertEvent.cause == cause_code,
             AlertEvent.alert_status == "Active"
@@ -155,6 +167,16 @@ class AlertEngine:
                 "IPS_110_AC_TR_VOLT_FAIL": "IPS_110_AC_TR_VOLT_LOW",
                 "IPS_IIP_VOLT_FAIL": "IPS_IIP_VOLT_LOW",
                 "IPS_SMR_1_VOLT_FAIL": "IPS_SMR_1_VOLT_LOW",
+                "IPS_SMR_2_VOLT_FAIL": "IPS_SMR_2_VOLT_LOW",
+                "IPS_SMR_3_VOLT_FAIL": "IPS_SMR_3_VOLT_LOW",
+                "IPS_SMR_4_VOLT_FAIL": "IPS_SMR_4_VOLT_LOW",
+                "IPS_SMR_5_VOLT_FAIL": "IPS_SMR_5_VOLT_LOW",
+                "IPS_110_AC_SIG_2_VOLT_FAIL": "IPS_110_AC_SIG_2_VOLT_LOW",
+                "IPS_110_AC_SIG_3_VOLT_FAIL": "IPS_110_AC_SIG_3_VOLT_LOW",
+                "IPS_110_AC_SIG_4_VOLT_FAIL": "IPS_110_AC_SIG_4_VOLT_LOW",
+                "IPS_110_AC_TR_2_VOLT_FAIL": "IPS_110_AC_TR_2_VOLT_LOW",
+                "IPS_110_AC_TR_3_VOLT_FAIL": "IPS_110_AC_TR_3_VOLT_LOW",
+                "IPS_110_AC_TR_4_VOLT_FAIL": "IPS_110_AC_TR_4_VOLT_LOW",
                 "IPS_DC_R_INT_VOLT_FAIL": "IPS_DC_R_INT_VOLT_LOW",
                 "IPS_DC_R_EXT_VOLT_FAIL": "IPS_DC_R_EXT_VOLT_LOW",
                 "IPS_DC_AXLE_C_VOLT_FAIL": "IPS_DC_AXLE_C_VOLT_LOW",
@@ -176,6 +198,9 @@ class AlertEngine:
                 "SIG_HHG_VOLT_CURR_FAIL": "SIG_HHG_VOLT_CURR_LOW",
                 "SIG_RG_VOLT_CURR_FAIL": "SIG_RG_VOLT_CURR_LOW",
                 "SIG_UNKNOWN_VOLT_CURR_FAIL": "SIG_UNKNOWN_VOLT_CURR_LOW",
+                "SIG_DPR_VOLT_FAIL": "SIG_DPR_VOLT_CURR_LOW",
+                "SIG_HPR_VOLT_FAIL": "SIG_HPR_VOLT_CURR_LOW",
+                "SIG_HHPR_VOLT_FAIL": "SIG_HHPR_VOLT_CURR_LOW",
                 "COSIG_ASPECT_VOLT_CURR_FAIL": "COSIG_ASPECT_VOLT_CURR_LOW",
                 "ROSIG_ASPECT_VOLT_CURR_FAIL": "ROSIG_ASPECT_VOLT_CURR_LOW",
                 
@@ -199,13 +224,14 @@ class AlertEngine:
                 else:
                     pred_cause = cause_code
             
-            pred_key = f"{asset_number_code}:{pred_cause}:{AlertType.PREDICTIVE.value}"
-            
+            pred_key = build_alert_key(station_id, asset_number_code, pred_cause, AlertType.PREDICTIVE.value)
+
             if pred_key in self.active_alerts:
                 self._resolve_alert(pred_key, f"Escalated to Failure ({cause_code})", db)
             else:
                 # Also look up in DB to resolve it if it exists active in DB
                 existing_pred = db.query(AlertEvent).filter(
+                    AlertEvent.station_id == station_id,
                     AlertEvent.asset_no == asset_number_code,
                     AlertEvent.cause == pred_cause,
                     AlertEvent.alert_status == "Active"
@@ -268,7 +294,7 @@ class AlertEngine:
     ) -> Optional[AlertEvent]:
         """Generate and store an alert using existing router"""
         
-        if not self._should_generate_alert(asset_number_code, cause_code, alert_type, db):
+        if not self._should_generate_alert(station_id, asset_number_code, cause_code, alert_type, db):
             return None
         
         # Import here to avoid circular imports
@@ -290,7 +316,7 @@ class AlertEngine:
             alert = create_alert_event(payload, db)
             
             # Track active alert
-            key = f"{asset_number_code}:{cause_code}:{alert_type.value}"
+            key = build_alert_key(station_id, asset_number_code, cause_code, alert_type.value)
             self.active_alerts[key] = {
                 "alert_id": alert.id,
                 "timestamp": timestamp

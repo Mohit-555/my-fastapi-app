@@ -1,9 +1,12 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+import logging
 
 from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent, Gateway, Telemetry, MaintenanceMode, AssetTypeMaster, AlertCauseMaster, Asset
 from app.auth_utils import hash_password
 from app.constants import ASSET_TYPE_MAP
+
+logger = logging.getLogger("rbac_defaults")
 
 
 DEFAULT_MENUS = [
@@ -393,6 +396,9 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
 
         user = db.query(User).filter(User.employee_id == u_data["employee_id"]).first()
         if user:
+            # SECURITY: never overwrite an existing account's password during
+            # reseeding — previously every restart reset all default users to
+            # "admin123", silently reverting password changes.
             user.full_name = u_data["full_name"]
             user.role_id = u_data["role_id"]
             user.email = u_data["email"]
@@ -400,7 +406,6 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
             user.designation = u_data["designation"]
             user.zone_id = zone_id
             user.division_id = division_id
-            user.hashed_password = default_password_hash
             user.is_active = u_data["is_active"]
         else:
             user = User(
@@ -911,6 +916,16 @@ def ensure_default_alert_causes(db: Session) -> None:
         {"cause_code": "IPS_110_AC_TR_VOLT_FAIL", "cause_detail": "IPS failed. 110 AC TR-1 O/P Voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
         {"cause_code": "IPS_IIP_VOLT_FAIL", "cause_detail": "IPS failed. IIP voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
         {"cause_code": "IPS_SMR_1_VOLT_FAIL", "cause_detail": "IPS failed. SMR-1 voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_SMR_2_VOLT_FAIL", "cause_detail": "IPS failed. SMR-2 voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_SMR_3_VOLT_FAIL", "cause_detail": "IPS failed. SMR-3 voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_SMR_4_VOLT_FAIL", "cause_detail": "IPS failed. SMR-4 voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_SMR_5_VOLT_FAIL", "cause_detail": "IPS failed. SMR-5 voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_110_AC_SIG_2_VOLT_FAIL", "cause_detail": "IPS failed. 110 AC Sig-2 O/P Voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_110_AC_SIG_3_VOLT_FAIL", "cause_detail": "IPS failed. 110 AC Sig-3 O/P Voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_110_AC_SIG_4_VOLT_FAIL", "cause_detail": "IPS failed. 110 AC Sig-4 O/P Voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_110_AC_TR_2_VOLT_FAIL", "cause_detail": "IPS failed. 110 AC TR-2 O/P Voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_110_AC_TR_3_VOLT_FAIL", "cause_detail": "IPS failed. 110 AC TR-3 O/P Voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
+        {"cause_code": "IPS_110_AC_TR_4_VOLT_FAIL", "cause_detail": "IPS failed. 110 AC TR-4 O/P Voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
         {"cause_code": "IPS_DC_R_INT_VOLT_FAIL", "cause_detail": "IPS failed. DC R INT voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
         {"cause_code": "IPS_DC_R_EXT_VOLT_FAIL", "cause_detail": "IPS failed. DC R EXT voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
         {"cause_code": "IPS_DC_AXLE_C_VOLT_FAIL", "cause_detail": "IPS failed. DC AXLE C voltage failed.", "asset_type_id": "50", "alert_category": "FAILURE"},
@@ -931,6 +946,16 @@ def ensure_default_alert_causes(db: Session) -> None:
         {"cause_code": "IPS_BATT_CHAR_CURR_LOW", "cause_detail": "IPS predictive Alert: Battery Charging current low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
         {"cause_code": "IPS_IIP_VOLT_LOW", "cause_detail": "IPS predictive Alert: IIP voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
         {"cause_code": "IPS_SMR_1_VOLT_LOW", "cause_detail": "IPS predictive Alert: SMR-1 voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_SMR_2_VOLT_LOW", "cause_detail": "IPS predictive Alert: SMR-2 voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_SMR_3_VOLT_LOW", "cause_detail": "IPS predictive Alert: SMR-3 voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_SMR_4_VOLT_LOW", "cause_detail": "IPS predictive Alert: SMR-4 voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_SMR_5_VOLT_LOW", "cause_detail": "IPS predictive Alert: SMR-5 voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_110_AC_SIG_2_VOLT_LOW", "cause_detail": "IPS predictive Alert: 110 AC Sig-2 O/P Voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_110_AC_SIG_3_VOLT_LOW", "cause_detail": "IPS predictive Alert: 110 AC Sig-3 O/P Voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_110_AC_SIG_4_VOLT_LOW", "cause_detail": "IPS predictive Alert: 110 AC Sig-4 O/P Voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_110_AC_TR_2_VOLT_LOW", "cause_detail": "IPS predictive Alert: 110 AC TR-2 O/P Voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_110_AC_TR_3_VOLT_LOW", "cause_detail": "IPS predictive Alert: 110 AC TR-3 O/P Voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
+        {"cause_code": "IPS_110_AC_TR_4_VOLT_LOW", "cause_detail": "IPS predictive Alert: 110 AC TR-4 O/P Voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
         {"cause_code": "IPS_DC_R_INT_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC R INT voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
         {"cause_code": "IPS_DC_R_EXT_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC R EXT voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},
         {"cause_code": "IPS_DC_AXLE_C_VOLT_LOW", "cause_detail": "IPS predictive Alert: DC AXLE C voltage low.", "asset_type_id": "50", "alert_category": "PREDICTIVE"},

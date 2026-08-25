@@ -3,6 +3,16 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+# Placeholder values that must never reach production. Startup refuses to
+# continue when secrets are missing or left at these known-bad values.
+_KNOWN_BAD_SECRETS = {
+    "your-secret-api-key-here-change-in-production",
+    "change-this-to-a-long-random-secret",
+    "change-me",
+    "secret",
+}
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -11,9 +21,10 @@ class Settings(BaseSettings):
     )
 
     DATABASE_URL: str
-    API_KEY: str = "your-secret-api-key-here-change-in-production"
+    SECRET_KEY: str = ""   # JWT signing key — REQUIRED, see validate_security_settings()
+    API_KEY: str = ""      # shared gateway/dashboard ingestion key — REQUIRED
     SMMS_BASE_URL: str = "https://smms.indianrailways.gov.in/api"
-    SMMS_API_KEY: str = "your-secret-api-key-here-change-in-production"
+    SMMS_API_KEY: str = ""  # optional: only needed when SMMS integration is enabled
     VENDOR_CODE: str = "XYZ"
     VENDOR_NAME: str = "XYZ Signalling Ltd"
 
@@ -46,6 +57,45 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def validate_security_settings() -> None:
+    """Fail fast at startup when secrets are missing or left at known-bad
+    placeholder values. Raises RuntimeError listing every offender so the
+    operator sees all problems in one boot, not one per restart.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    secret = (settings.SECRET_KEY or "").strip()
+    if not secret:
+        errors.append("SECRET_KEY is not set (required for JWT signing)")
+    elif secret.lower() in _KNOWN_BAD_SECRETS:
+        errors.append("SECRET_KEY is still the documented placeholder value")
+    elif len(secret) < 32:
+        errors.append("SECRET_KEY is too short — use >= 32 random characters")
+
+    api_key = (settings.API_KEY or "").strip()
+    if not api_key:
+        errors.append("API_KEY is not set (required for gateway ingestion auth)")
+    elif api_key.lower() in _KNOWN_BAD_SECRETS:
+        errors.append("API_KEY is still the documented placeholder value")
+
+    smms_key = (settings.SMMS_API_KEY or "").strip()
+    if not smms_key or smms_key.lower() in _KNOWN_BAD_SECRETS:
+        warnings.append(
+            "SMMS_API_KEY is unset/placeholder — SMMS integration endpoints will reject requests"
+        )
+
+    for w in warnings:
+        print(f"WARNING: {w}")
+
+    if errors:
+        raise RuntimeError(
+            "Refusing to start due to insecure configuration:\n  - " + "\n  - ".join(errors)
+        )
+
+
 
 engine = create_engine(
     settings.database_url,

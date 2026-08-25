@@ -12,7 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from app.database import SessionLocal, engine
-from app.auth_utils import get_current_user
+from app.auth_utils import get_current_user, require_admin
 from app.models.models import Base
 from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin, equipment_room, maintenance, webhook, config, statistics, websocket, sse, realtime, smms_telemetry, dashboard, monitoring, slave_card, performance
 from app.routers import auth
@@ -70,7 +70,10 @@ if os.getenv("RUN_STARTUP_SEEDING") == "1":
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup — refuse to serve with insecure/placeholder secrets
+    from app.database import validate_security_settings
+    validate_security_settings()
+
     if os.getenv("RUN_STARTUP_SEEDING") == "1":
         logger.info("Validating seed data...")
         try:
@@ -154,13 +157,17 @@ async def global_exception_handler(request, exc):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=".*",
+    # Explicit allow-list (comma-separated env var), NOT a wildcard: this app
+    # serves authenticated browser clients, and wildcard+credentials is both
+    # spec-violating and an injection risk.
+    allow_origins=[o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 protected_route = [Depends(get_current_user)]
+admin_route = [Depends(require_admin)]
 
 # ── Reference data ────────────────────────────────────────────────────────────
 app.include_router(zones.router, dependencies=protected_route)
@@ -174,7 +181,7 @@ app.include_router(assets.router, dependencies=protected_route)
 app.include_router(alerts.router, dependencies=protected_route)
 
 # Add after the alerts router line:
-app.include_router(admin.router, dependencies=protected_route)
+app.include_router(admin.router, dependencies=admin_route)
 app.include_router(equipment_room.router, dependencies=protected_route)
 app.include_router(maintenance.router, dependencies=protected_route)
 # ── Gateway ingestion ─────────────────────────────────────────────────────────
@@ -183,7 +190,8 @@ app.include_router(slave_card.router, dependencies=protected_route)
 
 # ── Telemetry query & live stream ─────────────────────────────────────────────
 app.include_router(telemetry.router, dependencies=protected_route)
-app.include_router(telemetry.integration_router)
+# SMMS/vendor integration endpoints expose historical telemetry — JWT required
+app.include_router(telemetry.integration_router, dependencies=protected_route)
 app.include_router(auth.router)
 app.include_router(webhook.router)
 app.include_router(websocket.router)
@@ -191,7 +199,7 @@ app.include_router(sse.router)
 app.include_router(realtime.router)
 app.include_router(smms_telemetry.router)
 app.include_router(dashboard.router)
-app.include_router(performance.router)
+app.include_router(performance.router, dependencies=protected_route)
 app.include_router(monitoring.router)
 # ── Decode utilities ──────────────────────────────────────────────────────────
 app.include_router(decode.router, dependencies=protected_route)

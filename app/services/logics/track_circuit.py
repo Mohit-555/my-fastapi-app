@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.models.models import Telemetry, Asset
 from app.services.alert_engine import AlertType
 from app.services.parameter_config_service import param_config_service
+from app.services.timestamp_utils import parse_prt
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +33,25 @@ class TrackCircuitLogics:
         alerts = []
         
         # Get recent data for average calculation
-        recent_data = db.query(Telemetry).filter(
+        limit = 100
+        # prt is a string in Annexure-B "DD-MM-YYYY" format — lexicographic
+        # SQL comparison/ordering is meaningless for it. Order by id
+        # (insertion order) and filter by the parsed timestamp instead.
+        rows = db.query(Telemetry).filter(
             Telemetry.gateway_id == gateway_id,
-            Telemetry.para_id == para_id,
-            Telemetry.prt >= (datetime.utcnow() - timedelta(days=15)).isoformat()
-        ).order_by(Telemetry.prt.desc()).limit(100).all()
+            Telemetry.para_id == para_id
+        ).order_by(Telemetry.id.desc()).limit(400).all()
+
+        cutoff = datetime.utcnow() - timedelta(days=15)
+        recent_data = []
+        for row in rows:
+            ts = parse_prt(row.prt)
+            if ts is None and row.received_at is not None:
+                ts = row.received_at.replace(tzinfo=None) if row.received_at.tzinfo else row.received_at
+            if ts is not None and ts >= cutoff:
+                recent_data.append(row)
+            if len(recent_data) >= limit:
+                break
         
         if not recent_data:
             return alerts
@@ -47,7 +62,7 @@ class TrackCircuitLogics:
             return alerts
         avg_value = sum(values) / len(values)
         
-        param_config = param_config_service.get_parameter_config(para_id)
+        param_config = param_config_service.get_effective_config(db, para_id, asset.station_id)
         
         if not param_config:
             return alerts
@@ -57,7 +72,9 @@ class TrackCircuitLogics:
             if param_config.min_safe is None:
                 logger.debug("Track Circuit TFC IP: min_safe not configured, skipping alert")
                 return alerts
-            threshold = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe)
+            # Spec semantics: "< LD1 % of avg value OR Min safe" — either
+            # condition alone must raise the alert.
+            threshold = max(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe)
             if value < threshold:
                 alerts.append({
                     "cause_code": "TC_TFC_IP_VOLT_LOW",
@@ -70,7 +87,7 @@ class TrackCircuitLogics:
             if param_config.min_safe is None:
                 logger.debug("Track Circuit TFC O/P: min_safe not configured, skipping alert")
                 return alerts
-            threshold = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe)
+            threshold = max(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe)
             if value < threshold:
                 alerts.append({
                     "cause_code": "TC_TFC_OP_VOLT_LOW",
@@ -101,16 +118,16 @@ class TrackCircuitLogics:
             if param_config.min_safe is None or param_config.max_safe is None:
                 logger.debug("Track Circuit VTC TR: min_safe/max_safe not configured, skipping alert")
                 return alerts
-            # Low check
-            threshold_low = min(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe)
+            # Low check — "< LD1 % of avg OR Min safe"
+            threshold_low = max(avg_value * (TrackCircuitLogics.LD1 / 100), param_config.min_safe)
             if value < threshold_low:
                 alerts.append({
                     "cause_code": "TC_TR_VOLT_LOW",
                     "cause_detail": "Track Ckt predictive Alert: Track Relay Voltage Low/ Under energization.",
                     "alert_type": AlertType.PREDICTIVE
                 })
-            # High check
-            threshold_high = max(avg_value * (TrackCircuitLogics.HD1 / 100), param_config.max_safe)
+            # High check — "> HD1 % of avg OR Max safe"
+            threshold_high = min(avg_value * (TrackCircuitLogics.HD1 / 100), param_config.max_safe)
             if value > threshold_high:
                 alerts.append({
                     "cause_code": "TC_TR_OVER_ENERIZATION",
@@ -148,7 +165,7 @@ class TrackCircuitLogics:
         """Check all failure logics for track circuit (Section 2.3(b))"""
         alerts = []
         
-        param_config = param_config_service.get_parameter_config(para_id)
+        param_config = param_config_service.get_effective_config(db, para_id, asset.station_id)
         
         if not param_config:
             return alerts

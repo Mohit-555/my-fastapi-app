@@ -1460,8 +1460,8 @@ def create_alert_event(payload: AlertEventCreate, db: Session = Depends(get_db))
     db.refresh(record)
 
     # Track in alert engine
-    from app.services.alert_engine import alert_engine
-    key = f"{record.asset_no}:{record.cause}:{record.alert_type}"
+    from app.services.alert_engine import alert_engine, build_alert_key
+    key = build_alert_key(record.station_id, record.asset_no, record.cause, record.alert_type)
     alert_engine.active_alerts[key] = {
         "alert_id": record.id,
         "timestamp": record.alert_time
@@ -1523,6 +1523,24 @@ def update_alert_feedback(
     if payload.feedback.upper() not in {"T", "PT", "F", "M"}:
         raise HTTPException(status_code=400, detail="feedback must be one of T, PT, F, M")
 
+    # Annexure D §6: once a maintainer submits feedback it is locked; only
+    # JE/SE/SSE or higher (role level <= 4) may modify an already-submitted
+    # feedback, and the request must carry remarks explaining the change.
+    if record.feedback:
+        role = getattr(current_user, "role", None)
+        level = getattr(role, "level", 99)
+        if level > 4:
+            raise HTTPException(
+                status_code=403,
+                detail="Feedback already submitted — only JE/SSE or higher authority can modify it"
+            )
+        if not payload.remarks:
+            raise HTTPException(
+                status_code=400,
+                detail="Remarks are mandatory when modifying submitted feedback"
+            )
+        record.remark = payload.remarks
+
     record.feedback = payload.feedback.upper()
     record.feedback_time = payload.feedback_time or datetime.utcnow()
 
@@ -1533,8 +1551,8 @@ def update_alert_feedback(
             record.rectification_time = datetime.utcnow()
             
         # Clear active alert tracking
-        from app.services.alert_engine import alert_engine
-        key = f"{record.asset_no}:{record.cause}:{record.alert_type}"
+        from app.services.alert_engine import alert_engine, build_alert_key
+        key = build_alert_key(record.station_id, record.asset_no, record.cause, record.alert_type)
         if key in alert_engine.active_alerts:
             del alert_engine.active_alerts[key]
         alert_engine.alert_history[key] = datetime.utcnow()
@@ -1621,8 +1639,8 @@ def update_alert_rectification(
 
     if record.alert_status == "Cleared":
         # Clear active alert tracking
-        from app.services.alert_engine import alert_engine
-        key = f"{record.asset_no}:{record.cause}:{record.alert_type}"
+        from app.services.alert_engine import alert_engine, build_alert_key
+        key = build_alert_key(record.station_id, record.asset_no, record.cause, record.alert_type)
         if key in alert_engine.active_alerts:
             del alert_engine.active_alerts[key]
         alert_engine.alert_history[key] = datetime.utcnow()

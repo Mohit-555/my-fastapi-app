@@ -3,10 +3,12 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from typing import Optional, Dict
 import json
 import asyncio
+import os
 from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
+from app.auth_utils import get_user_from_token_optional, extract_ws_token
 from app.services.websocket_manager import websocket_manager
 from app.services.redis_service import redis_service
 from app.models.models import Station, Gateway, AlertEvent
@@ -15,9 +17,31 @@ logger = logging.getLogger("websocket")
 
 router = APIRouter(tags=["WebSocket"])
 
+
+WS_AUTH_REQUIRED = os.getenv("WS_AUTH_REQUIRED", "1") == "1"
+
+
+async def authenticate_websocket(websocket: WebSocket) -> Optional[object]:
+    """Validate the JWT from the WS handshake. Accepts then closes with 4401
+    on failure so browsers get a clean close event. Returns the User (or
+    None when closed). Disable with WS_AUTH_REQUIRED=0 for local debugging."""
+    if not WS_AUTH_REQUIRED:
+        return None
+    token = extract_ws_token(websocket)
+    with SessionLocal() as db:
+        user = get_user_from_token_optional(token, db) if token else None
+    if user is None:
+        await websocket.accept()
+        await websocket.close(code=4401, reason="Unauthorized: missing or invalid token")
+        return None
+    return user
+
+
 @router.websocket("/ws/dashboard")
 async def websocket_dashboard(websocket: WebSocket):
     """Notify the React dashboard when /api/dashboard/overview should be refreshed."""
+    if await authenticate_websocket(websocket) is None and WS_AUTH_REQUIRED:
+        return
     connection_id = await websocket_manager.connect(
         websocket=websocket,
         station_code="__dashboard__",
@@ -49,7 +73,11 @@ async def websocket_telemetry(
     
     Clients receive real-time parameter updates for the specified station.
     Optional filters: asset_type, asset_no
+    
+    Auth: pass the JWT access token as `?token=` query parameter.
     """
+    if await authenticate_websocket(websocket) is None and WS_AUTH_REQUIRED:
+        return
     connection_id = await websocket_manager.connect(
         websocket=websocket,
         station_code=station_code,
@@ -94,7 +122,12 @@ async def websocket_alerts(
     WebSocket endpoint for live alert streaming.
     
     Clients receive real-time alert notifications for the specified station.
+    
+    Auth: pass the JWT access token as `?token=` query parameter.
     """
+    ws_user = await authenticate_websocket(websocket)
+    if ws_user is None and WS_AUTH_REQUIRED:
+        return
     connection_id = await websocket_manager.connect(
         websocket=websocket,
         station_code=station_code,
@@ -114,7 +147,8 @@ async def websocket_alerts(
                     websocket_manager.handle_pong(connection_id)
                     continue
                 if message.get("action") == "acknowledge":
-                    await handle_acknowledgement(websocket, message, station_code)
+                    await handle_acknowledgement(websocket, message, station_code,
+                                                 acknowledged_by=getattr(ws_user, "employee_id", None))
                 elif message.get("action") == "subscribe":
                     await handle_alert_subscription(websocket, message, station_code)
             except json.JSONDecodeError:
@@ -137,7 +171,11 @@ async def websocket_health(
     WebSocket endpoint for live health status streaming.
     
     Clients receive real-time health updates for sensors, IoT, gateway, and network.
+    
+    Auth: pass the JWT access token as `?token=` query parameter.
     """
+    if await authenticate_websocket(websocket) is None and WS_AUTH_REQUIRED:
+        return
     connection_id = await websocket_manager.connect(
         websocket=websocket,
         station_code=station_code,
@@ -307,8 +345,8 @@ async def handle_client_message(websocket: WebSocket, message: Dict, station_cod
         }))
 
 
-async def handle_acknowledgement(websocket: WebSocket, message: Dict, station_code: str):
-    """Handle alert acknowledgement from client"""
+async def handle_acknowledgement(websocket: WebSocket, message: Dict, station_code: str, acknowledged_by: Optional[str] = None):
+    """Handle alert acknowledgement from client (identity recorded)."""
     alert_id = message.get("alert_id")
     if not alert_id:
         await websocket.send_text(json.dumps({
@@ -321,6 +359,8 @@ async def handle_acknowledgement(websocket: WebSocket, message: Dict, station_co
         alert = db.query(AlertEvent).filter(AlertEvent.id == alert_id).first()
         if alert:
             alert.acknowledged = True
+            if not alert.remark:
+                alert.remark = f"Acknowledged via WebSocket by {acknowledged_by or 'unknown'}"
             db.commit()
     
     await websocket.send_text(json.dumps({

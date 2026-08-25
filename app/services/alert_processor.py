@@ -6,23 +6,23 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.services.alert_engine import alert_engine
 from app.models.models import Telemetry, Gateway, AssetParameter, Asset
+from app.services.timestamp_utils import parse_prt
 
 logger = logging.getLogger("alert_processor")
 
-def safe_parse_datetime(prt_str: str) -> datetime:
-    if not prt_str:
-        return datetime.utcnow()
-    clean_str = prt_str.replace(" IST", "").strip()
-    try:
-        return datetime.fromisoformat(clean_str)
-    except ValueError:
-        try:
-            return datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S.%f")
-        except ValueError:
-            try:
-                return datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                return datetime.utcnow()
+def safe_parse_datetime(prt_str: str, fallback: datetime = None) -> datetime:
+    """Parse a Telemetry.prt string; never fabricates timestamps.
+
+    Falls back to `fallback` (the row's real received_at ingest time) and
+    only then to utcnow. Previously an unparseable string silently became
+    utcnow(), corrupting alert incidence times.
+    """
+    parsed = parse_prt(prt_str)
+    if parsed is not None:
+        return parsed
+    if fallback is not None:
+        return fallback.replace(tzinfo=None) if fallback.tzinfo else fallback
+    return datetime.utcnow()
 
 class AlertProcessor:
     """Background service to process telemetry for alerts"""
@@ -131,7 +131,7 @@ class AlertProcessor:
                             cause_code=alert_data["cause_code"],
                             cause_detail=alert_data["cause_detail"],
                             alert_type=alert_data["alert_type"],
-                            timestamp=safe_parse_datetime(telemetry.prt),
+                            timestamp=safe_parse_datetime(telemetry.prt, fallback=telemetry.received_at),
                             db=db
                         )
                         if alert:

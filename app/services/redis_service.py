@@ -52,7 +52,24 @@ class RedisService:
                 logger.info("Redis connection closed.")
             except redis.RedisError:
                 logger.debug("Failed to close Redis client", exc_info=True)
-    
+
+    async def purge_expired(self) -> int:
+        """Eagerly evict expired entries from the in-memory fallback cache.
+
+        Real Redis expires keys itself; the fallback dict only evicts lazily
+        on read, so unread keys accumulate forever. Returns number purged.
+        """
+        if self.is_fallback:
+            now = datetime.now().timestamp()
+            expired = [k for k, rec in self._in_memory_db.items()
+                       if isinstance(rec, dict) and rec.get("expiry") is not None and rec["expiry"] <= now]
+            for k in expired:
+                self._in_memory_db.pop(k, None)
+            if expired:
+                logger.info(f"Purged {len(expired)} expired keys from in-memory cache")
+            return len(expired)
+        return 0
+
     # ============ Latest Parameter Values ============
     
     async def store_latest_parameter(

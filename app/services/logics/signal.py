@@ -26,7 +26,10 @@ class SignalLogics:
     # Main Signal keeps its original cause codes ("SIG_DG_...") unchanged so
     # existing alert history / dashboards keep working.
     _MAIN_ASPECTS = ["HHG", "DG", "HG", "RG"]  # HHG checked before HG (HG is a substring of HHG)
+    _MAIN_PR_VOLTS = ["HHPR", "DPR", "HPR"]    # HHPR checked before HPR (HPR is a substring of HHPR)
     _SHUNT_ASPECTS = ["ON", "OFF", "PILOT"]
+
+    _CURRENT_TYPE_IDS = {"00", "01", "10", "11"}   # DC-A, DC-mA, AC-A, AC-mA
 
     @staticmethod
     def _identify(code: str) -> Optional[Tuple[str, str]]:
@@ -39,6 +42,9 @@ class SignalLogics:
             for aspect in SignalLogics._MAIN_ASPECTS:
                 if aspect in code:
                     return ("MAIN", aspect)
+            for pr_volt in SignalLogics._MAIN_PR_VOLTS:
+                if pr_volt in code:
+                    return ("MAIN", pr_volt)
             logger.warning(f"Unknown aspect for MAIN signal parameter: {code}")
             return ("MAIN", "UNKNOWN")
 
@@ -70,7 +76,7 @@ class SignalLogics:
         """Check all predictive logics for signals (Main/Calling ON/Route/Shunt)"""
         alerts = []
 
-        param_config = param_config_service.get_parameter_config(para_id)
+        param_config = param_config_service.get_effective_config(db, para_id, asset.station_id)
         if not param_config:
             return alerts
 
@@ -89,6 +95,11 @@ class SignalLogics:
         }[signal_type]
 
         label = f"{aspect}_"
+        # Annexure C defines a high-side predictive (CURR HIGH) only for
+        # current parameters. Voltage-high is emitted as a clearly-named
+        # vendor extension (VOLT_HIGH) so over-voltage is never mislabeled
+        # as a current alert.
+        is_current_param = param_config.parameter_type_id in SignalLogics._CURRENT_TYPE_IDS
 
         if param_config.min_safe is not None and value < param_config.min_safe:
             alerts.append({
@@ -98,9 +109,10 @@ class SignalLogics:
             })
 
         if param_config.max_safe is not None and value > param_config.max_safe:
+            high_code = f"{prefix}_{label}CURR_HIGH" if is_current_param else f"{prefix}_{label}VOLT_HIGH"
             alerts.append({
-                "cause_code": f"{prefix}_{label}CURR_HIGH",
-                "cause_detail": f"{signal_type.replace('_', ' ').title()} Signal predictive Alert: Current of {aspect if aspect != 'ASPECT' else 'signal'} Aspect high.",
+                "cause_code": high_code,
+                "cause_detail": f"{signal_type.replace('_', ' ').title()} Signal predictive Alert: {'Current' if is_current_param else 'Voltage'} of {aspect if aspect != 'ASPECT' else 'signal'} Aspect high.",
                 "alert_type": AlertType.PREDICTIVE
             })
 
@@ -119,8 +131,24 @@ class SignalLogics:
         """Check all failure logics for signals (Main/Calling ON/Route/Shunt)"""
         alerts = []
 
-        param_config = param_config_service.get_parameter_config(para_id)
+        param_config = param_config_service.get_effective_config(db, para_id, asset.station_id)
         if not param_config:
+            return alerts
+
+        # Bimodal (relay-gated) parameters — e.g. Shunt ON aspect carries
+        # Min-fail ABOVE its lit band (spec Max safe=58 / Min fail=90), so a
+        # plain `value < min_fail` check would fire on every normal sample.
+        # Correct evaluation needs the SH-HR relay state (Annexure C §2.7);
+        # until that is implemented, skip failure generation for them.
+        if (param_config.min_fail is not None
+                and param_config.max_safe is not None
+                and param_config.min_fail > param_config.max_safe):
+            logger.debug(
+                "Skipping failure check for %s: min_fail (%s) sits above "
+                "max_safe (%s); requires relay-gated evaluation.",
+                param_config.parameter_representation_code,
+                param_config.min_fail, param_config.max_safe
+            )
             return alerts
 
         if param_config.min_fail is None or value >= param_config.min_fail:
@@ -147,7 +175,11 @@ class SignalLogics:
                                 "alert_type": AlertType.FAILURE})
             elif aspect == "RG":
                 alerts.append({"cause_code": "SIG_RG_VOLT_CURR_FAIL",
-                                "cause_detail": "Sig No. RG Aspect failed. HR DN. Signal blank in ON position.",
+                                "cause_detail": "Sig No. RG Aspect failed. Voltage or Current of RG Aspect failed.",
+                                "alert_type": AlertType.FAILURE})
+            elif aspect in SignalLogics._MAIN_PR_VOLTS:
+                alerts.append({"cause_code": f"SIG_{aspect}_VOLT_FAIL",
+                                "cause_detail": f"Sig No. {aspect} Voltage failed.",
                                 "alert_type": AlertType.FAILURE})
             else:
                 alerts.append({"cause_code": "SIG_UNKNOWN_VOLT_CURR_FAIL",

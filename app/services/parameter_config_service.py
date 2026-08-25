@@ -19,6 +19,8 @@ class ParameterConfigService:
     def __init__(self):
         # key: (asset_type_id, parameter_type_id, parameter_representation_id)
         self.config_cache: dict = {}
+        # key: (asset_type_hex, parameter_type_hex, station_id) → (mono_ts, Threshold row)
+        self._threshold_cache: dict = {}
         self._load_default_config()
     
     def _load_default_config(self):
@@ -109,13 +111,13 @@ class ParameterConfigService:
             ("10", "40", "DR",         "Digital status of DR (Green feed extended)", None, None, None, None, None),
             ("11", "40", "HR",         "Digital status of HR (Yellow feed extended)", None, None, None, None, None),
             ("12", "40", "HHR",        "Digital status of HHR (Double Yellow feed extended)", None, None, None, None, None),
-            ("20", "20", "VSIG DPR",   "DPR Voltage",                 "V", 18.0, 21.0, None, None),
-            ("21", "20", "VSIG HPR",   "HPR Voltage",                 "V", 18.0, 21.0, None, None),
-            ("22", "20", "VSIG HHPR",  "HHPR Voltage",                "V", 18.0, 21.0, None, None),
-            ("30", "30", "VSIG DG",    "Green Aspect Voltage",        "V", 90.0, None, 85.0, None),
-            ("31", "30", "VSIG HG",    "Yellow Aspect Voltage",       "V", 90.0, None, 85.0, None),
-            ("32", "30", "VSIG HHG",   "Double Yellow Aspect Voltage","V", 90.0, None, 85.0, None),
-            ("33", "30", "VSIG RG",    "Red Aspect Voltage",          "V", 90.0, None, 85.0, None),
+            ("20", "20", "VSIG DPR",   "DPR Voltage",                 "V", 21.0, None, 18.0, None),
+            ("21", "20", "VSIG HPR",   "HPR Voltage",                 "V", 21.0, None, 18.0, None),
+            ("22", "20", "VSIG HHPR",  "HHPR Voltage",                "V", 21.0, None, 18.0, None),
+            ("30", "30", "VSIG DG",    "Green Aspect Voltage",        "V", 90.0, None, 82.0, None),
+            ("31", "30", "VSIG HG",    "Yellow Aspect Voltage",       "V", 90.0, None, 82.0, None),
+            ("32", "30", "VSIG HHG",   "Double Yellow Aspect Voltage","V", 90.0, None, 82.0, None),
+            ("33", "30", "VSIG RG",    "Red Aspect Voltage",          "V", 90.0, None, 82.0, None),
             ("40", "11", "ISIG DG",    "Green Aspect Current",        "mA", 110.0, 150.0, 90.0, None),
             ("41", "11", "ISIG HG",    "Yellow Aspect Current",       "mA", 110.0, 150.0, 90.0, None),
             ("42", "11", "ISIG HHG",   "Double Yellow Aspect Current","mA", 110.0, 150.0, 90.0, None),
@@ -134,18 +136,21 @@ class ParameterConfigService:
 
     def _load_calling_on_signal_config(self):
         """
-        Calling ON Signal parameters — Annexure A §3(n), page 24 (asset_type_id="12").
+        Calling ON Signal parameters — Annexure A §3(n), "Nomenclature of
+        Parameters Calling ON Signal" (asset_type_id="12").
 
-        NOTE: "Calling ON Aspect Voltage/Current" both carry Max Safe=58 /
-        Min Safe=52 / Min Fail=90 in the source document.
+        Spec thresholds (Max safe | Min safe | Min fail):
+        - VCOSIG HPR:            __ | 21 | 18
+        - VCOSIG Aspect Voltage: 165 | 120 | 90   (110V AC feed family)
+        - ICOSIG Aspect Current: __ | 93 | 87
         """
         # (repr_id, type_id, code, name, min_safe, max_safe, min_fail, max_fail)
         co_params = [
             ("00", "40", "CO-HECR",   "Digital status of Calling ON HECR", None, None, None, None),
             ("10", "40", "CO-HR",     "Digital status of Calling ON HR",   None, None, None, None),
-            ("20", "20", "COSIG HPR", "Calling ON HPR Voltage",            21.0, 27.0, 18.0, None),
-            ("30", "30", "COSIG",     "Calling ON Aspect Voltage",         52.0, 58.0, 90.0, None),
-            ("40", "11", "ICOSIG",    "Calling ON Aspect Current",         52.0, 58.0, 90.0, None),
+            ("20", "20", "COSIG HPR", "Calling ON HPR Voltage",            21.0, None, 18.0, None),
+            ("30", "30", "COSIG",     "Calling ON Aspect Voltage",         120.0, 165.0, 90.0, None),
+            ("40", "11", "ICOSIG",    "Calling ON Aspect Current",         93.0, None, 87.0, None),
         ]
         for repr_id, type_id, code, name, min_safe, max_safe, min_fail, max_fail in co_params:
             self.register_parameter({
@@ -165,7 +170,7 @@ class ParameterConfigService:
         ro_params = [
             ("00", "40", "UECR",      "Digital status of UECR",  None, None, None, None),
             ("10", "40", "UHR",       "Digital status of UHR",   None, None, None, None),
-            ("20", "20", "ROSIG HPR", "Route HPR Voltage",       21.0, 27.0, 18.0, None),
+            ("20", "20", "ROSIG HPR", "Route HPR Voltage",       21.0, None, 18.0, None),
             ("30", "30", "ROSIG",     "Route Aspect Voltage",    119.0, 131.0, 90.0, None),
             ("40", "11", "IROSIG",    "Route Aspect Current",    93.0, None, 87.0, None),
         ]
@@ -181,18 +186,30 @@ class ParameterConfigService:
 
     def _load_shunt_signal_config(self):
         """
-        Shunt Signal parameters — Annexure A §3(n), page 27 (asset_type_id="11").
+        Shunt Signal parameters — Annexure A §3(n), "Nomenclature of
+        Parameters of Shunt Signal" (asset_type_id="11").
+
+        Spec thresholds (Max safe | Min safe | Min fail):
+        - VSHSIG ON:   58 | 52 | 90   ┐ bimodal/relay-gated readings:
+        - ISHSIG ON:   58 | 52 | 90   ┘ Min-fail sits ABOVE the lit band,
+                                       so failure evaluation requires the
+                                       SH-HR relay state (Annexure C §2.7).
+                                       signal.py skips these until relay-
+                                       gated evaluation is implemented.
+        - VSHSIG OFF:  __ | 93 | 87
+        - ISHSIG OFF:  58 | 52 | __
+        - ISHSIG PILOT: __ | 93 | 87
         """
         # (repr_id, type_id, code, name, min_safe, max_safe, min_fail, max_fail)
         sh_params = [
             ("00", "40", "SH-ECR OFF",   "Digital status of Shunt ECR (OFF)", None, None, None, None),
             ("01", "40", "SH-ECR ON",    "Digital status of Shunt ECR (ON)",  None, None, None, None),
             ("10", "40", "SH-HR",        "Digital status of Shunt HR",        None, None, None, None),
-            ("20", "20", "SHSIG HPR",    "Shunt HPR Voltage",                 21.0, 27.0, 18.0, None),
+            ("20", "20", "SHSIG HPR",    "Shunt HPR Voltage",                 21.0, None, 18.0, None),
             ("30", "30", "SHSIG ON",     "Shunt ON Aspect Voltage",           52.0, 58.0, 90.0, None),
-            ("31", "30", "SHSIG OFF",    "Shunt OFF Aspect Voltage",          87.0, 93.0, 80.0, None),
+            ("31", "30", "SHSIG OFF",    "Shunt OFF Aspect Voltage",          93.0, None, 87.0, None),
             ("40", "11", "ISHSIG ON",    "Shunt ON Aspect Current",           52.0, 58.0, 90.0, None),
-            ("41", "11", "ISHSIG OFF",   "Shunt OFF Aspect Current",          52.0, 58.0, 90.0, None),
+            ("41", "11", "ISHSIG OFF",   "Shunt OFF Aspect Current",          52.0, 58.0, None, None),
             ("42", "11", "ISHSIG PILOT", "Shunt PILOT Aspect Current",        93.0, None, 87.0, None),
         ]
         for repr_id, type_id, code, name, min_safe, max_safe, min_fail, max_fail in sh_params:
@@ -215,9 +232,11 @@ class ParameterConfigService:
         app/services/logics/point_machine.py — without these registered,
         that logic can never fire.
 
-        Default thresholds:
-        - TPT N / TPT R: max_safe=5.0s (obstruction warning), max_fail=8.0s (failure)
+        Default thresholds (Annexure A):
+        - VPT 110 DC LOC N / R: min_safe=90V, min_fail=82V
         - VPT 24 DC LOC N / R: min_safe=21V, max_safe=27V, min_fail=18V
+        - TPT N / TPT R: max_safe=8.0s (≈ WJR timer − 1.5 s; obstruction
+          declared when operation time exceeds this)
         """
         # (repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail, max_fail)
         pm_params = [
@@ -227,8 +246,11 @@ class ParameterConfigService:
             ("11", "40", "RWKR",             "Digital status of RWKR",                     None, None, None, None, None),
             ("12", "40", "NWCR",             "Digital status of NWCR",                     None, None, None, None, None),
             ("13", "40", "RWCR",             "Digital status of RWCR",                     None, None, None, None, None),
-            ("20", "20", "VPT 110 DC LOC N", "110 DC at Loc box for Normal",               "V", 82.0, 90.0, None, None),
-            ("21", "20", "VPT110 DC LOC R",  "110 DC at Loc box for Reverse",              "V", 82.0, 90.0, None, None),
+            ("20", "20", "VPT 110 DC LOC N", "110 DC at Loc box for Normal",               "V", 90.0, None, 82.0, None),
+            # NOTE: spec Annexure A row 8 writes this code WITHOUT a space
+            # ("VPT110 DC LOC R"); kept verbatim. Matching in logics/
+            # point_machine.py normalizes whitespace, so both spellings work.
+            ("21", "20", "VPT110 DC LOC R",  "110 DC at Loc box for Reverse",              "V", 90.0, None, 82.0, None),
             ("30", "00", "IPT N",            "Point Machine Current Normal",               "A", None, None, None, None),
             ("31", "00", "IPT R",            "Point Machine Current Reverse",              "A", None, None, None, None),
             # Gateway hardware sends representation_id=0C/0D for IPT N/R.
@@ -240,8 +262,10 @@ class ParameterConfigService:
             ("40", "20", "VPT 24 DC LOC N",  "24V DC to Relay Room after detection — Normal", "V", 21.0, 27.0, 18.0, None),
             ("41", "20", "VPT 24 DC LOC R",  "24V DC to Relay Room after detection — Reverse", "V", 21.0, 27.0, 18.0, None),
             ("50", "60", "XPT",              "Vibration (Optional)",                       None, None, None, None, None),
-            ("60", "90", "TPT N",            "Normal Operation Time (derived, obstruction check)", "sec", None, 5.0, None, 8.0),
-            ("61", "90", "TPT R",            "Reverse Operation Time (derived, obstruction check)", "sec", None, 5.0, None, 8.0),
+            # Spec: TPT max safe ≈ WJR timer − 1.5 s (default 8 s); obstruction
+            # is declared when operation time exceeds max safe.
+            ("60", "90", "TPT N",            "Normal Operation Time (derived, obstruction check)", "sec", None, 8.0, None, None),
+            ("61", "90", "TPT R",            "Reverse Operation Time (derived, obstruction check)", "sec", None, 8.0, None, None),
         ]
         for repr_id, type_id, code, name, unit, min_safe, max_safe, min_fail, max_fail in pm_params:
             self.register_parameter({
@@ -461,6 +485,79 @@ class ParameterConfigService:
         if not config:
             logger.debug(f"No config for para_id {para_id} (key={key})")
         return config
+
+    def get_effective_config(self, db, para_id: str, station_id: Optional[int] = None) -> Optional[ParameterConfig]:
+        """
+        Resolve the effective configuration for a parameter by merging the
+        static Annexure A defaults with any operator-configured overrides
+        from the `thresholds` table (#23).
+
+        Lookup priority: station-specific row → global default row
+        (station_id IS NULL). Only non-NULL columns on the DB row override
+        the static defaults, so partial overrides are supported.
+
+        warning_low/high map onto min_safe/max_safe and critical_low/high
+        onto min_fail/max_fail.
+        """
+        base = self.get_parameter_config(para_id)
+        if not base:
+            return None
+
+        if len(para_id) != 8:
+            return base
+
+        asset_type_hex = para_id[0:2].upper()
+        parameter_type_hex = para_id[4:6].upper()
+
+        # Small TTL cache so per-telemetry lookups don't hammer the DB
+        import time as _time
+        now_mono = _time.monotonic()
+        cache_key = (asset_type_hex, parameter_type_hex, station_id)
+        cached = self._threshold_cache.get(cache_key)
+        if cached and (now_mono - cached[0]) < 60:
+            row = cached[1]
+        else:
+            from app.models.models import Threshold
+            row = None
+            if station_id is not None:
+                row = (
+                    db.query(Threshold)
+                    .filter(
+                        Threshold.asset_type_hex == asset_type_hex,
+                        Threshold.parameter_type_hex == parameter_type_hex,
+                        Threshold.station_id == station_id,
+                    )
+                    .first()
+                )
+            if row is None:
+                row = (
+                    db.query(Threshold)
+                    .filter(
+                        Threshold.asset_type_hex == asset_type_hex,
+                        Threshold.parameter_type_hex == parameter_type_hex,
+                        Threshold.station_id.is_(None),
+                    )
+                    .first()
+                )
+            self._threshold_cache[cache_key] = (now_mono, row)
+
+        if row is None:
+            return base
+
+        # Copy the static config so we never mutate the shared cache entry
+        import copy
+        merged = copy.copy(base)
+        if row.warning_low is not None:
+            merged.min_safe = row.warning_low
+        if row.warning_high is not None:
+            merged.max_safe = row.warning_high
+        if row.critical_low is not None:
+            merged.min_fail = row.critical_low
+        if row.critical_high is not None:
+            merged.max_fail = row.critical_high
+        if row.unit:
+            merged.unit = row.unit
+        return merged
     
     def get_parameters_by_asset_type(self, asset_type_id: str) -> List[ParameterConfig]:
         """Get all parameters for an asset type"""

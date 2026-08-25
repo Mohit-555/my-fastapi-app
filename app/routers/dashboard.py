@@ -794,25 +794,9 @@ async def get_performance_report(
             pred_alert_per = 0.0
             actual_fail_alert_per = 0.0
 
-        # Fallback to realistic mock values if values are 0 to make the charts display beautifully
-        if fail_alert_per == 0.0:
-            import hashlib
-            seed = int(hashlib.md5(stn.station_code.encode()).hexdigest(), 16) % 1000
-            import random
-            random.seed(seed)
-            fail_alert_per = round(random.uniform(78.0, 92.0), 1)
-        if pred_alert_per == 0.0:
-            import hashlib
-            seed = int(hashlib.md5((stn.station_code + "_pred").encode()).hexdigest(), 16) % 1000
-            import random
-            random.seed(seed)
-            pred_alert_per = round(random.uniform(70.0, 85.0), 1)
-        if actual_fail_alert_per == 0.0:
-            import hashlib
-            seed = int(hashlib.md5((stn.station_code + "_actual").encode()).hexdigest(), 16) % 1000
-            import random
-            random.seed(seed)
-            actual_fail_alert_per = round(random.uniform(85.0, 96.0), 1)
+        # No mock fallback: report real values (0.0 when no alert data yet).
+        # Fabricating percentages here previously hid outages and inflated
+        # KPIs on the common dashboard.
 
         result_rows.append({
             "zone": stn.division.zone.zone_code,
@@ -901,14 +885,24 @@ async def get_dashboard_overview(
         total_assets = asset_query.scalar() or 0
         active_failures = alert_query.scalar() or 0
         
-        system_health = max(0.0, min(100.0, round(((total_assets - active_failures) / total_assets) * 100, 1))) if total_assets > 0 else 94.0
+        system_health = max(0.0, min(100.0, round(((total_assets - active_failures) / total_assets) * 100, 1))) if total_assets > 0 else 0.0
 
-        # 2. Gateway Health %
-        gateway_query = db.query(func.count(Gateway.id))
+        # 2. Gateway Health % — computed from cached health snapshots
+        gateway_q = db.query(Gateway)
         if station_ids is not None:
-            gateway_query = gateway_query.filter(Gateway.station_id.in_(station_ids))
-        total_gateways = gateway_query.scalar() or 0
-        gateway_health = 96.0 if total_gateways > 0 else 96.0
+            gateway_q = gateway_q.filter(Gateway.station_id.in_(station_ids))
+        gw_rows = gateway_q.all()
+        total_gateways = len(gw_rows)
+        healthy_gateways = 0
+        for gw in gw_rows:
+            try:
+                sensors = await redis_service.get_sensor_health_summary(gw.stngw_id) or {}
+                iot = await redis_service.get_iot_health_summary(gw.stngw_id) or {}
+                if not (sensors.get("faulty", 0) or iot.get("faulty", 0)):
+                    healthy_gateways += 1
+            except Exception:
+                pass
+        gateway_health = round(healthy_gateways / total_gateways * 100, 1) if total_gateways > 0 else 0.0
 
         # 3. Prediction Accuracy %
         pred_total_query = db.query(func.count(AlertEvent.id)).filter(AlertEvent.alert_type == 'Predictive')
@@ -1159,7 +1153,9 @@ async def get_dashboard_overview(
         # Override for consistency between top-level visual cards and detailed KPI counts
         total_assets = total_assets_dict["total"]
         active_failures = total_assets_dict["failure"]
-        system_health = max(0.0, min(100.0, round(((total_assets - active_failures) / total_assets) * 100, 1))) if total_assets > 0 else 94.0
+        # With no assets there are no failures — report 100 rather than
+        # inventing a plausible-looking number.
+        system_health = max(0.0, min(100.0, round(((total_assets - active_failures) / total_assets) * 100, 1))) if total_assets > 0 else 100.0
 
         sensor_dict = {
             "healthy": total_assets_dict["healthy"],
@@ -1268,21 +1264,17 @@ async def get_dashboard_overview(
         }
     except Exception as e:
         logger.error(f"Error generating dashboard overview: {e}")
+        # Honest empty payload on failure — previously this returned a fully
+        # fabricated dashboard which masked outages.
         return {
             "status": False,
             "message": f"Error generating dashboard overview: {str(e)}",
             "data": {
-                "assetCounts": {
-                    "Point Machine": {"healthy": 34, "predictive": 6, "failure": 2, "total": 42},
-                    "DC Track Circuit": {"healthy": 60, "predictive": 10, "failure": 5, "total": 75},
-                    "Main Signal": {"healthy": 34, "predictive": 6, "failure": 2, "total": 42},
-                    "Axle Counter": {"healthy": 34, "predictive": 6, "failure": 2, "total": 42},
-                    "LC Gate": {"healthy": 34, "predictive": 6, "failure": 2, "total": 42}
-                },
-                "totalAssets": {"healthy": 170, "predictive": 20, "failure": 10, "total": 200},
-                "sensor": {"healthy": 170, "failure": 10, "total": 180},
-                "iot": {"healthy": 170, "failure": 10, "total": 180},
-                "system": {"cpu": 42, "ram": 61, "storage": 38},
+                "assetCounts": {},
+                "totalAssets": {"healthy": 0, "predictive": 0, "failure": 0, "total": 0},
+                "sensor": {"healthy": 0, "failure": 0, "total": 0},
+                "iot": {"healthy": 0, "failure": 0, "total": 0},
+                "system": {"cpu": 0, "ram": 0, "storage": 0},
                 "alertTrend": [],
                 "predictive": 0,
                 "failure": 0,
@@ -1291,17 +1283,17 @@ async def get_dashboard_overview(
                 "failureFrequency": [],
                 "maintenanceMetrics": [],
                 "recentActivity": [],
-                "gatewayHealth": 96,
+                "gatewayHealth": 0,
                 "predictionAccuracy": [],
-                "availability": {"pointMachine": 97, "trackCircuit": 95, "axleCounter": 92},
+                "availability": {"pointMachine": 0, "trackCircuit": 0, "axleCounter": 0},
                 "failureCauses": [],
                 "kpis": {
-                    "total_assets": 200,
-                    "failures": 10,
-                    "system_health": 94.0,
-                    "gateway_health": 96,
-                    "prediction_accuracy": 91.0,
-                    "mttr_hours": 4.2
+                    "total_assets": 0,
+                    "failures": 0,
+                    "system_health": 0.0,
+                    "gateway_health": 0,
+                    "prediction_accuracy": 0.0,
+                    "mttr_hours": 0.0
                 }
             }
         }
