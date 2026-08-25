@@ -1,3 +1,4 @@
+from typing import Optional
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,6 +28,12 @@ class Settings(BaseSettings):
     SMMS_API_KEY: str = ""  # optional: only needed when SMMS integration is enabled
     VENDOR_CODE: str = "XYZ"
     VENDOR_NAME: str = "XYZ Signalling Ltd"
+
+    # Redis config settings loaded from .env
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: Optional[str] = None
 
     # ── mTLS (Annexure B §6) ──────────────────────────────────────────────
     # TLS itself is terminated by the reverse proxy (nginx/Traefik/etc), not
