@@ -448,6 +448,7 @@ def _base_live_query(
     station: Optional[str],
     alert_type: Optional[str],
     asset_type_hex: Optional[str],
+    asset_no: Optional[str] = None,
 ):
     q = (
         db.query(
@@ -480,6 +481,7 @@ def _base_live_query(
     station = _blank_to_none(station)
     alert_type = _normalize_alert_type(alert_type)
     asset_type_hex = _blank_to_none(asset_type_hex)
+    asset_no = _blank_to_none(asset_no)
 
     if zone_id is not None:
         q = q.filter(Zone.id == zone_id)
@@ -495,13 +497,15 @@ def _base_live_query(
         q = q.filter(func.upper(Station.station_code) == station.upper())
     if alert_type:
         q = q.filter(func.lower(AlertEvent.alert_type) == alert_type.lower())
+    if asset_no:
+        q = q.filter(func.upper(AlertEvent.asset_no) == asset_no.upper().strip())
 
     if asset_type_hex:
         asset_hexes = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
         if asset_hexes:
             q = q.filter(AlertEvent.asset_type_hex.in_(asset_hexes))
 
-    return q.order_by(AlertEvent.alert_time.desc(), AlertEvent.id.desc())
+    return q.order_by(AlertEvent.acknowledged.asc(), AlertEvent.alert_time.desc(), AlertEvent.id.desc())
 
 
 def _live_cards(raw_rows) -> List[AlertLiveCard]:
@@ -687,16 +691,20 @@ def get_alert_live(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
     station_id: Optional[int] = Query(None),
+    zone: Optional[str] = Query(None),
+    division: Optional[str] = Query(None),
+    station: Optional[str] = Query(None),
     alert_type: Optional[str] = Query(None),
     asset_type: Optional[str] = Query(None),
+    asset_no: Optional[str] = Query(None),
     limit: int = Query(100, le=1000),
     db: Session = Depends(get_db),
 ):
     """Return unresolved live alert cards and live counters."""
     asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
     raw_rows = _base_live_query(
-        db, zone_id, division_id, station_id, None, None, None,
-        alert_type, asset_type_hex,
+        db, zone_id, division_id, station_id, zone, division, station,
+        alert_type, asset_type_hex, asset_no
     ).limit(limit).all()
     alerts = _live_cards(raw_rows)
     predictive = sum(1 for row in alerts if row.alert_type.lower() == "predictive")
@@ -1391,13 +1399,23 @@ def _broadcast_alert_update(record: AlertEvent):
             "acknowledged": record.acknowledged
         }
         try:
-            asyncio.create_task(
-                websocket_manager.broadcast_alert(
-                    alert=alert_data,
-                    station_code=station_code
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    websocket_manager.broadcast_alert(
+                        alert=alert_data,
+                        station_code=station_code
+                    )
                 )
-            )
-        except RuntimeError:
+            except RuntimeError:
+                import anyio
+                async def run_broadcast():
+                    await websocket_manager.broadcast_alert(
+                        alert=alert_data,
+                        station_code=station_code
+                    )
+                anyio.from_thread.run(run_broadcast)
+        except Exception:
             pass
 
     safe_notify_dashboard("alert_updated")
