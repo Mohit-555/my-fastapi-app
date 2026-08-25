@@ -136,29 +136,68 @@ def _parse_date_range(
     return start_dt, end_dt
 
 
+def _parse_list_param(param: Any) -> Optional[List[str]]:
+    """Parse comma-separated strings, lists, or other types into a clean list of strings"""
+    if not param:
+        return None
+    if isinstance(param, list):
+        flat_list = []
+        for item in param:
+            if isinstance(item, str):
+                flat_list.extend([x.strip() for x in item.split(",") if x.strip()])
+            elif item is not None:
+                flat_list.append(str(item))
+        return flat_list if flat_list else None
+    if isinstance(param, str):
+        return [x.strip() for x in param.split(",") if x.strip()]
+    return [str(param)]
+
+
 def _resolve_location_ids(
     db: Session,
-    zones: Optional[List[str]] = None,
-    divisions: Optional[List[str]] = None,
-    stations: Optional[List[str]] = None
+    zones: Any = None,
+    divisions: Any = None,
+    stations: Any = None
 ) -> tuple[Optional[List[int]], Optional[List[int]], Optional[List[int]]]:
-    """Resolve zone/division/station codes to IDs"""
+    """Resolve zone/division/station codes to IDs in a cascading/interconnected manner"""
     zone_ids = None
     division_ids = None
     station_ids = None
     
-    if zones:
-        zone_records = db.query(Zone).filter(Zone.zone_code.in_(zones)).all()
+    zones_list = _parse_list_param(zones)
+    divisions_list = _parse_list_param(divisions)
+    stations_list = _parse_list_param(stations)
+    
+    # 1. Resolve Zones
+    if zones_list:
+        zone_records = db.query(Zone).filter(Zone.zone_code.in_(zones_list)).all()
         zone_ids = [z.id for z in zone_records]
-    
-    if divisions:
-        division_records = db.query(Division).filter(Division.division_code.in_(divisions)).all()
+        if not zone_ids:
+            zone_ids = []
+            
+    # 2. Resolve Divisions
+    if divisions_list:
+        query = db.query(Division).filter(Division.division_code.in_(divisions_list))
+        if zone_ids is not None:
+            query = query.filter(Division.zone_id.in_(zone_ids))
+        division_records = query.all()
         division_ids = [d.id for d in division_records]
-    
-    if stations:
-        station_records = db.query(Station).filter(Station.station_code.in_(stations)).all()
+        if not division_ids:
+            division_ids = []
+            
+    # 3. Resolve Stations
+    if stations_list:
+        query = db.query(Station).join(Division, Division.id == Station.division_id)
+        if division_ids is not None:
+            query = query.filter(Station.division_id.in_(division_ids))
+        elif zone_ids is not None:
+            query = query.filter(Division.zone_id.in_(zone_ids))
+            
+        station_records = query.filter(Station.station_code.in_(stations_list)).all()
         station_ids = [s.id for s in station_records]
-    
+        if not station_ids:
+            station_ids = []
+            
     return zone_ids, division_ids, station_ids
 
 
@@ -170,12 +209,12 @@ async def get_alert_summary_report(
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
     end_date: Optional[str] = Query(None, description="End date DD/MM/YYYY"),
     end_time: Optional[str] = Query(None, description="End time HH:MM:SS"),
-    zone: List[str] = Query(None, description="Zone codes"),
-    division: List[str] = Query(None, description="Division codes"),
-    station: List[str] = Query(None, description="Station codes"),
-    alert_type: List[str] = Query(None, description="Alert types"),
-    asset_type: List[str] = Query(None, description="Asset type codes"),
-    cause: List[str] = Query(None, description="Cause codes"),
+    zone: Optional[str] = Query(None, description="Zone codes"),
+    division: Optional[str] = Query(None, description="Division codes"),
+    station: Optional[str] = Query(None, description="Station codes"),
+    alert_type: Optional[str] = Query(None, description="Alert types"),
+    asset_type: Optional[str] = Query(None, description="Asset type codes"),
+    cause: Optional[str] = Query(None, description="Cause codes"),
     page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
@@ -197,8 +236,8 @@ async def get_alert_summary_report(
                          asset_type=asset_type, cause=cause, page=page,
                          page_number=page_number, page_size=page_size)
     start_date, start_time, end_date, end_time = m['start_date'], m['start_time'], m['end_date'], m['end_time']
-    zone, division, station = m['zone'], m['division'], m['station']
-    alert_type, asset_type, cause = m['alert_type'], m['asset_type'], m['cause']
+    zone, division, station = _parse_list_param(m['zone']), _parse_list_param(m['division']), _parse_list_param(m['station'])
+    alert_type, asset_type, cause = _parse_list_param(m['alert_type']), _parse_list_param(m['asset_type']), _parse_list_param(m['cause'])
     page_number, page_size = m['page_number'] or 1, m['page_size'] or 50
 
     if not start_date:
@@ -321,14 +360,14 @@ async def get_alert_history_report(
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
     end_date: Optional[str] = Query(None, description="End date DD/MM/YYYY"),
     end_time: Optional[str] = Query(None, description="End time HH:MM:SS"),
-    zone: List[str] = Query(None, description="Zone codes"),
-    division: List[str] = Query(None, description="Division codes"),
-    station: List[str] = Query(None, description="Station codes"),
-    alert_type: List[str] = Query(None, description="Alert types"),
-    asset_type: List[str] = Query(None, description="Asset type codes"),
-    cause: List[str] = Query(None, description="Cause codes"),
-    feedback: List[str] = Query(None, description="Feedback types (T, PT, F, M)"),
-    alert_status: List[str] = Query(None, description="Alert status"),
+    zone: Optional[str] = Query(None, description="Zone codes"),
+    division: Optional[str] = Query(None, description="Division codes"),
+    station: Optional[str] = Query(None, description="Station codes"),
+    alert_type: Optional[str] = Query(None, description="Alert types"),
+    asset_type: Optional[str] = Query(None, description="Asset type codes"),
+    cause: Optional[str] = Query(None, description="Cause codes"),
+    feedback: Optional[str] = Query(None, description="Feedback types (T, PT, F, M)"),
+    alert_status: Optional[str] = Query(None, description="Alert status"),
     page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
@@ -348,9 +387,9 @@ async def get_alert_history_report(
                          asset_type=asset_type, cause=cause, feedback=feedback,
                          alert_status=alert_status, page=page, page_number=page_number, page_size=page_size)
     start_date, start_time, end_date, end_time = m['start_date'], m['start_time'], m['end_date'], m['end_time']
-    zone, division, station = m['zone'], m['division'], m['station']
-    alert_type, asset_type, cause = m['alert_type'], m['asset_type'], m['cause']
-    feedback, alert_status = m['feedback'], m['alert_status']
+    zone, division, station = _parse_list_param(m['zone']), _parse_list_param(m['division']), _parse_list_param(m['station'])
+    alert_type, asset_type, cause = _parse_list_param(m['alert_type']), _parse_list_param(m['asset_type']), _parse_list_param(m['cause'])
+    feedback, alert_status = _parse_list_param(m['feedback']), _parse_list_param(m['alert_status'])
     page_number, page_size = m['page_number'] or 1, m['page_size'] or 50
 
     if not start_date:
@@ -474,10 +513,10 @@ async def get_telemetry_history_report(
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
     end_date: Optional[str] = Query(None, description="End date DD/MM/YYYY"),
     end_time: Optional[str] = Query(None, description="End time HH:MM:SS"),
-    zone: List[str] = Query(None, description="Zone codes"),
-    division: List[str] = Query(None, description="Division codes"),
-    station: List[str] = Query(None, description="Station codes"),
-    asset_type: List[str] = Query(None, description="Asset type codes"),
+    zone: Optional[str] = Query(None, description="Zone codes"),
+    division: Optional[str] = Query(None, description="Division codes"),
+    station: Optional[str] = Query(None, description="Station codes"),
+    asset_type: Optional[str] = Query(None, description="Asset type codes"),
     asset_number: Optional[str] = Query(None, description="JSON string list of asset numbers with station codes: '[{\"sc\": \"STN\", \"asset_number_code\": \"PT-101\"}]'"),
     page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
@@ -497,7 +536,7 @@ async def get_telemetry_history_report(
                          division=division, station=station, asset_type=asset_type,
                          page=page, page_number=page_number, page_size=page_size)
     start_date, start_time, end_date, end_time = m['start_date'], m['start_time'], m['end_date'], m['end_time']
-    zone, division, station, asset_type = m['zone'], m['division'], m['station'], m['asset_type']
+    zone, division, station, asset_type = _parse_list_param(m['zone']), _parse_list_param(m['division']), _parse_list_param(m['station']), _parse_list_param(m['asset_type'])
     page_number, page_size = m['page_number'] or 1, m['page_size'] or 50
 
     # asset_number from the JSON body comes as a list of AssetNumberFilter
@@ -622,10 +661,10 @@ async def get_telemetry_history_report(
 
 @router.post("/asset_detail", response_model=StandardResponse[Any])
 async def get_asset_detail_report(
-    zone: List[str] = Query(None, description="Zone codes"),
-    division: List[str] = Query(None, description="Division codes"),
-    station: List[str] = Query(None, description="Station codes"),
-    asset_type: List[str] = Query(None, description="Asset type codes"),
+    zone: Optional[str] = Query(None, description="Zone codes"),
+    division: Optional[str] = Query(None, description="Division codes"),
+    station: Optional[str] = Query(None, description="Station codes"),
+    asset_type: Optional[str] = Query(None, description="Asset type codes"),
     page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
@@ -642,7 +681,7 @@ async def get_asset_detail_report(
     """
     m = _merge_envelope(body, zone=zone, division=division, station=station,
                          asset_type=asset_type, page=page, page_number=page_number, page_size=page_size)
-    zone, division, station, asset_type = m['zone'], m['division'], m['station'], m['asset_type']
+    zone, division, station, asset_type = _parse_list_param(m['zone']), _parse_list_param(m['division']), _parse_list_param(m['station']), _parse_list_param(m['asset_type'])
     page_number, page_size = m['page_number'] or 1, m['page_size'] or 50
 
     # Resolve location IDs
@@ -730,9 +769,9 @@ async def get_performance_report(
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
     end_date: Optional[str] = Query(None, description="End date DD/MM/YYYY"),
     end_time: Optional[str] = Query(None, description="End time HH:MM:SS"),
-    zone: List[str] = Query(None, description="Zone codes"),
-    division: List[str] = Query(None, description="Division codes"),
-    station: List[str] = Query(None, description="Station codes"),
+    zone: Optional[str] = Query(None, description="Zone codes"),
+    division: Optional[str] = Query(None, description="Division codes"),
+    station: Optional[str] = Query(None, description="Station codes"),
     page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_number: Optional[int] = Query(1, ge=1, description="Page number"),
     page_size: Optional[int] = Query(50, ge=1, le=500, description="Page size"),
@@ -751,7 +790,7 @@ async def get_performance_report(
                          division=division, station=station, page=page,
                          page_number=page_number, page_size=page_size)
     start_date, start_time, end_date, end_time = m['start_date'], m['start_time'], m['end_date'], m['end_time']
-    zone, division, station = m['zone'], m['division'], m['station']
+    zone, division, station = _parse_list_param(m['zone']), _parse_list_param(m['division']), _parse_list_param(m['station'])
     page_number, page_size = m['page_number'] or 1, m['page_size'] or 50
 
     if not start_date:

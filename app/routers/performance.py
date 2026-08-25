@@ -12,7 +12,8 @@ from app.models.schemas import (
 )
 from app.routers.dashboard import (
     _parse_date_range,
-    _resolve_location_ids
+    _resolve_location_ids,
+    _parse_list_param
 )
 from app.services.statistics_service import statistics_service
 
@@ -25,9 +26,9 @@ async def get_performance_module_report(
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
     end_date: Optional[str] = Query(None, description="End date DD/MM/YYYY"),
     end_time: Optional[str] = Query(None, description="End time HH:MM:SS"),
-    zone: List[str] = Query(None, description="Zone codes"),
-    division: List[str] = Query(None, description="Division codes"),
-    station: List[str] = Query(None, description="Station codes"),
+    zone: Optional[str] = Query(None, description="Zone codes"),
+    division: Optional[str] = Query(None, description="Division codes"),
+    station: Optional[str] = Query(None, description="Station codes"),
     page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_number: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=500, description="Page size"),
@@ -44,7 +45,12 @@ async def get_performance_module_report(
         start_date = (datetime.now() - timedelta(days=30)).strftime("%d/%m/%Y")
 
     start_dt, end_dt = _parse_date_range(start_date, start_time, end_date, end_time)
-    zone_ids, division_ids, station_ids = _resolve_location_ids(db, zone, division, station)
+    
+    zone_list = _parse_list_param(zone)
+    division_list = _parse_list_param(division)
+    station_list = _parse_list_param(station)
+    
+    zone_ids, division_ids, station_ids = _resolve_location_ids(db, zone_list, division_list, station_list)
     
     station_query = db.query(Station).join(Division, Division.id == Station.division_id).join(Zone, Zone.id == Division.zone_id)
     if zone_ids:
