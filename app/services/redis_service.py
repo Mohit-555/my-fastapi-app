@@ -19,22 +19,30 @@ class RedisService:
             import redis
             from app.database import settings
             
-            # Since Redis settings might not exist in the default Settings,
-            # we safely check if they are defined, otherwise we use defaults.
-            host = getattr(settings, "REDIS_HOST", "localhost")
-            port = getattr(settings, "REDIS_PORT", 6379)
-            db = getattr(settings, "REDIS_DB", 0)
-            password = getattr(settings, "REDIS_PASSWORD", None)
-            
-            self.client = redis.Redis(
-                host=host,
-                port=port,
-                db=db,
-                password=password,
-                decode_responses=True,
-                socket_connect_timeout=2,
-                socket_timeout=2
-            )
+            redis_url = getattr(settings, "REDIS_URL", None)
+            if redis_url:
+                logger.info(f"Connecting to Redis using REDIS_URL: {redis_url[:20]}...")
+                self.client = redis.Redis.from_url(
+                    redis_url,
+                    decode_responses=True,
+                    socket_connect_timeout=2,
+                    socket_timeout=2
+                )
+            else:
+                host = getattr(settings, "REDIS_HOST", "localhost")
+                port = getattr(settings, "REDIS_PORT", 6379)
+                db = getattr(settings, "REDIS_DB", 0)
+                password = getattr(settings, "REDIS_PASSWORD", None)
+                
+                self.client = redis.Redis(
+                    host=host,
+                    port=port,
+                    db=db,
+                    password=password,
+                    decode_responses=True,
+                    socket_connect_timeout=2,
+                    socket_timeout=2
+                )
             # Test connection
             self.client.ping()
             self.is_fallback = False

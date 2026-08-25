@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     VENDOR_NAME: str = "XYZ Signalling Ltd"
 
     # Redis config settings loaded from .env
+    REDIS_URL: Optional[str] = None
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
