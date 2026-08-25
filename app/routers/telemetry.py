@@ -579,8 +579,8 @@ async def live_telemetry_stream(
     zone_code: Optional[str] = Query(None),
     division_code: Optional[str] = Query(None),
     asset_type: Optional[str] = Query(None),
-    asset_number: Optional[str] = Query(None),
-    asset_no: Optional[str] = Query(None),
+    asset_number: Optional[str] = Query(None, description="Asset number code, e.g. 'PT-103' (At least one of asset_number or asset_no is required)"),
+    asset_no: Optional[str] = Query(None, description="Alternative asset number code, e.g. 'PT-103'"),
     poll_interval: int = Query(5, ge=1, le=60, description="Polling interval in seconds (1–60)"),
     db: Session = Depends(get_db),
 ):
@@ -592,7 +592,11 @@ async def live_telemetry_stream(
       es.onmessage = (e) => { const d = JSON.parse(e.data); ... };
     """
     # Use asset_no if asset_number is not provided
-    eff_asset_no = asset_number or asset_no
+    # Clean the parameters to handle empty strings, whitespaces, "null", and "undefined"
+    clean_number = asset_number.strip() if asset_number and asset_number.strip().lower() not in ("null", "undefined") else None
+    clean_no = asset_no.strip() if asset_no and asset_no.strip().lower() not in ("null", "undefined") else None
+    
+    eff_asset_no = clean_number or clean_no
     if not eff_asset_no:
         raise HTTPException(status_code=400, detail="asset_number or asset_no is required")
 
