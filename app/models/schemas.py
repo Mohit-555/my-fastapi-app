@@ -1266,8 +1266,8 @@ class EquipmentRoomHistoryRow(BaseModel):
     station_name: str
     timestamp: datetime
     room_type: str
-    temperature: float
-    humidity: float
+    temperature: Optional[float] = None
+    humidity: Optional[float] = None
     door_status: Optional[str] = None
 
     class Config:

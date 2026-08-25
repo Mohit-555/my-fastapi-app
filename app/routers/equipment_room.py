@@ -138,7 +138,14 @@ def get_live_equipment_rooms(
         division = station.division
         zone = division.zone
 
-        door = getattr(r, "door_status", None) or ("OPEN" if temp > 34.0 else "CLOSED")
+        door = getattr(r, "door_status", None)
+        if door is None:
+            if r.room_type == "RR":
+                door = "OPEN" if (temp or 0) > 40.0 else "CLOSED"
+            elif r.room_type == "IPS":
+                door = "OPEN" if (temp or 0) > 34.0 else "CLOSED"
+            else:  # BATT
+                door = "OPEN" if (temp or 0) > 29.0 else "CLOSED"
 
         response_data.append({
             "id": r.id,
