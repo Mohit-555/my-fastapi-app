@@ -128,27 +128,23 @@ def _resolve_station_ids_by_codes(
     station_code: Optional[str] = None,
     station_id: Optional[int] = None,
 ) -> Optional[List[int]]:
-    if station_id:
-        return [station_id]
+    # If no filters at all are provided, return None
+    if not (zone_code or division_code or station_code or station_id is not None):
+        return None
         
     q = db.query(Station.id).join(Division).join(Zone)
-    has_filter = False
     
+    if station_id is not None:
+        q = q.filter(Station.id == station_id)
     if station_code:
         q = q.filter(Station.station_code == station_code.upper())
-        has_filter = True
     if division_code:
         q = q.filter(Division.division_code == division_code.upper())
-        has_filter = True
     if zone_code:
         q = q.filter(Zone.zone_code == zone_code.upper())
-        has_filter = True
         
-    if has_filter:
-        rows = q.all()
-        return [r.id for r in rows]
-        
-    return None
+    rows = q.all()
+    return [r.id for r in rows]
 
 
 def _get_threshold(
@@ -608,10 +604,13 @@ async def live_telemetry_stream(
 
     # Search asset
     asset_q = db.query(Asset)
-    if stn_ids:
+    if stn_ids is not None:
+        if not stn_ids:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Asset '{eff_asset_no}' not found with the specified location/type filters"
+            )
         asset_q = asset_q.filter(Asset.station_id.in_(stn_ids))
-    elif station_id is not None:
-        asset_q = asset_q.filter(Asset.station_id == station_id)
 
     if asset_type:
         asset_type_hexes = None
