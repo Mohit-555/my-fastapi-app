@@ -292,12 +292,25 @@ def get_health_summary(
     """
     Return Health Summary table grouped by Zone/Division/Station with availability percentages.
     """
-    from app.models.models import Station, Division, Zone
+    from app.models.models import Station, Division, Zone, Asset
+    from app.constants import ASSET_TYPE_MAP
     import csv, io
     from fastapi.responses import StreamingResponse
 
     query = db.query(Station).join(Division, Division.id == Station.division_id).join(Zone, Zone.id == Division.zone_id)
-    
+
+    # Resolve asset-type filter to hex codes and restrict to stations that own them
+    filter_hexes = None
+    if asset_type:
+        from app.routers.assets import _resolve_asset_types_to_hex
+        resolved = _resolve_asset_types_to_hex(db, asset_type)
+        filter_hexes = [h.strip() for h in resolved.split(",")] if resolved else [asset_type]
+        query = query.filter(
+            Station.id.in_(
+                db.query(Asset.station_id).filter(Asset.asset_type_hex.in_(filter_hexes))
+            )
+        )
+
     if zone:
         query = query.filter(Zone.zone_code.ilike(f"%{zone}%"))
     if division:
@@ -306,7 +319,16 @@ def get_health_summary(
         query = query.filter((Station.station_code.ilike(f"%{station}%")) | (Station.station_name.ilike(f"%{station}%")))
 
     stations = query.all()
-    
+
+    # Actual asset types present per station (for the Asset Type column)
+    station_types = {}
+    for sid, hex_code in db.query(Asset.station_id, Asset.asset_type_hex).distinct().all():
+        if filter_hexes and hex_code not in filter_hexes:
+            continue
+        val = ASSET_TYPE_MAP.get(hex_code, hex_code)
+        name = val[1] if isinstance(val, (tuple, list)) else str(val)
+        station_types.setdefault(sid, set()).add(name)
+
     rows = []
     for idx, st in enumerate(stations, start=1):
         z_code = st.division.zone.zone_code if st.division and st.division.zone else "NR"
@@ -346,7 +368,7 @@ def get_health_summary(
             "zone": z_code,
             "division": d_code,
             "station": s_code,
-            "asset_type": asset_type or "ALL",
+            "asset_type": asset_type if asset_type else (", ".join(sorted(station_types.get(st.id, []))) or "-"),
             "total_sensors": total_sensors,
             "avail_sensors_pct": avail_sensors_pct,
             "total_iots": total_iots,
