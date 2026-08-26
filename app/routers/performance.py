@@ -26,9 +26,16 @@ async def get_performance_module_report(
     start_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
     end_date: Optional[str] = Query(None, description="End date DD/MM/YYYY"),
     end_time: Optional[str] = Query(None, description="End time HH:MM:SS"),
+    from_date: Optional[str] = Query(None, description="Start date DD/MM/YYYY"),
+    from_time: Optional[str] = Query(None, description="Start time HH:MM:SS"),
+    to_date: Optional[str] = Query(None, description="End date DD/MM/YYYY"),
+    to_time: Optional[str] = Query(None, description="End time HH:MM:SS"),
     zone: Optional[str] = Query(None, description="Zone codes"),
     division: Optional[str] = Query(None, description="Division codes"),
     station: Optional[str] = Query(None, description="Station codes"),
+    zone_id: Optional[int] = Query(None, description="Zone database ID"),
+    division_id: Optional[int] = Query(None, description="Division database ID"),
+    station_id: Optional[int] = Query(None, description="Station database ID"),
     page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_number: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=500, description="Page size"),
@@ -41,6 +48,15 @@ async def get_performance_module_report(
     if page is not None:
         page_number = page
 
+    if from_date:
+        start_date = from_date
+    if to_date:
+        end_date = to_date
+    if from_time:
+        start_time = from_time
+    if to_time:
+        end_time = to_time
+
     if not start_date:
         start_date = (datetime.now() - timedelta(days=30)).strftime("%d/%m/%Y")
 
@@ -52,6 +68,13 @@ async def get_performance_module_report(
     
     zone_ids, division_ids, station_ids = _resolve_location_ids(db, zone_list, division_list, station_list)
     
+    if zone_id is not None:
+        zone_ids = [zone_id]
+    if division_id is not None:
+        division_ids = [division_id]
+    if station_id is not None:
+        station_ids = [station_id]
+        
     station_query = db.query(Station).join(Division, Division.id == Station.division_id).join(Zone, Zone.id == Division.zone_id)
     if zone_ids:
         station_query = station_query.filter(Zone.id.in_(zone_ids))
