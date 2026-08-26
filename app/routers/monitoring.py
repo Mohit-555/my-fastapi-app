@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.models import Gateway
+from app.models.models import Gateway, EquipmentRoom
 from app.models.schemas import (
     SystemHealthTotalsResponse, SystemHealthItem,
     FaultyByStationResponse, FaultyByStationItem,
