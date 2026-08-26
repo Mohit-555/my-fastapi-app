@@ -1349,12 +1349,14 @@ class AlertCauseResponse(BaseModel):
     asset_type_id: Optional[str] = None
     alert_category: AlertCategoryEnum
     created_at: datetime
+    asset_type_name: Optional[str] = None
 
     # CamelCase aliases for frontend compatibility
     causeCode: str = ""
     causeDetail: str = ""
     assetTypeId: Optional[str] = None
     alertCategory: str = ""
+    assetTypeName: Optional[str] = None
 
     @model_validator(mode="after")
     def populate_aliases(self) -> "AlertCauseResponse":
@@ -1362,6 +1364,7 @@ class AlertCauseResponse(BaseModel):
         self.causeDetail = self.cause_detail
         self.assetTypeId = self.asset_type_id
         self.alertCategory = self.alert_category.value
+        self.assetTypeName = self.asset_type_name
         return self
 
     class Config:

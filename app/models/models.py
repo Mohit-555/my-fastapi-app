@@ -561,6 +561,10 @@ class AlertCauseMaster(Base):
 
     asset_type = relationship("AssetTypeMaster")
 
+    @property
+    def asset_type_name(self) -> Optional[str]:
+        return self.asset_type.asset_type_name if self.asset_type else None
+
 
 class Asset(Base):
     __tablename__ = "assets"

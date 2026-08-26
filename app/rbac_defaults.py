@@ -322,6 +322,16 @@ def ensure_default_menus(db: Session) -> None:
     db.commit()
 
 
+# Template readings per room type. No telemetry feed writes equipment-room
+# sensors yet, so new and legacy NULL rows get these values to keep the
+# Equipment Room Live page meaningful instead of blank.
+EQUIPMENT_ROOM_TEMPLATES = {
+    "RR": {"temperature": 36.5, "humidity": 58.0},
+    "IPS": {"temperature": 29.8, "humidity": 47.0},
+    "BATT": {"temperature": 27.4, "humidity": 42.0},
+}
+
+
 def ensure_default_roles_users_and_permissions(db: Session) -> None:
     # 1. Ensure Roles
     for r_data in DEFAULT_ROLES:
@@ -461,11 +471,12 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
                 EquipmentRoom.room_type == room_type
             ).first()
             if not room:
+                tpl = EQUIPMENT_ROOM_TEMPLATES.get(room_type, {"temperature": 30.0, "humidity": 50.0})
                 room = EquipmentRoom(
                     station_id=station.id,
                     room_type=room_type,
-                    temperature=None,
-                    humidity=None
+                    temperature=tpl["temperature"],
+                    humidity=tpl["humidity"]
                 )
                 db.add(room)
     db.commit()
@@ -497,13 +508,24 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
             db.flush()
 
             for room_type in ["RR", "IPS", "BATT"]:
+                tpl = EQUIPMENT_ROOM_TEMPLATES.get(room_type, {"temperature": 30.0, "humidity": 50.0})
                 room = EquipmentRoom(
                     station_id=station.id,
                     room_type=room_type,
-                    temperature=None,
-                    humidity=None
+                    temperature=tpl["temperature"],
+                    humidity=tpl["humidity"]
                 )
                 db.add(room)
+    db.commit()
+
+    # 4c. Backfill template readings for rooms created before this template
+    # existed (humidity/temperature were NULL, leaving the Live page blank).
+    for room in db.query(EquipmentRoom).all():
+        tpl = EQUIPMENT_ROOM_TEMPLATES.get(room.room_type, {"temperature": 30.0, "humidity": 50.0})
+        if room.temperature is None:
+            room.temperature = tpl["temperature"]
+        if room.humidity is None:
+            room.humidity = tpl["humidity"]
     db.commit()
 
     # 5. Ensure Default Asset Inventories

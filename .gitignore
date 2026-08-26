@@ -43,6 +43,7 @@ AGENTS.md
 README.md
 docs/
 rdpms_frontend/
+standalone/
 frontend_png/
 alert/
 MOBILE_APP_*.md

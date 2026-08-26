@@ -1091,7 +1091,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
                 group_hex_str = ",".join(hexes)
                 
                 flat_asset_types.append(AssetTypeOption(
-                    id=member_id,
+                    id=t.id,
                     hex_id=group_hex_str,
                     code=t.asset_type_code,
                     label=group_label,
