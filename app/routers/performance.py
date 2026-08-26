@@ -74,8 +74,8 @@ async def get_performance_module_report(
             "zone": stn.division.zone.zone_code,
             "division": stn.division.division_code,
             "station": stn.station_code,
-            "fail_alert_per": stats.get("failure_success_rate", 50.0),
-            "pred_alert_per": stats.get("predictive_success_rate", 50.0),
+            "fail_alert_per": round(stats.get("failure_success_rate", 50.0), 1),
+            "pred_alert_per": round(stats.get("predictive_success_rate", 50.0), 1),
             "actual_fail_alert_per": 0.0
         })
     

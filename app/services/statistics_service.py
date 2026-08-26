@@ -46,8 +46,8 @@ class StatisticsService:
                 stats = {
                     "total_alerts": 0,
                     "by_type": {
-                        "failure": {"total": 0, "pending": 0, "cleared": 0},
-                        "predictive": {"total": 0, "pending": 0, "cleared": 0}
+                        "failure": {"total": 0, "pending": 0, "cleared": 0, "true_pt": 0},
+                        "predictive": {"total": 0, "pending": 0, "cleared": 0, "true_pt": 0}
                     },
                     "by_feedback": {
                         "T": 0,   # True
@@ -61,14 +61,18 @@ class StatisticsService:
                     alert_type = row.alert_type.lower()
                     stats["total_alerts"] += 1
                     
+                    fb = row.feedback
+                    is_true_pt = fb in ("T", "PT")
+                    
                     if alert_type in stats["by_type"]:
                         stats["by_type"][alert_type]["total"] += 1
-                        if row.alert_status.lower() == 'active' or row.alert_status.lower() == 'pending':
+                        if row.alert_status.lower() in ('active', 'pending'):
                             stats["by_type"][alert_type]["pending"] += 1
                         else:
                             stats["by_type"][alert_type]["cleared"] += 1
+                        if is_true_pt:
+                            stats["by_type"][alert_type]["true_pt"] += 1
                     
-                    fb = row.feedback
                     if fb and fb in stats["by_feedback"]:
                         stats["by_feedback"][fb] += 1
                 
@@ -76,16 +80,19 @@ class StatisticsService:
                 failure_total = stats["by_type"]["failure"]["total"]
                 predictive_total = stats["by_type"]["predictive"]["total"]
                 
-                true_pt = stats["by_feedback"]["T"] + stats["by_feedback"]["PT"]
+                failure_true_pt = stats["by_type"]["failure"]["true_pt"]
+                predictive_true_pt = stats["by_type"]["predictive"]["true_pt"]
                 
                 stats["failure_success_rate"] = (
-                    true_pt / failure_total * 100 if failure_total > 0 else 0.0
+                    failure_true_pt / failure_total * 100 if failure_total > 0 else 0.0
                 )
                 stats["predictive_success_rate"] = (
-                    true_pt / predictive_total * 100 if predictive_total > 0 else 0.0
+                    predictive_true_pt / predictive_total * 100 if predictive_total > 0 else 0.0
                 )
+                
+                overall_true_pt = failure_true_pt + predictive_true_pt
                 stats["overall_success_rate"] = (
-                    true_pt / stats["total_alerts"] * 100 if stats["total_alerts"] > 0 else 0.0
+                    overall_true_pt / stats["total_alerts"] * 100 if stats["total_alerts"] > 0 else 0.0
                 )
                 
                 return stats
