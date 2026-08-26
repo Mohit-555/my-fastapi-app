@@ -15,10 +15,21 @@ class RedisService:
     
     def connect(self):
         """Establish Redis connection, fall back to in-memory dictionary on failure"""
+        import os
+        from app.database import settings
+
+        # No REDIS_URL and no explicit REDIS_HOST configured: run fully
+        # in-memory so deployments without Redis never log errors or pay a
+        # connection timeout at startup.
+        if not getattr(settings, "REDIS_URL", None) and not os.getenv("REDIS_HOST"):
+            self.client = None
+            self.is_fallback = True
+            logger.info("REDIS_URL/REDIS_HOST not set - using in-memory cache.")
+            return
+
         try:
             import redis
-            from app.database import settings
-            
+
             redis_url = getattr(settings, "REDIS_URL", None)
             if redis_url:
                 logger.info(f"Connecting to Redis using REDIS_URL: {redis_url[:20]}...")
