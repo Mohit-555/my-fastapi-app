@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 import hashlib
 import secrets
-from fastapi import HTTPException, Depends
+from fastapi import HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.database import get_db, settings
@@ -16,7 +16,7 @@ REFRESH_TOKEN_EXPIRE_DAYS = 1
 REMEMBER_ME_EXPIRE_DAYS = 7
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-security_scheme = HTTPBearer()
+security_scheme = HTTPBearer(auto_error=False)
 
 
 def hash_password(plain: str) -> str:
@@ -42,8 +42,16 @@ def hash_refresh_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security_scheme), db: Session = Depends(get_db)):
-    token = credentials.credentials
+def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
+    db: Session = Depends(get_db),
+):
+    # EventSource can't set headers — allow ?token= as a fallback (same
+    # contract the websocket endpoints use via extract_ws_token).
+    token: str | None = credentials.credentials if credentials else request.query_params.get("token")
+    if not token:
+        raise HTTPException(status_code=403, detail="Not authenticated")
     from app.models.models import User
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
