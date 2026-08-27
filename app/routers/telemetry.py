@@ -484,12 +484,12 @@ def _poll_telemetry_sync(
 
                 live_items = [
                     {
-                        "time": r.prt or (r.received_at.strftime("%H:%M:%S") if r.received_at else "Now"),
-                        "Avg_Current": r.prv if pid[4:6] == "01" else 3.18,
-                        "Peak_Current": r.prv if pid[4:6] == "02" else 7.50,
-                        "Battery_Voltage": r.prv if pid[4:6] == "04" else 12.39,
-                        "Stroke_Time": r.prv if pid[4:6] == "03" else 1944.0,
-                        "Temperature": r.prv if pid[4:6] == "05" else 46.5
+                        "time": r.received_at.strftime("%H:%M:%S.%f")[:-3] if r.received_at else (r.prt or "Now"),
+                        "Avg_Current": r.prv if pid[4:6] == "01" else None,
+                        "Peak_Current": r.prv if pid[4:6] == "02" else None,
+                        "Battery_Voltage": r.prv if pid[4:6] == "04" else None,
+                        "Stroke_Time": r.prv if pid[4:6] == "03" else None,
+                        "Temperature": r.prv if pid[4:6] == "05" else None
                     }
                     for r in rows
                 ]
