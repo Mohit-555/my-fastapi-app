@@ -411,13 +411,31 @@ def _setup_sse_asset_sync(station_id: int, asset_number: str):
         if not gateway_id:
             return {"error": f"Asset {asset_number} has no gateway"}
 
+        prefix = f"{asset.asset_type_hex}{asset.asset_number_id}"
+
+        # Resolve initial_last_seen_id to start from the latest records (up to 120 rows)
+        subq = (
+            db.query(Telemetry.id)
+            .filter(
+                Telemetry.gateway_id == gateway_id,
+                Telemetry.para_id.like(f"{prefix}%")
+            )
+            .order_by(Telemetry.id.desc())
+            .limit(120)
+            .all()
+        )
+        initial_last_seen_id = 0
+        if subq:
+            initial_last_seen_id = min(r[0] for r in subq) - 1
+
         return {
             "gateway_id": gateway_id,
             "gw_stngw_id": asset.gateway.stngw_id,
             "station_id": asset.station_id,
-            "prefix": f"{asset.asset_type_hex}{asset.asset_number_id}",
+            "prefix": prefix,
             "asset_type_hex": asset.asset_type_hex,
             "asset_type_name": asset.asset_type.asset_type_name if asset.asset_type else None,
+            "initial_last_seen_id": initial_last_seen_id,
         }
     finally:
         db.close()
@@ -514,12 +532,12 @@ async def _sse_event_generator(request: Request, station_id: int, asset_number: 
     Async generator that polls for new telemetry every `poll_interval` seconds
     and yields SSE-formatted events.
     """
-    last_seen_id = 0
-
     asset_data = await asyncio.to_thread(_setup_sse_asset_sync, station_id, asset_number)
     if "error" in asset_data:
         yield f"event: error\ndata: {json.dumps({'detail': asset_data['error']})}\n\n"
         return
+
+    last_seen_id = asset_data.get("initial_last_seen_id", 0)
 
     gateway_id = asset_data["gateway_id"]
     gw_stngw_id = asset_data["gw_stngw_id"]

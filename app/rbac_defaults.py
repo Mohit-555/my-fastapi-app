@@ -788,8 +788,8 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
     # Seed
     target_gws = list(gateways_by_station.values())
     existing_set = {
-        (r.gateway_id, r.para_id, r.prt, r.prv)
-        for r in db.query(Telemetry.gateway_id, Telemetry.para_id, Telemetry.prt, Telemetry.prv)
+        (r.gateway_id, r.para_id, r.prt, r.prv, r.received_at.date() if r.received_at else None)
+        for r in db.query(Telemetry.gateway_id, Telemetry.para_id, Telemetry.prt, Telemetry.prv, Telemetry.received_at)
         .filter(Telemetry.gateway_id.in_(target_gws))
         .all()
     }
@@ -799,7 +799,7 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
         for dt_utc, prt, vals in pt_final_points:
             for idx, p_hex in enumerate(["01", "02", "03", "04", "05"]):
                 para_id = f"0001{p_hex}00"
-                key = (gw_id, para_id, prt, vals[idx])
+                key = (gw_id, para_id, prt, vals[idx], dt_utc.date())
                 if key not in existing_set:
                     db.add(Telemetry(
                         gateway_id=gw_id,
@@ -814,7 +814,7 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
         for dt_utc, prt, vals in tc_final_points:
             for idx, p_hex in enumerate(["01", "02", "03", "04", "05"]):
                 para_id = f"200C{p_hex}00"
-                key = (gw_id, para_id, prt, vals[idx])
+                key = (gw_id, para_id, prt, vals[idx], dt_utc.date())
                 if key not in existing_set:
                     db.add(Telemetry(
                         gateway_id=gw_id,
