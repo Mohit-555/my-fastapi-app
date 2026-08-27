@@ -142,7 +142,7 @@ class Telemetry(Base):
     prv = Column(Float, nullable=True)
     prt = Column(String(30), nullable=True)
     raw_payload = Column(Text, nullable=True)
-    received_at = Column(DateTime, default=datetime.now(UTC))
+    received_at = Column(DateTime, default=lambda: datetime.now(UTC))
     is_processed = Column(Boolean, default=False, nullable=False, server_default="false", index=True)
 
     gateway = relationship("Gateway", back_populates="telemetry")
@@ -173,7 +173,7 @@ class TelemetryWaveform(Base):
     para_id = Column(String(8), nullable=False, index=True)
     prt = Column(String(30), nullable=True)  # timestamp this waveform corresponds to
     raw = Column(JSON, nullable=False)        # the full array of samples, e.g. [0.0, 9.9, 4.7, ...]
-    received_at = Column(DateTime, default=datetime.now(UTC))
+    received_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
     __table_args__ = (
         Index('idx_telemetry_waveform_lookup', 'para_id', 'prt'),
