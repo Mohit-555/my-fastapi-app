@@ -787,10 +787,20 @@ def ensure_default_roles_users_and_permissions(db: Session) -> None:
 
     # Seed
     target_gws = list(gateways_by_station.values())
+    
+    # Optimize query to only fetch relevant parameter and time points to avoid out-of-memory issues
+    para_id_list = [f"0001{p_hex}00" for p_hex in ["01", "02", "03", "04", "05"]] + \
+                   [f"200C{p_hex}00" for p_hex in ["01", "02", "03", "04", "05"]]
+    prt_list = list({p[1] for p in pt_final_points} | {p[1] for p in tc_final_points})
+
     existing_set = {
         (r.gateway_id, r.para_id, r.prt, r.prv, r.received_at.date() if r.received_at else None)
         for r in db.query(Telemetry.gateway_id, Telemetry.para_id, Telemetry.prt, Telemetry.prv, Telemetry.received_at)
-        .filter(Telemetry.gateway_id.in_(target_gws))
+        .filter(
+            Telemetry.gateway_id.in_(target_gws),
+            Telemetry.para_id.in_(para_id_list),
+            Telemetry.prt.in_(prt_list)
+        )
         .all()
     }
 
