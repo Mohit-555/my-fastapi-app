@@ -484,7 +484,7 @@ def _poll_telemetry_sync(
 
                 live_items = [
                     {
-                        "time": r.received_at.strftime("%H:%M:%S.%f")[:-3] if r.received_at else (r.prt or "Now"),
+                        "time": (r.prt.split(" ")[-1][:8] if r.prt and " " in r.prt else r.prt) if r.prt else (r.received_at.strftime("%H:%M:%S.%f")[:-3] if r.received_at else "Now"),
                         "Avg_Current": r.prv if pid[4:6] == "01" else None,
                         "Peak_Current": r.prv if pid[4:6] == "02" else None,
                         "Battery_Voltage": r.prv if pid[4:6] == "04" else None,
