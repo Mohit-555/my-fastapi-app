@@ -542,6 +542,7 @@ def receive_fixed_parameters(
                             para_id=para_id_upper,
                             prv=value,
                             prt=timestamp,
+                            received_at=datetime.now(timezone.utc),
                             raw_payload=json.dumps({
                                 "rqi": payload.rqi,
                                 "stngw_id": stngw_id,
@@ -706,6 +707,7 @@ def receive_event_parameters(
                             para_id=para_id_upper,
                             prv=value,
                             prt=timestamp,
+                            received_at=datetime.now(timezone.utc),
                             raw_payload=json.dumps({
                                 "rqi": payload.rqi,
                                 "stngw_id": stngw_id,
