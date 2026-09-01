@@ -413,7 +413,7 @@ def _setup_sse_asset_sync(station_id: int, asset_number: str):
 
         prefix = f"{asset.asset_type_hex}{asset.asset_number_id}"
 
-        # Resolve initial_last_seen_id to start from the latest records (up to 120 rows)
+        # Resolve initial_last_seen_id to start from the latest records (most recent 15 rows)
         subq = (
             db.query(Telemetry.id)
             .filter(
@@ -421,7 +421,7 @@ def _setup_sse_asset_sync(station_id: int, asset_number: str):
                 Telemetry.para_id.like(f"{prefix}%")
             )
             .order_by(Telemetry.id.desc())
-            .limit(120)
+            .limit(15)
             .all()
         )
         initial_last_seen_id = 0
@@ -439,6 +439,26 @@ def _setup_sse_asset_sync(station_id: int, asset_number: str):
         }
     finally:
         db.close()
+
+
+def _map_pid_to_field(pid: str, current_item: dict) -> Optional[str]:
+    if not pid or len(pid) < 8:
+        return None
+    type_code = pid[4:6]
+    suffix = pid[4:].upper()
+    if suffix == "000C" or type_code == "01" or suffix in ("0100", "0001", "000A"):
+        return "Avg_Current"
+    elif suffix == "000D" or type_code == "02" or suffix in ("0200", "0002", "000B"):
+        if current_item.get("Avg_Current") is not None and current_item.get("Peak_Current") is None:
+            return "Peak_Current"
+        return "Avg_Current" if current_item.get("Avg_Current") is None else "Peak_Current"
+    elif type_code == "03" or suffix in ("9060", "9061", "0300", "0003"):
+        return "Stroke_Time"
+    elif type_code == "04" or suffix in ("2020", "2021", "0400", "0004", "0020"):
+        return "Battery_Voltage"
+    elif type_code == "05" or suffix in ("5000", "F000", "0500", "0005", "5001"):
+        return "Temperature"
+    return None
 
 
 def _poll_telemetry_sync(
@@ -471,33 +491,31 @@ def _poll_telemetry_sync(
         if new_rows:
             next_seen_id = new_rows[-1].id
 
-            grouped: dict[str, list] = {}
-            for row in new_rows:
-                pid = row.para_id
-                if len(pid) != 8:
-                    continue
-                grouped.setdefault(pid, []).append(row)
+            # Group rows by device timestamp (prt) to merge same-batch parameter updates into a single live_data row
+            ts_groups: dict[str, list] = {}
+            for r in new_rows:
+                ts_key = (r.prt.split(" ")[-1][:8] if r.prt and " " in r.prt else r.prt) if r.prt else (r.received_at.strftime("%H:%M:%S") if r.received_at else "Now")
+                ts_groups.setdefault(ts_key, []).append(r)
 
-            for pid, rows in grouped.items():
-                param_info = PARAMETER_TYPE_MAP.get(pid[4:6])
-                threshold = _get_threshold(db, asset_type_hex, pid[4:6], station_id)
+            for ts_key, rows in ts_groups.items():
+                row_item = {
+                    "time": ts_key,
+                    "Avg_Current": None,
+                    "Peak_Current": None,
+                    "Battery_Voltage": None,
+                    "Stroke_Time": None,
+                    "Temperature": None
+                }
+                points_data = []
+                last_pid = rows[-1].para_id
+                for r in rows:
+                    field = _map_pid_to_field(r.para_id, row_item)
+                    if field:
+                        row_item[field] = r.prv
+                    points_data.append({"t": r.prt or r.received_at.isoformat(), "v": r.prv})
 
-                live_items = [
-                    {
-                        "time": (r.prt.split(" ")[-1][:8] if r.prt and " " in r.prt else r.prt) if r.prt else (r.received_at.strftime("%H:%M:%S.%f")[:-3] if r.received_at else "Now"),
-                        "Avg_Current": r.prv if pid[4:6] == "01" else None,
-                        "Peak_Current": r.prv if pid[4:6] == "02" else None,
-                        "Battery_Voltage": r.prv if pid[4:6] == "04" else None,
-                        "Stroke_Time": r.prv if pid[4:6] == "03" else None,
-                        "Temperature": r.prv if pid[4:6] == "05" else None
-                    }
-                    for r in rows
-                ]
-
-                points_data = [
-                    {"t": r.prt or r.received_at.isoformat(), "v": r.prv}
-                    for r in rows
-                ]
+                param_info = PARAMETER_TYPE_MAP.get(last_pid[4:6]) if len(last_pid) == 8 else None
+                threshold = _get_threshold(db, asset_type_hex, last_pid[4:6], station_id) if len(last_pid) == 8 else None
 
                 payload = {
                     "Zone": "NR",
@@ -506,12 +524,12 @@ def _poll_telemetry_sync(
                     "Asset_No": asset_number or "PT-101",
                     "Time": datetime.now().strftime("%H:%M:%S"),
                     "Status": "Predictive",
-                    "live_data": live_items,
-                    "para_id": pid,
+                    "live_data": [row_item],
+                    "para_id": last_pid,
                     "stngw_id": gw_stngw_id,
                     "asset_type_hex": asset_type_hex,
                     "asset_type_name": asset_type_name,
-                    "parameter_name": param_info[1] if param_info else None,
+                    "parameter_name": param_info[1] if param_info else "Telemetry Data",
                     "parameter_unit": param_info[2] if param_info else None,
                     "points": points_data,
                     "threshold_warning_high": threshold.warning_high if threshold else None,
