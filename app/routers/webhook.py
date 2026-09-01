@@ -201,9 +201,9 @@ class BaseWebhookPayload(BaseModel):
         return v.upper()
 
 class ParameterData(BaseModel):
-    para_id: str = Field(..., description="4 Byte hexadecimal parameter ID")
-    prv: List[float] = Field(..., description="List of parameter values")
-    prt: List[str] = Field(..., description="List of timestamps")
+    para_id: Optional[str] = Field(None, description="4 Byte hexadecimal parameter ID")
+    prv: Optional[List[float]] = Field(None, description="List of parameter values")
+    prt: Optional[List[str]] = Field(None, description="List of timestamps")
     raw: Optional[List[float]] = Field(
         None,
         description="Optional full raw waveform samples for this reading (e.g. a "
@@ -214,14 +214,18 @@ class ParameterData(BaseModel):
 
     @field_validator('para_id')
     @classmethod
-    def validate_para_id(cls, v: str) -> str:
+    def validate_para_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
         if not re.match(r'^[0-9A-Fa-f]{8}$', v):
             raise ValueError('para_id must be 8 character hexadecimal string')
         return v.upper()
 
     @field_validator('prv')
     @classmethod
-    def validate_values(cls, v: List[float]) -> List[float]:
+    def validate_values(cls, v: Optional[List[float]]) -> Optional[List[float]]:
+        if v is None:
+            return v
         for val in v:
             if math.isnan(val) or math.isinf(val):
                 raise ValueError(f'Invalid value: {val} (NaN or Infinity)')
@@ -229,9 +233,9 @@ class ParameterData(BaseModel):
     
     @field_validator('prt')
     @classmethod
-    def validate_timestamps(cls, v: List[str], info) -> List[str]:
-        if not v:
-            raise ValueError('prt cannot be empty')
+    def validate_timestamps(cls, v: Optional[List[str]], info) -> Optional[List[str]]:
+        if v is None:
+            return v
         # Access sibling fields from validation context (if present)
         prv = info.data.get('prv')
         if prv is not None and len(v) != len(prv):
@@ -521,41 +525,55 @@ def receive_fixed_parameters(
                 if candidate_para_ids - known_para_ids:
                     db.flush()
 
-            saved_count = 0
-            duplicate_count = 0
-            errors = []
-            records_to_insert = []
+            last_para_id = None
+            last_prt = None
 
             for param in payload.parameters:
-                para_id_upper = param.para_id.upper()
-                try:
-                    for i, value in enumerate(param.prv):
-                        timestamp = param.prt[i]
-                        dedup_key = (para_id_upper, timestamp, value)
-                        if dedup_key in existing_keys:
-                            duplicate_count += 1
-                            continue
-                        existing_keys.add(dedup_key)
+                # If this parameter block only has raw waveform data, associate it with the preceding parameter
+                if not param.para_id and param.raw:
+                    if last_para_id:
+                        db.add(TelemetryWaveform(
+                            para_id=last_para_id,
+                            prt=last_prt,
+                            raw=param.raw,
+                        ))
+                    continue
 
-                        record = Telemetry(
-                            gateway_id=gateway.id,
-                            para_id=para_id_upper,
-                            prv=value,
-                            prt=timestamp,
-                            received_at=datetime.now(timezone.utc),
-                            raw_payload=json.dumps({
-                                "rqi": payload.rqi,
-                                "stngw_id": stngw_id,
-                                "para_id": param.para_id,
-                                "prv": value,
-                                "prt": timestamp,
-                                "packet_type": "fixed_interval_5_9"
-                            })
-                        )
-                        records_to_insert.append(record)
-                        saved_count += 1
-                    
-                    if param.prv:
+                if not param.para_id:
+                    continue
+
+                para_id_upper = param.para_id.upper()
+                last_para_id = para_id_upper
+                last_prt = param.prt[-1] if param.prt else None
+
+                try:
+                    if param.prv and param.prt:
+                        for i, value in enumerate(param.prv):
+                            timestamp = param.prt[i]
+                            dedup_key = (para_id_upper, timestamp, value)
+                            if dedup_key in existing_keys:
+                                duplicate_count += 1
+                                continue
+                            existing_keys.add(dedup_key)
+
+                            record = Telemetry(
+                                gateway_id=gateway.id,
+                                para_id=para_id_upper,
+                                prv=value,
+                                prt=timestamp,
+                                received_at=datetime.now(timezone.utc),
+                                raw_payload=json.dumps({
+                                    "rqi": payload.rqi,
+                                    "stngw_id": stngw_id,
+                                    "para_id": param.para_id,
+                                    "prv": value,
+                                    "prt": timestamp,
+                                    "packet_type": "fixed_interval_5_9"
+                                })
+                            )
+                            records_to_insert.append(record)
+                            saved_count += 1
+                        
                         latest_value = param.prv[-1]
                         health = param_config_service.check_parameter_health(
                             para_id=para_id_upper,
@@ -564,14 +582,10 @@ def receive_fixed_parameters(
                         if health["status"] == "warning":
                             logger.warning(f"Parameter {param.para_id} is in warning state: {health['message']}")
 
-                    # Store full raw waveform if the gateway sent one (e.g.
-                    # a point machine operation's current/vibration curve),
-                    # confirmed needed for diagnostics/predictive
-                    # maintenance. Previously accepted but silently dropped.
                     if param.raw:
                         db.add(TelemetryWaveform(
                             para_id=para_id_upper,
-                            prt=param.prt[-1] if param.prt else None,
+                            prt=last_prt,
                             raw=param.raw,
                         ))
                 except Exception as e:
@@ -588,7 +602,7 @@ def receive_fixed_parameters(
             station_code = gateway.station.station_code if (gateway and gateway.station) else None
             if station_code and records_to_insert:
                 for param in payload.parameters:
-                    if param.prv:
+                    if param.para_id and param.prv:
                         para_id_upper = param.para_id.upper()
                         asset_number_code = asset_mappings.get(para_id_upper)
                         safe_create_task(
