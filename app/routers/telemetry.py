@@ -497,6 +497,15 @@ def _poll_telemetry_sync(
                 ts_key = (r.prt.split(" ")[-1][:8] if r.prt and " " in r.prt else r.prt) if r.prt else (r.received_at.strftime("%H:%M:%S") if r.received_at else "Now")
                 ts_groups.setdefault(ts_key, []).append(r)
 
+            # Map para_id suffix → frontend field key
+            _SUFFIX_FIELD = {
+                "000C": "I_avg",  "0001": "I_avg",  "01": "I_avg",
+                "000D": "I_peak", "0002": "I_peak", "02": "I_peak",
+                "9060": "stroke_ms","9061":"stroke_ms","03":"stroke_ms",
+                "2020": "V_batt", "2021": "V_batt", "04": "V_batt",
+                "5000": "temp",   "F000": "temp",   "05": "temp",
+            }
+
             for ts_key, rows in ts_groups.items():
                 row_item = {
                     "time": ts_key,
@@ -508,14 +517,63 @@ def _poll_telemetry_sync(
                 }
                 points_data = []
                 last_pid = rows[-1].para_id
+
+                # Collect per-field thresholds from all rows in this timestamp group
+                field_thresholds: dict = {}
                 for r in rows:
                     field = _map_pid_to_field(r.para_id, row_item)
                     if field:
                         row_item[field] = r.prv
                     points_data.append({"t": r.prt or r.received_at.isoformat(), "v": r.prv})
 
+                    if len(r.para_id) == 8:
+                        suffix = r.para_id[4:].upper()
+                        type_code = r.para_id[4:6]
+                        fk = _SUFFIX_FIELD.get(suffix) or _SUFFIX_FIELD.get(type_code)
+                        # Map hardware suffix → catalog parameter_type_hex stored in DB
+                        _SUFFIX_CATALOG = {
+                            "000C": "01", "0001": "01", "I_avg": "01",
+                            "000D": "02", "0002": "02", "I_peak": "02",
+                            "9060": "03", "9061": "03", "stroke_ms": "03",
+                            "2020": "04", "2021": "04", "V_batt": "04",
+                            "5000": "05", "F000": "05", "temp": "05",
+                        }
+                        db_type_hex = _SUFFIX_CATALOG.get(suffix) or _SUFFIX_CATALOG.get(fk) or type_code
+                        if fk and fk not in field_thresholds:
+                            thr = _get_threshold(db, asset_type_hex, db_type_hex, station_id)
+                            if thr:
+                                field_thresholds[fk] = {
+                                    "warning_high":  thr.warning_high,
+                                    "warning_low":   thr.warning_low,
+                                    "critical_high": thr.critical_high,
+                                    "critical_low":  thr.critical_low,
+                                }
+
+                # Compute real Status from thresholds + live values
+                status = "Healthy"
+                _FIELD_VAL_MAP = {
+                    "I_avg":     row_item.get("Avg_Current"),
+                    "I_peak":    row_item.get("Peak_Current"),
+                    "V_batt":    row_item.get("Battery_Voltage"),
+                    "stroke_ms": row_item.get("Stroke_Time"),
+                    "temp":      row_item.get("Temperature"),
+                }
+                for fk, val in _FIELD_VAL_MAP.items():
+                    if val is None:
+                        continue
+                    thr = field_thresholds.get(fk, {})
+                    ch = thr.get("critical_high")
+                    wh = thr.get("warning_high")
+                    cl = thr.get("critical_low")
+                    wl = thr.get("warning_low")
+                    if (ch is not None and val > ch) or (cl is not None and val < cl):
+                        status = "Failure"
+                        break
+                    if (wh is not None and val > wh) or (wl is not None and val < wl):
+                        if status != "Failure":
+                            status = "Predictive"
+
                 param_info = PARAMETER_TYPE_MAP.get(last_pid[4:6]) if len(last_pid) == 8 else None
-                threshold = _get_threshold(db, asset_type_hex, last_pid[4:6], station_id) if len(last_pid) == 8 else None
 
                 payload = {
                     "Zone": "NR",
@@ -523,7 +581,7 @@ def _poll_telemetry_sync(
                     "Asset_Type": asset_type_name or "Point Machine",
                     "Asset_No": asset_number or "PT-101",
                     "Time": datetime.now().strftime("%H:%M:%S"),
-                    "Status": "Predictive",
+                    "Status": status,
                     "live_data": [row_item],
                     "para_id": last_pid,
                     "stngw_id": gw_stngw_id,
@@ -532,8 +590,7 @@ def _poll_telemetry_sync(
                     "parameter_name": param_info[1] if param_info else "Telemetry Data",
                     "parameter_unit": param_info[2] if param_info else None,
                     "points": points_data,
-                    "threshold_warning_high": threshold.warning_high if threshold else None,
-                    "threshold_critical_high": threshold.critical_high if threshold else None,
+                    "field_thresholds": field_thresholds if field_thresholds else None,
                 }
                 payloads.append(payload)
 
