@@ -525,6 +525,10 @@ def receive_fixed_parameters(
                 if candidate_para_ids - known_para_ids:
                     db.flush()
 
+            saved_count = 0
+            duplicate_count = 0
+            errors = []
+            records_to_insert = []
             last_para_id = None
             last_prt = None
 
