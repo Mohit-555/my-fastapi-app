@@ -16,7 +16,7 @@ from app.auth_utils import get_current_user, require_admin
 from app.models.models import Base
 from app.routers import zones, divisions, stations, gateway, decode, telemetry, assets, alerts, admin, equipment_room, maintenance, webhook, config, statistics, websocket, sse, realtime, smms_telemetry, dashboard, monitoring, slave_card, performance
 from app.routers import auth
-from app.rbac_defaults import ensure_default_menus, ensure_default_roles_users_and_permissions, ensure_default_zones, ensure_default_divisions, ensure_default_stations, ensure_default_asset_types, ensure_default_alert_causes, ensure_default_assets
+from app.rbac_defaults import ensure_default_menus, ensure_default_roles_users_and_permissions, ensure_default_zones, ensure_default_divisions, ensure_default_stations, ensure_default_asset_types, ensure_default_alert_causes, ensure_default_assets, ensure_default_thresholds
 from app.services.scheduler import scheduler
 from app.services.redis_service import redis_service
 from app.services.database_service import db_service
@@ -64,6 +64,7 @@ if os.getenv("RUN_STARTUP_SEEDING") == "1":
             ensure_default_asset_types(db)
             ensure_default_alert_causes(db)
             ensure_default_assets(db)
+            ensure_default_thresholds(db)
     except Exception as e:
         logger.warning(f"Startup default seeding warning (handled): {e}")
 
@@ -87,6 +88,12 @@ async def lifespan(app: FastAPI):
                     logger.error(f"Seed data still has errors after seeding: {validation_results['errors']}")
         except Exception as e:
             logger.error(f"Failed to run seed data validation: {e}")
+
+    try:
+        with SessionLocal() as db:
+            ensure_default_thresholds(db)
+    except Exception as e:
+        logger.warning(f"Startup default threshold seeding warning: {e}")
 
     await db_service.initialize()
     scheduler.start()

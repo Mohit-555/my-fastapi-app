@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import logging
 
-from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent, Gateway, Telemetry, MaintenanceMode, AssetTypeMaster, AlertCauseMaster, Asset
+from app.models.models import Menu, Role, User, RoleMenu, Zone, Division, Station, EquipmentRoom, AssetInventory, AlertEvent, Gateway, Telemetry, MaintenanceMode, AssetTypeMaster, AlertCauseMaster, Asset, Threshold
 from app.auth_utils import hash_password
 from app.constants import ASSET_TYPE_MAP
 
@@ -1232,3 +1232,35 @@ def ensure_default_assets(db: Session) -> None:
                 is_active=True
             ))
     db.commit()
+
+
+def ensure_default_thresholds(db: Session) -> None:
+    """Ensure standard RDSO Point Machine and default thresholds exist in DB."""
+    default_thresholds = [
+        # (asset_type_hex, parameter_type_hex, warning_low, warning_high, critical_low, critical_high, unit, description)
+        ("00", "01", 0.5,  4.0,  0.1,  6.0,  "A",   "Avg Current - EOP Point Machine"),
+        ("00", "02", None, 8.0,  None, 12.0, "A",   "Peak Current - EOP Point Machine"),
+        ("00", "03", None, 4000.0, None, 5000.0, "ms", "Stroke Time - EOP Point Machine"),
+        ("00", "04", 80.0, None, 75.0, None, "V",   "Battery Voltage - EOP Point Machine"),
+        ("00", "05", None, 50.0, None, 60.0, "°C",  "Motor Temperature - EOP Point Machine"),
+    ]
+    for asset_hex, param_hex, wl, wh, cl, ch, unit, desc in default_thresholds:
+        existing = db.query(Threshold).filter(
+            Threshold.asset_type_hex == asset_hex,
+            Threshold.parameter_type_hex == param_hex,
+            Threshold.station_id.is_(None)
+        ).first()
+        if not existing:
+            db.add(Threshold(
+                asset_type_hex=asset_hex,
+                parameter_type_hex=param_hex,
+                station_id=None,
+                warning_low=wl,
+                warning_high=wh,
+                critical_low=cl,
+                critical_high=ch,
+                unit=unit,
+                description=desc
+            ))
+    db.commit()
+
