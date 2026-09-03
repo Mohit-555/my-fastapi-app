@@ -1161,19 +1161,6 @@ async def get_dashboard_overview(
                 pq = pq.filter(AlertEvent.station_id.in_(station_ids))
             pred_cnt = pq.scalar() or 0
             
-            # Fallback to realistic mock values if database doesn't have this asset type
-            if total_cnt == 0:
-                if category_name == "Point Machine":
-                    total_cnt, pred_cnt, fail_cnt = 42, 6, 2
-                elif category_name == "DC Track Circuit":
-                    total_cnt, pred_cnt, fail_cnt = 75, 10, 5
-                elif category_name == "Main Signal":
-                    total_cnt, pred_cnt, fail_cnt = 42, 6, 2
-                elif category_name == "Axle Counter":
-                    total_cnt, pred_cnt, fail_cnt = 42, 6, 2
-                elif category_name == "LC Gate":
-                    total_cnt, pred_cnt, fail_cnt = 42, 6, 2
-            
             healthy_cnt = max(0, total_cnt - pred_cnt - fail_cnt)
             asset_counts[category_name] = {
                 "healthy": healthy_cnt,
