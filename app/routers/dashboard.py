@@ -954,7 +954,7 @@ async def get_dashboard_overview(
             pred_true_query = pred_true_query.filter(AlertEvent.station_id.in_(station_ids))
         pred_total = pred_total_query.scalar() or 0
         pred_true = pred_true_query.scalar() or 0
-        prediction_accuracy = round((pred_true / pred_total) * 100, 1) if pred_total > 0 and pred_true > 0 else 91.0
+        prediction_accuracy = round((pred_true / pred_total) * 100, 1) if pred_total > 0 else 100.0
 
         # 4. MTTR (Mean Time to Rectify in hours)
         rectified_alerts_query = db.query(AlertEvent.alert_time, AlertEvent.rectification_time).filter(
@@ -964,11 +964,8 @@ async def get_dashboard_overview(
         if station_ids is not None:
             rectified_alerts_query = rectified_alerts_query.filter(AlertEvent.station_id.in_(station_ids))
         rectified_alerts = rectified_alerts_query.all()
-        if rectified_alerts:
-            durations = [(r[1] - r[0]).total_seconds() / 3600.0 for r in rectified_alerts if r[1] > r[0]]
-            mttr_hours = round(sum(durations) / len(durations), 1) if durations else 4.2
-        else:
-            mttr_hours = 4.2
+        durations = [(r[1] - r[0]).total_seconds() / 3600.0 for r in rectified_alerts if r[1] > r[0]]
+        mttr_hours = round(sum(durations) / len(durations), 1) if durations else 0.0
 
         # 5. Alert Trend (Past 14 Days)
         now = datetime.utcnow()
@@ -1010,15 +1007,12 @@ async def get_dashboard_overview(
         fail_active = fail_active_q.scalar() or 0
         pred_active = pred_active_q.scalar() or 0
         
-        if fail_active + pred_active == 0:
-            alert_severity = {"Critical": 12, "High": 8, "Medium": 45, "Low": 35}
-        else:
-            alert_severity = {
-                "Critical": fail_active,
-                "High": max(1, pred_active // 2),
-                "Medium": max(1, pred_active // 3),
-                "Low": max(1, pred_active // 4)
-            }
+        alert_severity = {
+            "Critical": fail_active,
+            "High": pred_active,
+            "Medium": 0,
+            "Low": 0
+        }
 
         # 7. Division Health
         divisions = db.query(Division).all()
@@ -1035,22 +1029,13 @@ async def get_dashboard_overview(
                     AlertEvent.alert_type == 'Failure',
                     or_(AlertEvent.alert_status == 'Active', AlertEvent.alert_status == 'Pending')
                 ).scalar() or 0
-                score = round(((div_assets - div_fails) / div_assets) * 100) if div_assets > 0 else 90
+                score = round(((div_assets - div_fails) / div_assets) * 100) if div_assets > 0 else 100
             else:
-                score = 85
+                score = 100
             
             # Use zone suffix if division code is duplicate (e.g. NGP)
             name = f"{div.division_code} ({div.zone.zone_code})" if div_code_counts[div.division_code] > 1 else div.division_code
-            division_health.append({"name": name, "health": max(50, min(100, score))})
-
-        if not division_health:
-            division_health = [
-                {"name": "LKO", "health": 92},
-                {"name": "DLI", "health": 82},
-                {"name": "AGC", "health": 74},
-                {"name": "PRYJ", "health": 88},
-                {"name": "HWH", "health": 68}
-            ]
+            division_health.append({"name": name, "health": max(0, min(100, score))})
 
         # 8. Failure Frequency by Asset Category
         category_counts = {
@@ -1074,15 +1059,7 @@ async def get_dashboard_overview(
             elif hex_code in ["10", "11", "12", "13"]:
                 category_counts["Signal"] += 1
 
-        if sum(category_counts.values()) == 0:
-            failure_frequency = [
-                {"name": "Point Machine", "value": 18},
-                {"name": "Track Circuit", "value": 12},
-                {"name": "Axle Counter", "value": 8},
-                {"name": "Signal", "value": 14}
-            ]
-        else:
-            failure_frequency = [{"name": k, "value": v} for k, v in category_counts.items()]
+        failure_frequency = [{"name": k, "value": v} for k, v in category_counts.items()]
 
         # 9. Failure Root Causes
         cause_query = db.query(AlertEvent.cause, func.count(AlertEvent.id)).filter(
@@ -1091,15 +1068,7 @@ async def get_dashboard_overview(
         if station_ids is not None:
             cause_query = cause_query.filter(AlertEvent.station_id.in_(station_ids))
         cause_rows = cause_query.group_by(AlertEvent.cause).order_by(func.count(AlertEvent.id).desc()).limit(5).all()
-
-        if cause_rows:
-            root_causes = [{"cause": r[0] or "Unknown", "count": r[1]} for r in cause_rows]
-        else:
-            root_causes = [
-                {"cause": "Power Failure", "count": 24},
-                {"cause": "Communication Loss", "count": 18},
-                {"cause": "Overheating", "count": 11}
-            ]
+        root_causes = [{"cause": r[0] or "Unknown", "count": r[1]} for r in cause_rows]
 
         # 10. Recent Critical Activities
         recent_query = db.query(AlertEvent)
@@ -1108,7 +1077,7 @@ async def get_dashboard_overview(
         recent_events = recent_query.order_by(AlertEvent.alert_time.desc()).limit(5).all()
         recent_activities = []
         for ev in recent_events:
-            time_str = ev.alert_time.strftime("%H:%M") if ev.alert_time else "10:24"
+            time_str = ev.alert_time.strftime("%H:%M") if ev.alert_time else "00:00"
             asset_label = f"Asset {ev.asset_no}" if ev.asset_no else "Asset Event"
             sev = "Critical" if ev.alert_type == "Failure" else "High"
             recent_activities.append({
@@ -1116,11 +1085,6 @@ async def get_dashboard_overview(
                 "time": time_str,
                 "severity": sev
             })
-
-        if not recent_activities:
-            recent_activities = [
-                {"title": "Point Machine PT-103 Failure", "time": "10:24", "severity": "Critical"}
-            ]
 
         # Determine category mapping
         asset_counts = {
@@ -1211,10 +1175,10 @@ async def get_dashboard_overview(
             })
 
         alert_severity_list = [
-            {"name": "Critical", "value": alert_severity.get("Critical", 12)},
-            {"name": "High", "value": alert_severity.get("High", 28)},
-            {"name": "Medium", "value": alert_severity.get("Medium", 46)},
-            {"name": "Low", "value": alert_severity.get("Low", 61)}
+            {"name": "Critical", "value": alert_severity.get("Critical", 0)},
+            {"name": "High", "value": alert_severity.get("High", 0)},
+            {"name": "Medium", "value": alert_severity.get("Medium", 0)},
+            {"name": "Low", "value": alert_severity.get("Low", 0)}
         ]
 
         failure_frequency_list = []
