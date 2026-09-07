@@ -164,10 +164,14 @@ async def global_exception_handler(request, exc):
 
 app.add_middleware(
     CORSMiddleware,
-    # Explicit allow-list (comma-separated env var), NOT a wildcard: this app
-    # serves authenticated browser clients, and wildcard+credentials is both
-    # spec-violating and an injection risk.
-    allow_origins=[o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",") if o.strip()],
+    allow_origins=[
+        "http://3.6.93.103:3001",
+        "http://3.6.93.103",
+        "http://3.6.93.103:3000",
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
