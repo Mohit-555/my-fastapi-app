@@ -646,3 +646,25 @@ class AssetParameter(Base):
         Index('idx_asset_params_lookup', 'asset_id', 'para_id'),
     )
 
+
+# ── API Request/Response Logger ───────────────────────────────────────────────
+
+class ApiLog(Base):
+    """
+    Logs every API request and response for debugging.
+    Disable in production by setting API_LOGGING_ENABLED=false in .env.
+    """
+    __tablename__ = "api_logs"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    method          = Column(String(10), nullable=False)           # GET, POST, etc.
+    endpoint        = Column(String(255), nullable=False, index=True)
+    query_params    = Column(Text, nullable=True)                  # ?zone=NR&...
+    request_body    = Column(Text, nullable=True)                  # JSON body (passwords masked)
+    response_body   = Column(Text, nullable=True)                  # JSON response (truncated at 2000 chars)
+    status_code     = Column(Integer, nullable=True, index=True)
+    employee_id     = Column(String(100), nullable=True, index=True)  # from JWT if available
+    ip_address      = Column(String(50), nullable=True)
+    response_time_ms= Column(Integer, nullable=True)               # milliseconds
+    error_detail    = Column(Text, nullable=True)                  # exception message if any
+    created_at      = Column(DateTime, default=datetime.now(UTC), index=True)

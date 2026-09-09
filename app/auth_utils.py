@@ -11,9 +11,9 @@ from app.database import get_db, settings
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-REFRESH_TOKEN_EXPIRE_DAYS = 1
-REMEMBER_ME_EXPIRE_DAYS = 7
+ACCESS_TOKEN_EXPIRE_MINUTES = 480   # 8 hours — prevents random logout during working day
+REFRESH_TOKEN_EXPIRE_DAYS = 7       # 7 days refresh token window
+REMEMBER_ME_EXPIRE_DAYS = 30        # 30 days if remember_me=true
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security_scheme = HTTPBearer(auto_error=False)

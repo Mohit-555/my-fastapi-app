@@ -6,6 +6,7 @@ from alembic.config import Config
 from fastapi import Depends, FastAPI, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
+from app.middleware.api_logger import ApiLoggerMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -176,6 +177,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# API request/response logger — disable via API_LOGGING_ENABLED=false in .env once stable
+app.add_middleware(ApiLoggerMiddleware)
 
 protected_route = [Depends(get_current_user)]
 admin_route = [Depends(require_admin)]
