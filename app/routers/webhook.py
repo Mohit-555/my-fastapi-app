@@ -586,6 +586,28 @@ def receive_fixed_parameters(
                         if health["status"] == "warning":
                             logger.warning(f"Parameter {param.para_id} is in warning state: {health['message']}")
 
+                        # Update EquipmentRoom for Temp (50) and Humidity (51)
+                        if len(para_id_upper) >= 6:
+                            param_type = para_id_upper[4:6]
+                            if param_type in ["50", "51"]:
+                                room_type = None
+                                if para_id_upper.startswith("F0"): room_type = "RR"
+                                elif para_id_upper.startswith("F1"): room_type = "IPS"
+                                # Depending on standard, BATT could be F2/F3 etc. Add more prefixes if needed.
+                                
+                                if room_type and gateway.station_id:
+                                    from app.models.models import EquipmentRoom
+                                    room = db.query(EquipmentRoom).filter(
+                                        EquipmentRoom.station_id == gateway.station_id,
+                                        EquipmentRoom.room_type == room_type
+                                    ).first()
+                                    
+                                    if room:
+                                        if param_type == "50":
+                                            room.temperature = latest_value
+                                        elif param_type == "51":
+                                            room.humidity = latest_value
+
                     if param.raw:
                         db.add(TelemetryWaveform(
                             para_id=para_id_upper,
