@@ -54,3 +54,7 @@ RDPMS_Master_API_Mapping_Sheet.csv
 websocket.md
 rdpms_backend.zip
 
+.agents/
+.claude/
+.agents/
+.claude/
