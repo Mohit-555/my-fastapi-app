@@ -668,3 +668,77 @@ def seed_database():
         return {"status": False, "message": f"Seeding failed: {str(e)}", "data": None}
 
 
+# ── API Logs ──────────────────────────────────────────────────────────────────
+
+@router.get("/logs", summary="View API request/response logs (admin only)")
+def get_api_logs(
+    endpoint:    Optional[str]  = Query(None,  description="Filter by endpoint path e.g. /auth/login"),
+    method:      Optional[str]  = Query(None,  description="Filter by HTTP method e.g. GET, POST"),
+    status_code: Optional[int]  = Query(None,  description="Filter by HTTP status code e.g. 401, 200"),
+    employee_id: Optional[str]  = Query(None,  description="Filter by employee_id"),
+    from_date:   Optional[str]  = Query(None,  description="Filter from date (YYYY-MM-DD)"),
+    to_date:     Optional[str]  = Query(None,  description="Filter to date (YYYY-MM-DD)"),
+    limit:       int            = Query(50,    ge=1, le=500, description="Number of records to return"),
+    offset:      int            = Query(0,     ge=0, description="Pagination offset"),
+    db:          Session        = Depends(get_db),
+):
+    """
+    View API request/response logs for debugging.
+    Supports filters: endpoint, method, status_code, employee_id, date range.
+    Restricted to admin roles.
+    """
+    from app.models.models import ApiLog
+
+    query = db.query(ApiLog)
+
+    if endpoint:
+        query = query.filter(ApiLog.endpoint.ilike(f"%{endpoint}%"))
+    if method:
+        query = query.filter(ApiLog.method == method.upper())
+    if status_code:
+        query = query.filter(ApiLog.status_code == status_code)
+    if employee_id:
+        query = query.filter(ApiLog.employee_id == employee_id)
+    if from_date:
+        try:
+            query = query.filter(ApiLog.created_at >= datetime.strptime(from_date, "%Y-%m-%d"))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid from_date format. Use YYYY-MM-DD")
+    if to_date:
+        try:
+            from datetime import timedelta
+            query = query.filter(ApiLog.created_at < datetime.strptime(to_date, "%Y-%m-%d") + timedelta(days=1))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid to_date format. Use YYYY-MM-DD")
+
+    total   = query.count()
+    records = query.order_by(ApiLog.created_at.desc()).offset(offset).limit(limit).all()
+
+    data = [
+        {
+            "id":               r.id,
+            "method":           r.method,
+            "endpoint":         r.endpoint,
+            "query_params":     r.query_params,
+            "request_body":     r.request_body,
+            "response_body":    r.response_body,
+            "status_code":      r.status_code,
+            "employee_id":      r.employee_id,
+            "ip_address":       r.ip_address,
+            "response_time_ms": r.response_time_ms,
+            "error_detail":     r.error_detail,
+            "created_at":       r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in records
+    ]
+
+    return {
+        "status":  True,
+        "message": "Success",
+        "data": {
+            "total":   total,
+            "offset":  offset,
+            "limit":   limit,
+            "records": data,
+        }
+    }
