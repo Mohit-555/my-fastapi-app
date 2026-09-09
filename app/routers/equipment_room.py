@@ -71,17 +71,8 @@ def _generate_history_data(
             division = station.division
             zone = division.zone
 
-            # door_status from DB if available, else derived from temperature threshold
-            door = getattr(r, "door_status", None)
-            if door is None:
-                if r.room_type == "RR":
-                    door = "OPEN" if (temp or 0) > 40.0 else "CLOSED"
-                elif r.room_type == "IPS":
-                    door = "OPEN" if (temp or 0) > 34.0 else "CLOSED"
-                else:  # BATT
-                    door = "OPEN" if (temp or 0) > 29.0 else "CLOSED"
-            else:
-                door_status = door
+            # door_status from DB digital sensor, default to CLOSED if not reported
+            door = getattr(r, "door_status", None) or "CLOSED"
 
             rows.append({
                 "id": f"{r.id}-{r.room_type}-{ts.strftime('%Y%m%d%H%M')}",
@@ -149,14 +140,7 @@ def get_live_equipment_rooms(
         division = station.division
         zone = division.zone
 
-        door = getattr(r, "door_status", None)
-        if door is None:
-            if r.room_type == "RR":
-                door = "OPEN" if temp > 40.0 else "CLOSED"
-            elif r.room_type == "IPS":
-                door = "OPEN" if temp > 34.0 else "CLOSED"
-            else:  # BATT
-                door = "OPEN" if temp > 29.0 else "CLOSED"
+        door = getattr(r, "door_status", None) or "CLOSED"
 
         response_data.append({
             "id": r.id,

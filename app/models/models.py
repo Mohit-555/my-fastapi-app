@@ -503,6 +503,7 @@ class EquipmentRoom(Base):
     room_type = Column(String(10), nullable=False)  # 'RR', 'IPS', 'BATT'
     temperature = Column(Float, nullable=True)
     humidity = Column(Float, nullable=True)
+    door_status = Column(String(10), default="CLOSED", nullable=True)
     updated_at = Column(DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
 
     station = relationship("Station", back_populates="equipment_rooms")

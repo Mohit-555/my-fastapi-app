@@ -586,14 +586,14 @@ def receive_fixed_parameters(
                         if health["status"] == "warning":
                             logger.warning(f"Parameter {param.para_id} is in warning state: {health['message']}")
 
-                        # Update EquipmentRoom for Temp (50) and Humidity (51)
+                        # Update EquipmentRoom for Temp (50), Humidity (51), and Door Status (40)
                         if len(para_id_upper) >= 6:
                             param_type = para_id_upper[4:6]
-                            if param_type in ["50", "51"]:
+                            if param_type in ["50", "51", "40"]:
                                 room_type = None
                                 if para_id_upper.startswith("F0"): room_type = "RR"
                                 elif para_id_upper.startswith("F1"): room_type = "IPS"
-                                # Depending on standard, BATT could be F2/F3 etc. Add more prefixes if needed.
+                                elif para_id_upper.startswith("F2"): room_type = "BATT"
                                 
                                 if room_type and gateway.station_id:
                                     from app.models.models import EquipmentRoom
@@ -607,6 +607,8 @@ def receive_fixed_parameters(
                                             room.temperature = latest_value
                                         elif param_type == "51":
                                             room.humidity = latest_value
+                                        elif param_type == "40":
+                                            room.door_status = "OPEN" if float(latest_value) == 1.0 else "CLOSED"
 
                     if param.raw:
                         db.add(TelemetryWaveform(
@@ -772,6 +774,31 @@ def receive_event_parameters(
                             prt=param.prt if isinstance(param.prt, str) else (param.prt[-1] if param.prt else None),
                             raw=param.raw,
                         ))
+
+                    # Update EquipmentRoom for Temp (50), Humidity (51), and Door Status (40)
+                    if param.prv and len(para_id_upper) >= 6:
+                        latest_value = param.prv[-1]
+                        param_type = para_id_upper[4:6]
+                        if param_type in ["50", "51", "40"]:
+                            room_type = None
+                            if para_id_upper.startswith("F0"): room_type = "RR"
+                            elif para_id_upper.startswith("F1"): room_type = "IPS"
+                            elif para_id_upper.startswith("F2"): room_type = "BATT"
+
+                            if room_type and gateway.station_id:
+                                from app.models.models import EquipmentRoom
+                                room = db.query(EquipmentRoom).filter(
+                                    EquipmentRoom.station_id == gateway.station_id,
+                                    EquipmentRoom.room_type == room_type
+                                ).first()
+
+                                if room:
+                                    if param_type == "50":
+                                        room.temperature = latest_value
+                                    elif param_type == "51":
+                                        room.humidity = latest_value
+                                    elif param_type == "40":
+                                        room.door_status = "OPEN" if float(latest_value) == 1.0 else "CLOSED"
                 except Exception as e:
                     errors.append({
                         "para_id": param.para_id,
