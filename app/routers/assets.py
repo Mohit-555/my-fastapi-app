@@ -57,7 +57,7 @@ router = APIRouter(prefix="/assets", tags=["Assets & Thresholds"])
 
 
 def _blank_to_none(value: Optional[str]) -> Optional[str]:
-    if value is None:
+    if not isinstance(value, str):
         return None
     val = value.strip()
     return None if val == "" else val
@@ -971,13 +971,13 @@ def get_asset_utilization(
     
     query = db.query(Asset).join(Station, Station.id == Asset.station_id).join(Division, Division.id == Station.division_id).join(Zone, Zone.id == Division.zone_id)
     
-    if zone:
+    if isinstance(zone, str) and zone:
         query = query.filter(Zone.zone_code.ilike(f"%{zone}%"))
-    if division:
+    if isinstance(division, str) and division:
         query = query.filter(Division.division_code.ilike(f"%{division}%"))
-    if station:
+    if isinstance(station, str) and station:
         query = query.filter((Station.station_code.ilike(f"%{station}%")) | (Station.station_name.ilike(f"%{station}%")))
-    if asset_no:
+    if isinstance(asset_no, str) and asset_no:
         query = query.filter(Asset.asset_number_code.ilike(f"%{asset_no}%"))
         
     asset_hex = _resolve_asset_types_to_hex(db, asset_type)
@@ -985,7 +985,12 @@ def get_asset_utilization(
         hex_list = [h.strip() for h in asset_hex.split(",") if h.strip()]
         query = query.filter(Asset.asset_type_hex.in_(hex_list))
         
-    assets = query.all()
+    # 1. Paginate assets first to avoid executing hundreds of heavy count queries
+    total_records = query.count()
+    total_pages = (total_records + page_size - 1) // page_size if total_records else 0
+    offset = (page - 1) * page_size
+    paginated_assets = query.order_by(Asset.id).offset(offset).limit(page_size).all()
+    
     rows = []
     
     # Parse dates if provided
@@ -1002,10 +1007,35 @@ def get_asset_utilization(
         except Exception:
             pass
             
-    for idx, ast in enumerate(assets, start=1):
-        t_query = db.query(func.count(Telemetry.id)).join(Gateway, Gateway.id == Telemetry.gateway_id).filter(
+    for idx, ast in enumerate(paginated_assets, start=offset + 1):
+        # Resolve parameter IDs for this specific asset
+        asset_prefix = f"{ast.asset_type_hex}{ast.asset_number_id}" if (ast.asset_type_hex and ast.asset_number_id) else None
+        
+        # Look up explicitly assigned parameter IDs from AssetParameter
+        assigned_pids = [
+            r[0] for r in db.query(AssetParameter.para_id).filter(AssetParameter.asset_id == ast.id).all()
+        ]
+        
+        # Count distinct operation events/timestamps specifically for this asset
+        t_query = db.query(func.count(func.distinct(Telemetry.prt))).join(
+            Gateway, Gateway.id == Telemetry.gateway_id
+        ).filter(
             Gateway.station_id == ast.station_id
         )
+        
+        # Filter specifically by this asset's parameters or prefix
+        if assigned_pids:
+            if asset_prefix:
+                t_query = t_query.filter(
+                    (Telemetry.para_id.in_(assigned_pids)) | (Telemetry.para_id.startswith(asset_prefix))
+                )
+            else:
+                t_query = t_query.filter(Telemetry.para_id.in_(assigned_pids))
+        elif asset_prefix:
+            t_query = t_query.filter(Telemetry.para_id.startswith(asset_prefix))
+        else:
+            t_query = t_query.filter(Telemetry.para_id == "__NONE__")
+            
         if start_dt:
             t_query = t_query.filter(Telemetry.received_at >= start_dt)
         if end_dt:
@@ -1027,11 +1057,6 @@ def get_asset_utilization(
             "number_of_operations": ops_count
         })
         
-    total_records = len(rows)
-    total_pages = (total_records + page_size - 1) // page_size if total_records else 0
-    offset = (page - 1) * page_size
-    paginated_rows = rows[offset:offset + page_size]
-    
     return {
         "status": True,
         "message": "Success",
@@ -1040,7 +1065,7 @@ def get_asset_utilization(
             "page": page,
             "page_size": page_size,
             "total_pages": total_pages,
-            "rows": paginated_rows
+            "rows": rows
         }
     }
 
