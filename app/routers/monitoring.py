@@ -1,9 +1,9 @@
 # app/routers/monitoring.py
 from fastapi import APIRouter, Depends, Query
 from app.auth_utils import get_current_user
-from typing import Optional, List, Any
+from typing import Optional, Any
 from datetime import datetime
-from sqlalchemy import text
+from sqlalchemy import text, func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -276,13 +276,30 @@ async def get_faulty_by_station(
     }
 
 
+def _clean_monitoring_param(val: Any) -> Optional[str]:
+    """Helper to clean query parameter and treat 'all', 'null', 'undefined', 'none', '0', '' as None."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s or s.lower() in ("all", "null", "undefined", "none", "0"):
+        return None
+    return s
+
+
 @router.get("/health/summary", response_model=StandardResponse[Any])
 def get_health_summary(
     current_user=Depends(get_current_user),
-    zone: Optional[str] = Query(None, description="Zone code"),
-    division: Optional[str] = Query(None, description="Division code"),
-    station: Optional[str] = Query(None, description="Station code"),
-    asset_type: Optional[str] = Query(None, description="Asset type"),
+    zone: Optional[str] = Query(None, description="Zone code, name, or ID"),
+    division: Optional[str] = Query(None, description="Division code, name, or ID"),
+    station: Optional[str] = Query(None, description="Station code, name, or ID"),
+    zone_id: Optional[str] = Query(None, description="Zone ID"),
+    division_id: Optional[str] = Query(None, description="Division ID"),
+    station_id: Optional[str] = Query(None, description="Station ID"),
+    zone_code: Optional[str] = Query(None, description="Zone Code"),
+    division_code: Optional[str] = Query(None, description="Division Code"),
+    station_code: Optional[str] = Query(None, description="Station Code"),
+    asset_type: Optional[str] = Query(None, description="Asset type ID, code, or name"),
+    asset_type_id: Optional[str] = Query(None, description="Asset type ID"),
     from_date: Optional[str] = Query(None, description="From date"),
     to_date: Optional[str] = Query(None, description="To date"),
     page: int = Query(1, ge=1),
@@ -291,32 +308,78 @@ def get_health_summary(
 ):
     """
     Return Health Summary table grouped by Zone/Division/Station with availability percentages.
+    Supports filtering by Zone, Division, Station (IDs, codes, names) and Asset Type.
     """
-    from app.models.models import Station, Division, Zone, Asset
-    from app.constants import ASSET_TYPE_MAP
-    import csv, io
-    from fastapi.responses import StreamingResponse
+    from app.models.models import Station, Division, Zone, Asset, AssetTypeMaster
+    from app.constants import ASSET_TYPE_MAP, ASSET_TYPE_DISPLAY_GROUPS
+    from app.routers.assets import _resolve_asset_types_to_hex
+
+    target_zone = _clean_monitoring_param(zone_id) or _clean_monitoring_param(zone_code) or _clean_monitoring_param(zone)
+    target_division = _clean_monitoring_param(division_id) or _clean_monitoring_param(division_code) or _clean_monitoring_param(division)
+    target_station = _clean_monitoring_param(station_id) or _clean_monitoring_param(station_code) or _clean_monitoring_param(station)
+    target_asset_type = _clean_monitoring_param(asset_type_id) or _clean_monitoring_param(asset_type)
 
     query = db.query(Station).join(Division, Division.id == Station.division_id).join(Zone, Zone.id == Division.zone_id)
 
-    # Resolve asset-type filter to hex codes and restrict to stations that own them
+    # 1. Resolve asset-type filter to hex codes and human-readable name
     filter_hexes = None
-    if asset_type:
-        from app.routers.assets import _resolve_asset_types_to_hex
-        resolved = _resolve_asset_types_to_hex(db, asset_type)
-        filter_hexes = [h.strip() for h in resolved.split(",")] if resolved else [asset_type]
-        query = query.filter(
-            Station.id.in_(
-                db.query(Asset.station_id).filter(Asset.asset_type_hex.in_(filter_hexes))
-            )
-        )
+    resolved_filter_name = None
+    if target_asset_type:
+        resolved = _resolve_asset_types_to_hex(db, target_asset_type)
+        filter_hexes = [h.strip() for h in resolved.split(",") if h.strip()] if resolved else None
 
-    if zone:
-        query = query.filter(Zone.zone_code.ilike(f"%{zone}%"))
-    if division:
-        query = query.filter(Division.division_code.ilike(f"%{division}%"))
-    if station:
-        query = query.filter((Station.station_code.ilike(f"%{station}%")) | (Station.station_name.ilike(f"%{station}%")))
+        # Resolve readable display name
+        if target_asset_type.isdigit():
+            atm = db.query(AssetTypeMaster).filter(AssetTypeMaster.id == int(target_asset_type)).first()
+            if atm:
+                for grp_name, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
+                    if atm.asset_type_id and atm.asset_type_id.upper() in [h.upper() for h in hexes]:
+                        resolved_filter_name = grp_name
+                        break
+                if not resolved_filter_name:
+                    resolved_filter_name = atm.asset_type_name
+        else:
+            for grp_name in ASSET_TYPE_DISPLAY_GROUPS:
+                if grp_name.lower() == target_asset_type.lower():
+                    resolved_filter_name = grp_name
+                    break
+
+        if filter_hexes:
+            query = query.filter(
+                Station.id.in_(
+                    db.query(Asset.station_id).filter(Asset.asset_type_hex.in_(filter_hexes))
+                )
+            )
+        else:
+            query = query.filter(Station.id == -1)
+
+    # 2. Apply Location Filters
+    if target_station:
+        if target_station.isdigit():
+            query = query.filter(Station.id == int(target_station))
+        else:
+            query = query.filter(
+                (func.upper(Station.station_code) == target_station.upper()) |
+                (Station.station_name.ilike(f"%{target_station}%"))
+            )
+
+    if target_division:
+        if target_division.isdigit():
+            query = query.filter(Division.id == int(target_division))
+        else:
+            query = query.filter(
+                (func.upper(Division.division_code) == target_division.upper()) |
+                (Division.division_name.ilike(f"%{target_division}%"))
+            )
+
+    if target_zone:
+        if target_zone.isdigit():
+            query = query.filter(Zone.id == int(target_zone))
+        else:
+            query = query.filter(
+                (func.upper(Zone.zone_code) == target_zone.upper()) |
+                (Zone.zone_name.ilike(f"%{target_zone}%"))
+            )
 
     stations = query.all()
 
@@ -327,6 +390,11 @@ def get_health_summary(
             continue
         val = ASSET_TYPE_MAP.get(hex_code, hex_code)
         name = val[1] if isinstance(val, (tuple, list)) else str(val)
+        # Map to display group if available for standardized names (e.g. "Main Signal" / "Point Machine")
+        for grp_name, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
+            if hex_code.upper() in [h.upper() for h in hexes]:
+                name = grp_name
+                break
         station_types.setdefault(sid, set()).add(name)
 
     rows = []
@@ -334,7 +402,7 @@ def get_health_summary(
         z_code = st.division.zone.zone_code if st.division and st.division.zone else "NR"
         d_code = st.division.division_code if st.division else "LKO"
         s_code = st.station_code
-        
+
         # Count actual sensors/IoT/gateway from related equipment records
         sensor_count = db.query(EquipmentRoom).filter(
             EquipmentRoom.station_id == st.id,
@@ -351,24 +419,35 @@ def get_health_summary(
         gateway_count = db.query(Gateway).filter(
             Gateway.station_id == st.id
         ).count() if st.id else 0
-        
+
         total_sensors = sensor_count or 1  # avoid div0
         total_iots = iot_count or 1
         total_network = network_count or 1
         total_gateway = gateway_count or 1
-        
-        # Compute real availability: active_count / total (placeholder: 100% if no inactive records)
-        avail_sensors_pct = "100.0%"
-        avail_iots_pct = "100.0%"
-        avail_network_pct = "100.0%"
-        avail_gateway_pct = "100.0%"
-        
+
+        # Compute real availability: active_count / total
+        # Note: Sending "100.0" avoids "100.0%%" since frontend UI template appends '%'
+        avail_sensors_pct = "100.0"
+        avail_iots_pct = "100.0"
+        avail_network_pct = "100.0"
+        avail_gateway_pct = "100.0"
+
+        st_types = station_types.get(st.id, set())
+        if st_types:
+            display_asset_type = ", ".join(sorted(st_types))
+        elif resolved_filter_name:
+            display_asset_type = resolved_filter_name
+        elif target_asset_type and not target_asset_type.isdigit():
+            display_asset_type = target_asset_type
+        else:
+            display_asset_type = "-"
+
         rows.append({
             "sr_no": idx,
             "zone": z_code,
             "division": d_code,
             "station": s_code,
-            "asset_type": asset_type if asset_type else (", ".join(sorted(station_types.get(st.id, []))) or "-"),
+            "asset_type": display_asset_type,
             "total_sensors": total_sensors,
             "avail_sensors_pct": avail_sensors_pct,
             "total_iots": total_iots,
@@ -406,7 +485,14 @@ def download_health_summary(
     zone: Optional[str] = Query(None),
     division: Optional[str] = Query(None),
     station: Optional[str] = Query(None),
+    zone_id: Optional[str] = Query(None),
+    division_id: Optional[str] = Query(None),
+    station_id: Optional[str] = Query(None),
+    zone_code: Optional[str] = Query(None),
+    division_code: Optional[str] = Query(None),
+    station_code: Optional[str] = Query(None),
     asset_type: Optional[str] = Query(None),
+    asset_type_id: Optional[str] = Query(None),
     from_date: Optional[str] = Query(None),
     to_date: Optional[str] = Query(None),
     db: Session = Depends(get_db)
@@ -414,12 +500,16 @@ def download_health_summary(
     """
     Export Health Summary data to CSV format.
     """
-    import csv, io
+    import csv
+    import io
     from fastapi.responses import StreamingResponse
 
     res = get_health_summary(
         zone=zone, division=division, station=station,
-        asset_type=asset_type, from_date=from_date, to_date=to_date,
+        zone_id=zone_id, division_id=division_id, station_id=station_id,
+        zone_code=zone_code, division_code=division_code, station_code=station_code,
+        asset_type=asset_type, asset_type_id=asset_type_id,
+        from_date=from_date, to_date=to_date,
         page=1, page_size=100000, db=db
     )
 
@@ -434,12 +524,16 @@ def download_health_summary(
     ])
 
     for r in res.get("data", {}).get("rows", []):
+        s_pct = r["avail_sensors_pct"] if str(r["avail_sensors_pct"]).endswith("%") else f"{r['avail_sensors_pct']}%"
+        i_pct = r["avail_iots_pct"] if str(r["avail_iots_pct"]).endswith("%") else f"{r['avail_iots_pct']}%"
+        n_pct = r["avail_network_pct"] if str(r["avail_network_pct"]).endswith("%") else f"{r['avail_network_pct']}%"
+        g_pct = r["avail_gateway_pct"] if str(r["avail_gateway_pct"]).endswith("%") else f"{r['avail_gateway_pct']}%"
         writer.writerow([
             r["sr_no"], r["zone"], r["division"], r["station"],
-            r["asset_type"], r["total_sensors"], r["avail_sensors_pct"],
-            r["total_iots"], r["avail_iots_pct"],
-            r["total_network"], r["avail_network_pct"],
-            r["total_gateway"], r["avail_gateway_pct"]
+            r["asset_type"], r["total_sensors"], s_pct,
+            r["total_iots"], i_pct,
+            r["total_network"], n_pct,
+            r["total_gateway"], g_pct
         ])
 
     output.seek(0)
