@@ -113,26 +113,58 @@ def _parse_date_range(
     end_date: Optional[str],
     end_time: Optional[str]
 ) -> tuple[datetime, datetime]:
-    """Parse date/time strings into datetime objects"""
-    start_dt = None
-    end_dt = None
-    
-    if start_date:
-        if start_time:
-            start_dt = datetime.strptime(f"{start_date} {start_time}", '%d/%m/%Y %H:%M:%S')
+    """Parse date/time strings into datetime objects supporting multiple formats (ISO, UK, and composite)"""
+    def _parse_single_dt(d_str: Optional[str], t_str: Optional[str], is_end: bool = False) -> Optional[datetime]:
+        if not d_str:
+            return None
+        d_str = str(d_str).strip()
+        if not d_str:
+            return None
+
+        # Check if d_str already contains time (e.g. "2026-09-09 14:30" or "2026-09-09T14:30:00")
+        if " " in d_str or "T" in d_str:
+            combined = d_str.replace("T", " ")
+        elif t_str:
+            t_str = str(t_str).strip()
+            if " " in t_str or "T" in t_str:
+                combined = t_str.replace("T", " ")
+            else:
+                combined = f"{d_str} {t_str}"
         else:
-            start_dt = datetime.strptime(start_date, '%d/%m/%Y')
-    else:
+            combined = d_str
+
+        date_formats = (
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%d/%m/%Y %H:%M:%S",
+            "%d/%m/%Y %H:%M",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y/%m/%d %H:%M",
+            "%d-%m-%Y %H:%M:%S",
+            "%d-%m-%Y %H:%M",
+            "%Y-%m-%d",
+            "%d/%m/%Y",
+            "%Y/%m/%d",
+            "%d-%m-%Y",
+        )
+        for fmt in date_formats:
+            try:
+                dt = datetime.strptime(combined, fmt)
+                if is_end and fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y"):
+                    dt = dt + timedelta(days=1) - timedelta(seconds=1)
+                return dt
+            except ValueError:
+                continue
+        return None
+
+    start_dt = _parse_single_dt(start_date, start_time, is_end=False)
+    if start_dt is None:
         start_dt = datetime.now() - timedelta(days=30)
-    
-    if end_date:
-        if end_time:
-            end_dt = datetime.strptime(f"{end_date} {end_time}", '%d/%m/%Y %H:%M:%S')
-        else:
-            end_dt = datetime.strptime(end_date, '%d/%m/%Y') + timedelta(days=1) - timedelta(seconds=1)
-    else:
+
+    end_dt = _parse_single_dt(end_date, end_time, is_end=True)
+    if end_dt is None:
         end_dt = datetime.now()
-    
+
     return start_dt, end_dt
 
 
@@ -159,7 +191,7 @@ def _resolve_location_ids(
     divisions: Any = None,
     stations: Any = None
 ) -> tuple[Optional[List[int]], Optional[List[int]], Optional[List[int]]]:
-    """Resolve zone/division/station codes to IDs in a cascading/interconnected manner"""
+    """Resolve zone/division/station codes or IDs to database IDs in a cascading manner"""
     zone_ids = None
     division_ids = None
     station_ids = None
@@ -169,34 +201,73 @@ def _resolve_location_ids(
     stations_list = _parse_list_param(stations)
     
     # 1. Resolve Zones
-    if zones_list:
-        zone_records = db.query(Zone).filter(Zone.zone_code.in_(zones_list)).all()
-        zone_ids = [z.id for z in zone_records]
-        if not zone_ids:
+    if zones_list is not None:
+        zone_ids = []
+        for item in zones_list:
+            s_item = str(item).strip()
+            if not s_item or s_item.upper() == "ALL" or s_item == "0":
+                continue
+            if s_item.isdigit():
+                z = db.query(Zone).filter(Zone.id == int(s_item)).first()
+                if z and z.id not in zone_ids:
+                    zone_ids.append(z.id)
+            z_codes = db.query(Zone).filter(Zone.zone_code.ilike(s_item)).all()
+            for z in z_codes:
+                if z.id not in zone_ids:
+                    zone_ids.append(z.id)
+        if not zone_ids and not any(str(x).upper() in ("ALL", "0", "") for x in zones_list):
             zone_ids = []
+        elif any(str(x).upper() in ("ALL", "0", "") for x in zones_list) and not zone_ids:
+            zone_ids = None
             
     # 2. Resolve Divisions
-    if divisions_list:
-        query = db.query(Division).filter(Division.division_code.in_(divisions_list))
-        if zone_ids is not None:
-            query = query.filter(Division.zone_id.in_(zone_ids))
-        division_records = query.all()
-        division_ids = [d.id for d in division_records]
-        if not division_ids:
+    if divisions_list is not None:
+        division_ids = []
+        for item in divisions_list:
+            s_item = str(item).strip()
+            if not s_item or s_item.upper() == "ALL" or s_item == "0":
+                continue
+            query = db.query(Division)
+            if zone_ids is not None:
+                query = query.filter(Division.zone_id.in_(zone_ids))
+            if s_item.isdigit():
+                d = query.filter(Division.id == int(s_item)).first()
+                if d and d.id not in division_ids:
+                    division_ids.append(d.id)
+            d_codes = query.filter(Division.division_code.ilike(s_item)).all()
+            for d in d_codes:
+                if d.id not in division_ids:
+                    division_ids.append(d.id)
+        if not division_ids and not any(str(x).upper() in ("ALL", "0", "") for x in divisions_list):
             division_ids = []
+        elif any(str(x).upper() in ("ALL", "0", "") for x in divisions_list) and not division_ids:
+            division_ids = None
             
     # 3. Resolve Stations
-    if stations_list:
-        query = db.query(Station).join(Division, Division.id == Station.division_id)
-        if division_ids is not None:
-            query = query.filter(Station.division_id.in_(division_ids))
-        elif zone_ids is not None:
-            query = query.filter(Division.zone_id.in_(zone_ids))
-            
-        station_records = query.filter(Station.station_code.in_(stations_list)).all()
-        station_ids = [s.id for s in station_records]
-        if not station_ids:
+    if stations_list is not None:
+        station_ids = []
+        for item in stations_list:
+            s_item = str(item).strip()
+            if not s_item or s_item.upper() == "ALL" or s_item == "0":
+                continue
+            query = db.query(Station).join(Division, Division.id == Station.division_id)
+            if division_ids is not None:
+                query = query.filter(Station.division_id.in_(division_ids))
+            elif zone_ids is not None:
+                query = query.filter(Division.zone_id.in_(zone_ids))
+                
+            if s_item.isdigit():
+                s = query.filter(Station.id == int(s_item)).first()
+                if s and s.id not in station_ids:
+                    station_ids.append(s.id)
+            s_codes = query.filter(Station.station_code.ilike(s_item)).all()
+            for s in s_codes:
+                if s.id not in station_ids:
+                    station_ids.append(s.id)
+        if not station_ids and not any(str(x).upper() in ("ALL", "0", "") for x in stations_list):
             station_ids = []
+        elif any(str(x).upper() in ("ALL", "0", "") for x in stations_list) and not station_ids:
+            station_ids = None
             
     return zone_ids, division_ids, station_ids
 
@@ -804,11 +875,11 @@ async def get_performance_report(
     # Get all stations matching filters
     station_query = db.query(Station).join(Division, Division.id == Station.division_id).join(Zone, Zone.id == Division.zone_id)
     
-    if zone_ids:
+    if zone_ids is not None:
         station_query = station_query.filter(Zone.id.in_(zone_ids))
-    if division_ids:
+    if division_ids is not None:
         station_query = station_query.filter(Division.id.in_(division_ids))
-    if station_ids:
+    if station_ids is not None:
         station_query = station_query.filter(Station.id.in_(station_ids))
     
     stations = station_query.all()

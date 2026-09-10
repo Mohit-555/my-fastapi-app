@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timedelta, date
 from typing import List, Dict, Any, Optional
 from sqlalchemy import and_
+from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models.models import AlertEvent, Gateway, Asset
@@ -14,10 +15,12 @@ class StatisticsService:
     async def calculate_alert_statistics(
         self,
         stngw_id: Optional[str] = None,
+        station_id: Optional[int] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
+        db: Optional[Session] = None
     ) -> Dict[str, Any]:
-        """Calculate alert statistics for a period"""
+        """Calculate alert statistics for a period (optionally scoped by gateway or station)"""
         def make_naive(dt: Optional[datetime]) -> Optional[datetime]:
             if dt is None:
                 return None
@@ -26,80 +29,95 @@ class StatisticsService:
         start_date_naive = make_naive(start_date)
         end_date_naive = make_naive(end_date)
 
-        with SessionLocal() as db:
-            try:
-                query = db.query(AlertEvent)
-                
-                if stngw_id:
-                    gateway = db.query(Gateway).filter(Gateway.stngw_id == stngw_id.upper()).first()
-                    if not gateway:
-                        return {}
-                    query = query.filter(AlertEvent.station_id == gateway.station_id)
-                
-                if start_date_naive:
-                    query = query.filter(AlertEvent.alert_time >= start_date_naive)
-                if end_date_naive:
-                    query = query.filter(AlertEvent.alert_time <= end_date_naive)
-                
-                rows = query.all()
-                
-                stats = {
-                    "total_alerts": 0,
-                    "by_type": {
-                        "failure": {"total": 0, "pending": 0, "cleared": 0, "true_pt": 0},
-                        "predictive": {"total": 0, "pending": 0, "cleared": 0, "true_pt": 0}
-                    },
-                    "by_feedback": {
-                        "T": 0,   # True
-                        "PT": 0,  # Partially True
-                        "F": 0,   # False
-                        "M": 0    # Maintenance
+        def _execute_query(session: Session) -> Dict[str, Any]:
+            query = session.query(AlertEvent)
+            
+            if station_id is not None:
+                query = query.filter(AlertEvent.station_id == station_id)
+            elif stngw_id:
+                gateway = session.query(Gateway).filter(Gateway.stngw_id == stngw_id.upper()).first()
+                if not gateway:
+                    return {
+                        "total_alerts": 0,
+                        "failure_success_rate": 0.0,
+                        "predictive_success_rate": 0.0,
+                        "overall_success_rate": 0.0,
+                        "by_type": {"failure": {"total": 0, "pending": 0, "cleared": 0, "true_pt": 0},
+                                    "predictive": {"total": 0, "pending": 0, "cleared": 0, "true_pt": 0}},
+                        "by_feedback": {"T": 0, "PT": 0, "F": 0, "M": 0}
                     }
+                query = query.filter(AlertEvent.station_id == gateway.station_id)
+            
+            if start_date_naive:
+                query = query.filter(AlertEvent.alert_time >= start_date_naive)
+            if end_date_naive:
+                query = query.filter(AlertEvent.alert_time <= end_date_naive)
+            
+            rows = query.all()
+            
+            stats = {
+                "total_alerts": 0,
+                "by_type": {
+                    "failure": {"total": 0, "pending": 0, "cleared": 0, "true_pt": 0},
+                    "predictive": {"total": 0, "pending": 0, "cleared": 0, "true_pt": 0}
+                },
+                "by_feedback": {
+                    "T": 0,   # True
+                    "PT": 0,  # Partially True
+                    "F": 0,   # False
+                    "M": 0    # Maintenance
                 }
+            }
+            
+            for row in rows:
+                alert_type = (row.alert_type or "").lower()
+                stats["total_alerts"] += 1
                 
-                for row in rows:
-                    alert_type = row.alert_type.lower()
-                    stats["total_alerts"] += 1
-                    
-                    fb = row.feedback
-                    is_true_pt = fb in ("T", "PT")
-                    
-                    if alert_type in stats["by_type"]:
-                        stats["by_type"][alert_type]["total"] += 1
-                        if row.alert_status.lower() in ('active', 'pending'):
-                            stats["by_type"][alert_type]["pending"] += 1
-                        else:
-                            stats["by_type"][alert_type]["cleared"] += 1
-                        if is_true_pt:
-                            stats["by_type"][alert_type]["true_pt"] += 1
-                    
-                    if fb and fb in stats["by_feedback"]:
-                        stats["by_feedback"][fb] += 1
+                fb = row.feedback
+                is_true_pt = fb in ("T", "PT")
                 
-                # Calculate success rates
-                failure_total = stats["by_type"]["failure"]["total"]
-                predictive_total = stats["by_type"]["predictive"]["total"]
+                if alert_type in stats["by_type"]:
+                    stats["by_type"][alert_type]["total"] += 1
+                    status = (row.alert_status or "").lower()
+                    if status in ('active', 'pending'):
+                        stats["by_type"][alert_type]["pending"] += 1
+                    else:
+                        stats["by_type"][alert_type]["cleared"] += 1
+                    if is_true_pt:
+                        stats["by_type"][alert_type]["true_pt"] += 1
                 
-                failure_true_pt = stats["by_type"]["failure"]["true_pt"]
-                predictive_true_pt = stats["by_type"]["predictive"]["true_pt"]
-                
-                stats["failure_success_rate"] = (
-                    failure_true_pt / failure_total * 100 if failure_total > 0 else 0.0
-                )
-                stats["predictive_success_rate"] = (
-                    predictive_true_pt / predictive_total * 100 if predictive_total > 0 else 0.0
-                )
-                
-                overall_true_pt = failure_true_pt + predictive_true_pt
-                stats["overall_success_rate"] = (
-                    overall_true_pt / stats["total_alerts"] * 100 if stats["total_alerts"] > 0 else 0.0
-                )
-                
-                return stats
-                
-            except Exception:
-                logger.exception("Error calculating alert statistics")
-                raise
+                if fb and fb in stats["by_feedback"]:
+                    stats["by_feedback"][fb] += 1
+            
+            # Calculate success rates
+            failure_total = stats["by_type"]["failure"]["total"]
+            predictive_total = stats["by_type"]["predictive"]["total"]
+            
+            failure_true_pt = stats["by_type"]["failure"]["true_pt"]
+            predictive_true_pt = stats["by_type"]["predictive"]["true_pt"]
+            
+            stats["failure_success_rate"] = (
+                failure_true_pt / failure_total * 100 if failure_total > 0 else 0.0
+            )
+            stats["predictive_success_rate"] = (
+                predictive_true_pt / predictive_total * 100 if predictive_total > 0 else 0.0
+            )
+            
+            overall_true_pt = failure_true_pt + predictive_true_pt
+            stats["overall_success_rate"] = (
+                overall_true_pt / stats["total_alerts"] * 100 if stats["total_alerts"] > 0 else 0.0
+            )
+            
+            return stats
+
+        try:
+            if db is not None:
+                return _execute_query(db)
+            with SessionLocal() as session:
+                return _execute_query(session)
+        except Exception:
+            logger.exception("Error calculating alert statistics")
+            raise
     
     async def calculate_asset_availability(
         self,
