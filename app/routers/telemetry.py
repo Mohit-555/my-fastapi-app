@@ -513,7 +513,12 @@ def _poll_telemetry_sync(
                     "Peak_Current": None,
                     "Battery_Voltage": None,
                     "Stroke_Time": None,
-                    "Temperature": None
+                    "Temperature": None,
+                    "I_avg": None,
+                    "I_peak": None,
+                    "V_batt": None,
+                    "stroke_ms": None,
+                    "temp": None,
                 }
                 points_data = []
                 last_pid = rows[-1].para_id
@@ -524,6 +529,16 @@ def _poll_telemetry_sync(
                     field = _map_pid_to_field(r.para_id, row_item)
                     if field:
                         row_item[field] = r.prv
+                        if field == "Avg_Current":
+                            row_item["I_avg"] = r.prv
+                        elif field == "Peak_Current":
+                            row_item["I_peak"] = r.prv
+                        elif field == "Battery_Voltage":
+                            row_item["V_batt"] = r.prv
+                        elif field == "Stroke_Time":
+                            row_item["stroke_ms"] = r.prv
+                        elif field == "Temperature":
+                            row_item["temp"] = r.prv
                     points_data.append({"t": r.prt or r.received_at.isoformat(), "v": r.prv})
 
                     if len(r.para_id) == 8:
@@ -741,14 +756,81 @@ async def live_telemetry_stream(
             detail=f"Asset '{eff_asset_no}' not found with the specified location/type filters"
         )
 
-    return StreamingResponse(
-        _sse_event_generator(request, asset.station_id, asset.asset_number_code, poll_interval),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    accept_header = request.headers.get("accept", "")
+    if "text/event-stream" in accept_header:
+        return StreamingResponse(
+            _sse_event_generator(request, asset.station_id, asset.asset_number_code, poll_interval),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # For standard HTTP GET requests (e.g. Axios/Redux getTelemetryLive), return JSON response
+    gw = db.query(Gateway).filter(Gateway.stngw_id == asset.station_gateway_id).first()
+    gw_id = gw.id if gw else None
+
+    rows = []
+    if gw_id:
+        an_h = asset.asset_number_id.upper() if asset.asset_number_id else "01"
+        at_h = asset.asset_type_hex.upper() if asset.asset_type_hex else "00"
+        p_prefix = f"{at_h}{an_h}"
+        raw_telem = (
+            db.query(Telemetry)
+            .filter(Telemetry.gateway_id == gw_id, Telemetry.para_id.like(f"{p_prefix}%"))
+            .order_by(Telemetry.received_at.desc(), Telemetry.id.desc())
+            .limit(60)
+            .all()
+        )
+        ts_groups: dict = {}
+        for r in reversed(raw_telem):
+            t_key = r.prt or r.received_at.strftime("%H:%M")
+            if t_key not in ts_groups:
+                ts_groups[t_key] = []
+            ts_groups[t_key].append(r)
+
+        for t_key, t_rows in ts_groups.items():
+            item = {
+                "time": t_key,
+                "I_avg": None, "Avg_Current": None,
+                "I_peak": None, "Peak_Current": None,
+                "V_batt": None, "Battery_Voltage": None,
+                "stroke_ms": None, "Stroke_Time": None,
+                "temp": None, "Temperature": None,
+            }
+            for r in t_rows:
+                field = _map_pid_to_field(r.para_id, item)
+                if field:
+                    item[field] = r.prv
+                    if field == "Avg_Current": item["I_avg"] = r.prv
+                    elif field == "Peak_Current": item["I_peak"] = r.prv
+                    elif field == "Battery_Voltage": item["V_batt"] = r.prv
+                    elif field == "Stroke_Time": item["stroke_ms"] = r.prv
+                    elif field == "Temperature": item["temp"] = r.prv
+            rows.append(item)
+
+    resolved_zone = asset.station.division.zone.zone_code if asset.station and asset.station.division and asset.station.division.zone else "NR"
+    resolved_div = asset.station.division.division_code if asset.station and asset.station.division else "PRYG"
+    resolved_stn = asset.station.station_name if asset.station else "Station"
+
+    return {
+        "status": True,
+        "message": "Success",
+        "data": {
+            "Zone": resolved_zone,
+            "Division": resolved_div,
+            "station_name": resolved_stn,
+            "Asset_Type": "Point Machine" if asset.asset_type_hex == "00" else (asset.asset_type.asset_type_name if asset.asset_type else "Point Machine"),
+            "Asset_No": asset.asset_number_code,
+            "Status": "Healthy",
+            "rows": rows,
+            "total": len(rows),
+            "page": 1,
+            "page_size": 10,
+            "total_pages": 1
+        }
+    }
 
 
 # ── Telemetry History ─────────────────────────────────────────────────────────
