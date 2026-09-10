@@ -1110,13 +1110,19 @@ def get_telemetry_history(
         for k, v in r.values.items():
             clean_k = k.split("(")[0].strip().replace(" ", "_")
             row_item[clean_k] = v
+            if "temp" in clean_k.lower():
+                row_item["Temperature"] = v
         live_data_list.append(row_item)
+
+    resolved_asset_type = asset_type or "Point Machine"
+    if resolved_asset_type.upper() == "EOP":
+        resolved_asset_type = "Point Machine"
 
     response_data = TelemetryHistoryResponse(
         Zone=resolved_zone,
         Division=resolved_div,
-        Asset_Type=asset_type or "Point Machine",
-        Asset_No=asset_no or asset_number_hex or "PT-101",
+        Asset_Type=resolved_asset_type,
+        Asset_No=asset_no or asset_number_hex or "PM-101",
         Time=datetime.now().strftime("%H:%M:%S"),
         Status="Predictive",
         live_data=live_data_list,
