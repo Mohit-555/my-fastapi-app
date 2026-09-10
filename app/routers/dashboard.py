@@ -1,14 +1,14 @@
 # app/routers/dashboard.py
 import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Any
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_, case
+from sqlalchemy import func, or_, case
 
 from app.database import get_db, settings
-from app.models.models import AlertEvent, Asset, Station, Division, Zone, AlertCauseMaster, Gateway, Telemetry
+from app.models.models import AlertEvent, Asset, AssetParameter, Station, Division, Zone, Gateway, Telemetry
 from app.services.statistics_service import statistics_service
 from app.services.redis_service import redis_service
 from app.models.schemas import (
@@ -585,7 +585,6 @@ async def get_telemetry_history_report(
     
     # Apply asset number filter
     if asset_number:
-        import json
         try:
             asset_number_list = json.loads(asset_number)
         except Exception:
@@ -884,32 +883,129 @@ async def get_performance_report(
 
 # ============ 6. Executive Overview Dashboard (GET method) ============
 
+def _clean_dashboard_param(val: Any) -> Optional[str]:
+    """Helper to clean query parameter and treat 'all', 'null', 'undefined', 'none', '0', '' as None."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s or s.lower() in ("all", "null", "undefined", "none", "0"):
+        return None
+    return s
+
+
 @router.get("/overview")
 async def get_dashboard_overview(
     zone_code: Optional[str] = Query(None, description="Optional Zone Code filter"),
     division_code: Optional[str] = Query(None, description="Optional Division Code filter"),
     station_code: Optional[str] = Query(None, description="Optional Station Code filter"),
+    zone: Optional[str] = Query(None, description="Optional Zone Code, Name, or ID"),
+    division: Optional[str] = Query(None, description="Optional Division Code, Name, or ID"),
+    station: Optional[str] = Query(None, description="Optional Station Code, Name, or ID"),
+    zone_id: Optional[str] = Query(None, description="Optional Zone ID"),
+    division_id: Optional[str] = Query(None, description="Optional Division ID"),
+    station_id: Optional[str] = Query(None, description="Optional Station ID"),
     db: Session = Depends(get_db)
 ):
     """
     Get executive analytics overview for the main visual dashboard.
     Supports filtering by Zone, Division, and Station via GET query params.
+    Accepts zone/division/station by ID, code, or name.
     """
     try:
-        # Determine station_ids filter if zone, division, or station is selected
+        # Determine target filters
+        target_station_id = None
+        target_division_id = None
+        target_zone_id = None
+        filter_not_found = False
         station_ids = None
-        if station_code:
-            stn = db.query(Station).filter(Station.station_code == station_code).first()
-            station_ids = [stn.id] if stn else []
-        elif division_code:
-            div = db.query(Division).filter(Division.division_code == division_code).first()
-            station_ids = [s.id for s in div.stations] if div else []
-        elif zone_code:
-            zn = db.query(Zone).filter(Zone.zone_code == zone_code).first()
-            if zn:
-                station_ids = [s.id for div in zn.divisions for s in div.stations]
+
+        # 1. Resolve Station filter (highest specificity)
+        stn_val = _clean_dashboard_param(station_id) or _clean_dashboard_param(station_code) or _clean_dashboard_param(station)
+        if stn_val:
+            stn = None
+            if stn_val.isdigit():
+                stn = db.query(Station).filter(Station.id == int(stn_val)).first()
+            if not stn:
+                stn = db.query(Station).filter(func.upper(Station.station_code) == stn_val.upper()).first()
+            if not stn:
+                stn = db.query(Station).filter(Station.station_name.ilike(stn_val)).first()
+
+            if stn:
+                target_station_id = stn.id
+                target_division_id = stn.division_id
+                target_zone_id = stn.division.zone_id if stn.division else None
+                station_ids = [stn.id]
             else:
+                filter_not_found = True
                 station_ids = []
+
+        # 2. Resolve Division filter (if station not specified)
+        if station_ids is None:
+            div_val = _clean_dashboard_param(division_id) or _clean_dashboard_param(division_code) or _clean_dashboard_param(division)
+            if div_val:
+                div = None
+                if div_val.isdigit():
+                    div = db.query(Division).filter(Division.id == int(div_val)).first()
+                if not div:
+                    div = db.query(Division).filter(func.upper(Division.division_code) == div_val.upper()).first()
+                if not div:
+                    div = db.query(Division).filter(Division.division_name.ilike(div_val)).first()
+
+                if div:
+                    target_division_id = div.id
+                    target_zone_id = div.zone_id
+                    station_ids = [s.id for s in div.stations]
+                else:
+                    filter_not_found = True
+                    station_ids = []
+
+        # 3. Resolve Zone filter (if station and division not specified)
+        if station_ids is None:
+            zn_val = _clean_dashboard_param(zone_id) or _clean_dashboard_param(zone_code) or _clean_dashboard_param(zone)
+            if zn_val:
+                zn = None
+                if zn_val.isdigit():
+                    zn = db.query(Zone).filter(Zone.id == int(zn_val)).first()
+                if not zn:
+                    zn = db.query(Zone).filter(func.upper(Zone.zone_code) == zn_val.upper()).first()
+                if not zn:
+                    zn = db.query(Zone).filter(Zone.zone_name.ilike(zn_val)).first()
+
+                if zn:
+                    target_zone_id = zn.id
+                    station_ids = [s.id for div in zn.divisions for s in div.stations]
+                else:
+                    filter_not_found = True
+                    station_ids = []
+
+        # Ensure target_zone_id and target_division_id are populated if passed alongside child filters
+        if target_zone_id is None and not filter_not_found:
+            zn_val = _clean_dashboard_param(zone_id) or _clean_dashboard_param(zone_code) or _clean_dashboard_param(zone)
+            if zn_val:
+                zn = None
+                if zn_val.isdigit():
+                    zn = db.query(Zone).filter(Zone.id == int(zn_val)).first()
+                if not zn:
+                    zn = db.query(Zone).filter(func.upper(Zone.zone_code) == zn_val.upper()).first()
+                if not zn:
+                    zn = db.query(Zone).filter(Zone.zone_name.ilike(zn_val)).first()
+                if zn:
+                    target_zone_id = zn.id
+
+        if target_division_id is None and not filter_not_found:
+            div_val = _clean_dashboard_param(division_id) or _clean_dashboard_param(division_code) or _clean_dashboard_param(division)
+            if div_val:
+                div = None
+                if div_val.isdigit():
+                    div = db.query(Division).filter(Division.id == int(div_val)).first()
+                if not div:
+                    div = db.query(Division).filter(func.upper(Division.division_code) == div_val.upper()).first()
+                if not div:
+                    div = db.query(Division).filter(Division.division_name.ilike(div_val)).first()
+                if div:
+                    target_division_id = div.id
+
+        logger.debug(f"Dashboard overview filter: station={target_station_id}, division={target_division_id}, zone={target_zone_id}")
 
         # 1. Total Assets & Failures
         asset_query = db.query(func.count(Asset.id))
@@ -1015,7 +1111,15 @@ async def get_dashboard_overview(
         }
 
         # 7. Division Health
-        divisions = db.query(Division).all()
+        if filter_not_found:
+            divisions = []
+        elif target_division_id is not None:
+            divisions = db.query(Division).filter(Division.id == target_division_id).all()
+        elif target_zone_id is not None:
+            divisions = db.query(Division).filter(Division.zone_id == target_zone_id).all()
+        else:
+            divisions = db.query(Division).all()
+
         division_health = []
         from collections import Counter
         div_code_counts = Counter(d.division_code for d in divisions)
@@ -1034,7 +1138,8 @@ async def get_dashboard_overview(
                 score = 100
             
             # Use zone suffix if division code is duplicate (e.g. NGP)
-            name = f"{div.division_code} ({div.zone.zone_code})" if div_code_counts[div.division_code] > 1 else div.division_code
+            zcode = div.zone.zone_code if div.zone else ""
+            name = f"{div.division_code} ({zcode})" if div_code_counts[div.division_code] > 1 and zcode else div.division_code
             division_health.append({"name": name, "health": max(0, min(100, score))})
 
         # 8. Failure Frequency by Asset Category
