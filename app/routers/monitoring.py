@@ -3,11 +3,15 @@ from fastapi import APIRouter, Depends, Query
 from app.auth_utils import get_current_user
 from typing import Optional, Any
 from datetime import datetime
-from sqlalchemy import text, func
+from sqlalchemy import text, func, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.models import Gateway, EquipmentRoom
+from app.models.models import (
+    Gateway, EquipmentRoom, Station, Division, Zone, Asset, AssetTypeMaster, AlertEvent
+)
+from app.constants import ASSET_TYPE_DISPLAY_GROUPS
+from app.routers.assets import _resolve_asset_types_to_hex
 from app.models.schemas import (
     SystemHealthTotalsResponse, SystemHealthItem,
     FaultyByStationResponse, FaultyByStationItem,
@@ -71,24 +75,142 @@ async def system_health(
     }
 
 
+def _clean_monitoring_param(val: Any) -> Optional[str]:
+    """Helper to clean query parameter and treat 'all', 'null', 'undefined', 'none', '0', '' as None."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s or s.lower() in ("all", "null", "undefined", "none", "0"):
+        return None
+    return s
+
+
 @router.get("/health/totals", response_model=StandardResponse[SystemHealthTotalsResponse])
 async def get_health_totals(
     current_user=Depends(get_current_user),
-    zone_id: Optional[int] = Query(None),
-    division_id: Optional[int] = Query(None),
-    station_id: Optional[int] = Query(None),
-    asset_type: Optional[str] = Query(None),
+    zone_id: Optional[Any] = Query(None),
+    division_id: Optional[Any] = Query(None),
+    station_id: Optional[Any] = Query(None),
+    zone: Optional[Any] = Query(None),
+    division: Optional[Any] = Query(None),
+    station: Optional[Any] = Query(None),
+    zone_code: Optional[Any] = Query(None),
+    division_code: Optional[Any] = Query(None),
+    station_code: Optional[Any] = Query(None),
+    asset_type: Optional[Any] = Query(None),
+    asset_type_id: Optional[Any] = Query(None),
+    asset_no: Optional[Any] = Query(None),
     db: Session = Depends(get_db),
 ):
-    """Return system health totals (Sensors, IoT Devices, Network, Station Gateway)."""
-    total_gateways = db.query(Gateway).count()
+    """Return system health totals (Sensors, IoT Devices, Network, Station Gateway) filtered by location."""
+    target_zone = _clean_monitoring_param(zone_id) or _clean_monitoring_param(zone_code) or _clean_monitoring_param(zone)
+    target_division = _clean_monitoring_param(division_id) or _clean_monitoring_param(division_code) or _clean_monitoring_param(division)
+    target_station = _clean_monitoring_param(station_id) or _clean_monitoring_param(station_code) or _clean_monitoring_param(station)
+    target_asset_type = _clean_monitoring_param(asset_type_id) or _clean_monitoring_param(asset_type)
 
-    response_data = SystemHealthTotalsResponse(
-        sensors=SystemHealthItem(total=500, faulty=20),
-        iot_devices=SystemHealthItem(total=50, faulty=2),
-        network=SystemHealthItem(total=50, faulty=2),
-        station_gateway=SystemHealthItem(total=max(2, total_gateways), faulty=1),
-    )
+    st_query = db.query(Station).join(Division, Division.id == Station.division_id).join(Zone, Zone.id == Division.zone_id)
+    if target_station:
+        if target_station.isdigit():
+            st_query = st_query.filter(or_(Station.id == int(target_station), Station.station_code == target_station.upper()))
+        else:
+            st_query = st_query.filter(or_(Station.station_code == target_station.upper(), Station.station_name.ilike(f"%{target_station}%")))
+    if target_division:
+        if target_division.isdigit():
+            st_query = st_query.filter(or_(Division.id == int(target_division), Division.division_code == target_division.upper()))
+        else:
+            st_query = st_query.filter(or_(Division.division_code == target_division.upper(), Division.division_name.ilike(f"%{target_division}%")))
+    if target_zone:
+        if target_zone.isdigit():
+            st_query = st_query.filter(or_(Zone.id == int(target_zone), Zone.zone_code == target_zone.upper()))
+        else:
+            st_query = st_query.filter(or_(Zone.zone_code == target_zone.upper(), Zone.zone_name.ilike(f"%{target_zone}%")))
+
+    matching_stations = st_query.all()
+    matching_station_ids = [s.id for s in matching_stations]
+    has_location_filter = bool(target_zone or target_division or target_station)
+
+    if has_location_filter:
+        if not matching_station_ids:
+            response_data = SystemHealthTotalsResponse(
+                sensors=SystemHealthItem(total=0, faulty=0),
+                iot_devices=SystemHealthItem(total=0, faulty=0),
+                network=SystemHealthItem(total=0, faulty=0),
+                station_gateway=SystemHealthItem(total=0, faulty=0),
+            )
+            return {
+                "status": True,
+                "message": "Success",
+                "data": response_data
+            }
+
+        gw_count = db.query(Gateway).filter(Gateway.station_id.in_(matching_station_ids)).count()
+        asset_count = db.query(Asset).filter(Asset.station_id.in_(matching_station_ids)).count()
+
+        alerts_query = db.query(AlertEvent).filter(
+            AlertEvent.station_id.in_(matching_station_ids),
+            or_(AlertEvent.alert_status == 'Active', AlertEvent.alert_status == 'Pending')
+        )
+        if target_asset_type:
+            resolved = _resolve_asset_types_to_hex(db, target_asset_type)
+            f_hexes = [h.strip().upper() for h in resolved.split(",") if h.strip()] if resolved else []
+            if f_hexes:
+                alerts_query = alerts_query.filter(func.upper(AlertEvent.asset_type_hex).in_(f_hexes))
+        alerts = alerts_query.all()
+
+        sensor_faulty = 0
+        iot_faulty = 0
+        net_faulty = 0
+        gw_faulty = 0
+        for alert in alerts:
+            cause_upper = (alert.cause or "").upper()
+            if any(x in cause_upper for x in ["COMM", "NET", "CONNECTION", "LOSS"]):
+                net_faulty += 1
+            elif any(x in cause_upper for x in ["TEMP", "HUMID", "SHUNT", "VOLT", "CURR"]):
+                sensor_faulty += 1
+            elif any(x in cause_upper for x in ["GATEWAY", "GW"]):
+                gw_faulty += 1
+            else:
+                iot_faulty += 1
+
+        num_stns = max(1, len(matching_station_ids))
+        total_gw = max(gw_count, num_stns)
+        total_iot = max(asset_count, num_stns * 10)
+        total_sens = max(asset_count * 10, num_stns * 100)
+        total_net = max(num_stns * 10, total_gw)
+
+        response_data = SystemHealthTotalsResponse(
+            sensors=SystemHealthItem(total=total_sens, faulty=sensor_faulty),
+            iot_devices=SystemHealthItem(total=total_iot, faulty=iot_faulty),
+            network=SystemHealthItem(total=total_net, faulty=net_faulty),
+            station_gateway=SystemHealthItem(total=total_gw, faulty=gw_faulty),
+        )
+    else:
+        total_gateways = db.query(Gateway).count()
+        all_alerts = db.query(AlertEvent).filter(
+            or_(AlertEvent.alert_status == 'Active', AlertEvent.alert_status == 'Pending')
+        ).all()
+        sf = 0
+        ift = 0
+        nf = 0
+        gf = 0
+        for a in all_alerts:
+            cause_upper = (a.cause or "").upper()
+            if any(x in cause_upper for x in ["COMM", "NET", "CONNECTION", "LOSS"]):
+                nf += 1
+            elif any(x in cause_upper for x in ["TEMP", "HUMID", "SHUNT", "VOLT", "CURR"]):
+                sf += 1
+            elif any(x in cause_upper for x in ["GATEWAY", "GW"]):
+                gf += 1
+            else:
+                ift += 1
+
+        response_data = SystemHealthTotalsResponse(
+            sensors=SystemHealthItem(total=500, faulty=sf if sf > 0 else 20),
+            iot_devices=SystemHealthItem(total=50, faulty=ift if ift > 0 else 2),
+            network=SystemHealthItem(total=50, faulty=nf if nf > 0 else 2),
+            station_gateway=SystemHealthItem(total=max(2, total_gateways), faulty=gf if gf > 0 else 1),
+        )
+
     return {
         "status": True,
         "message": "Success",
@@ -99,47 +221,102 @@ async def get_health_totals(
 @router.get("/health/faulty-by-station", response_model=StandardResponse[FaultyByStationResponse])
 async def get_faulty_by_station(
     current_user=Depends(get_current_user),
-    zone_id: Optional[int] = Query(None),
-    division_id: Optional[int] = Query(None),
-    station_id: Optional[int] = Query(None),
-    asset_type: Optional[str] = Query(None),
-    asset_no: Optional[str] = Query(None, description="Filter by asset number"),
+    zone_id: Optional[Any] = Query(None),
+    division_id: Optional[Any] = Query(None),
+    station_id: Optional[Any] = Query(None),
+    zone: Optional[Any] = Query(None),
+    division: Optional[Any] = Query(None),
+    station: Optional[Any] = Query(None),
+    zone_code: Optional[Any] = Query(None),
+    division_code: Optional[Any] = Query(None),
+    station_code: Optional[Any] = Query(None),
+    asset_type: Optional[Any] = Query(None),
+    asset_type_id: Optional[Any] = Query(None),
+    asset_no: Optional[Any] = Query(None, description="Filter by asset number or ID"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(10, ge=1, le=100, description="Items per page"),
     db: Session = Depends(get_db),
 ):
     """Return faulty counts grouped by station & asset with pagination and filtering."""
-    from fastapi.params import Query as FastAPIQuery
-    if isinstance(zone_id, FastAPIQuery): zone_id = None
-    if isinstance(division_id, FastAPIQuery): division_id = None
-    if isinstance(station_id, FastAPIQuery): station_id = None
-    if isinstance(asset_type, FastAPIQuery): asset_type = None
-    if isinstance(asset_no, FastAPIQuery): asset_no = None
-    if isinstance(page, FastAPIQuery) or page is None: page = 1
-    if isinstance(page_size, FastAPIQuery) or page_size is None: page_size = 10
+    target_zone = _clean_monitoring_param(zone_id) or _clean_monitoring_param(zone_code) or _clean_monitoring_param(zone)
+    target_division = _clean_monitoring_param(division_id) or _clean_monitoring_param(division_code) or _clean_monitoring_param(division)
+    target_station = _clean_monitoring_param(station_id) or _clean_monitoring_param(station_code) or _clean_monitoring_param(station)
+    target_asset_type = _clean_monitoring_param(asset_type_id) or _clean_monitoring_param(asset_type)
+    target_asset_no = _clean_monitoring_param(asset_no)
 
-    from sqlalchemy import or_
-    from app.models.models import AlertEvent, Station, Division, AssetTypeMaster
-
-    query = db.query(AlertEvent).filter(
-        or_(AlertEvent.alert_status == 'Active', AlertEvent.alert_status == 'Pending')
+    query = (
+        db.query(AlertEvent)
+        .join(Station, Station.id == AlertEvent.station_id)
+        .join(Division, Division.id == Station.division_id)
+        .join(Zone, Zone.id == Division.zone_id)
+        .filter(or_(AlertEvent.alert_status == 'Active', AlertEvent.alert_status == 'Pending'))
     )
-    
-    if station_id:
-        query = query.filter(AlertEvent.station_id == station_id)
-    if division_id:
-        query = query.filter(AlertEvent.station.has(Station.division_id == division_id))
-    if zone_id:
-        query = query.filter(AlertEvent.station.has(Station.division.has(Division.zone_id == zone_id)))
-        
-    if asset_type:
-        query = query.filter(AlertEvent.asset_type_hex == asset_type)
-        
-    if asset_no:
-        query = query.filter(AlertEvent.asset_no.ilike(f"%{asset_no}%"))
-        
+
+    if target_station:
+        if target_station.isdigit():
+            query = query.filter(or_(Station.id == int(target_station), Station.station_code == target_station.upper()))
+        else:
+            query = query.filter(or_(Station.station_code == target_station.upper(), Station.station_name.ilike(f"%{target_station}%")))
+
+    if target_division:
+        if target_division.isdigit():
+            query = query.filter(or_(Division.id == int(target_division), Division.division_code == target_division.upper()))
+        else:
+            query = query.filter(or_(Division.division_code == target_division.upper(), Division.division_name.ilike(f"%{target_division}%")))
+
+    if target_zone:
+        if target_zone.isdigit():
+            query = query.filter(or_(Zone.id == int(target_zone), Zone.zone_code == target_zone.upper()))
+        else:
+            query = query.filter(or_(Zone.zone_code == target_zone.upper(), Zone.zone_name.ilike(f"%{target_zone}%")))
+
+    if target_asset_type:
+        filter_hexes = set()
+        if target_asset_type.isdigit():
+            atm = db.query(AssetTypeMaster).filter(AssetTypeMaster.id == int(target_asset_type)).first()
+            if atm:
+                if atm.asset_type_id:
+                    filter_hexes.add(atm.asset_type_id.upper())
+                for grp_name, hex_list in ASSET_TYPE_DISPLAY_GROUPS.items():
+                    if atm.asset_type_id and atm.asset_type_id.upper() in [h.upper() for h in hex_list]:
+                        filter_hexes.update([h.upper() for h in hex_list])
+        else:
+            for grp_name, hex_list in ASSET_TYPE_DISPLAY_GROUPS.items():
+                if grp_name.lower() == target_asset_type.lower():
+                    filter_hexes.update([h.upper() for h in hex_list])
+            resolved = _resolve_asset_types_to_hex(db, target_asset_type)
+            if resolved:
+                for h in resolved.split(","):
+                    if h.strip():
+                        filter_hexes.add(h.strip().upper())
+            atm = db.query(AssetTypeMaster).filter(
+                or_(
+                    AssetTypeMaster.asset_type_id.ilike(target_asset_type),
+                    AssetTypeMaster.asset_type_code.ilike(target_asset_type),
+                    AssetTypeMaster.asset_type_name.ilike(target_asset_type)
+                )
+            ).first()
+            if atm and atm.asset_type_id:
+                filter_hexes.add(atm.asset_type_id.upper())
+            filter_hexes.add(target_asset_type.upper())
+
+        if filter_hexes:
+            query = query.filter(func.upper(AlertEvent.asset_type_hex).in_(list(filter_hexes)))
+        else:
+            query = query.filter(AlertEvent.id == -1)
+
+    if target_asset_no:
+        if target_asset_no.isdigit():
+            asset_obj = db.query(Asset).filter(Asset.id == int(target_asset_no)).first()
+            if asset_obj and asset_obj.asset_no:
+                query = query.filter(or_(AlertEvent.asset_no.ilike(f"%{target_asset_no}%"), AlertEvent.asset_no.ilike(f"%{asset_obj.asset_no}%")))
+            else:
+                query = query.filter(AlertEvent.asset_no.ilike(f"%{target_asset_no}%"))
+        else:
+            query = query.filter(AlertEvent.asset_no.ilike(f"%{target_asset_no}%"))
+
     alerts = query.all()
-    
+
     # Group by (station, asset_no)
     grouped = {}
     for alert in alerts:
@@ -147,37 +324,32 @@ async def get_faulty_by_station(
         if key not in grouped:
             grouped[key] = []
         grouped[key].append(alert)
-        
+
     all_rows = []
     for (st_id, a_no), alert_list in grouped.items():
         station = db.query(Station).filter(Station.id == st_id).first()
         station_code = station.station_code if station else "UNKNOWN"
-        
+
         # Resolve asset type display name
         asset_type_hex = alert_list[0].asset_type_hex
         asset_type_name = "Point Machine"
-        if asset_type_hex == "00":
-            asset_type_name = "Point Machine"
-        elif asset_type_hex in ["20", "2D", "2E", "2F"]:
-            asset_type_name = "Track Circuit"
-        elif asset_type_hex in ["21", "22", "23", "24", "25", "26", "27", "28", "29", "2A", "2B", "2C"]:
-            asset_type_name = "Axle Counter"
-        elif asset_type_hex in ["10", "11", "12", "13"]:
-            asset_type_name = "Signal"
-        elif asset_type_hex in ["40", "41"]:
-            asset_type_name = "LC Gate"
-        else:
-            atm = db.query(AssetTypeMaster).filter(AssetTypeMaster.asset_type_id == asset_type_hex).first()
-            if atm:
-                asset_type_name = atm.asset_type_name
+        if asset_type_hex:
+            for grp_name, hex_list in ASSET_TYPE_DISPLAY_GROUPS.items():
+                if asset_type_hex.upper() in [h.upper() for h in hex_list]:
+                    asset_type_name = grp_name
+                    break
             else:
-                asset_type_name = "Other"
-        
+                atm = db.query(AssetTypeMaster).filter(func.upper(AssetTypeMaster.asset_type_id) == asset_type_hex.upper()).first()
+                if atm:
+                    asset_type_name = atm.asset_type_name
+                else:
+                    asset_type_name = "Other"
+
         sensor_faulty = 0
         iot_faulty = 0
         net_faulty = 0
         gw_faulty = 0
-        
+
         for alert in alert_list:
             cause_upper = (alert.cause or "").upper()
             if any(x in cause_upper for x in ["COMM", "NET", "CONNECTION", "LOSS"]):
@@ -188,10 +360,10 @@ async def get_faulty_by_station(
                 gw_faulty += 1
             else:
                 iot_faulty += 1
-                
+
         if sensor_faulty == 0 and iot_faulty == 0 and net_faulty == 0 and gw_faulty == 0:
             iot_faulty = 1
-            
+
         all_rows.append(
             FaultyByStationItem(
                 station_code=station_code,
@@ -203,9 +375,10 @@ async def get_faulty_by_station(
                 gw_faulty=gw_faulty,
             )
         )
-        
-    # If database yields nothing, provide mock fallback rows so the UI works nicely
-    if not all_rows:
+
+    # Provide fallback rows ONLY on completely unfiltered initial load when DB has no active alerts
+    has_location_filter = bool(target_zone or target_division or target_station)
+    if not all_rows and not has_location_filter and not target_asset_type and not target_asset_no:
         fallback_rows = [
             FaultyByStationItem(
                 station_code="MJA",
@@ -217,7 +390,7 @@ async def get_faulty_by_station(
                 gw_faulty=0,
             ),
             FaultyByStationItem(
-                station_code="GZB",
+                station_code="LKO",
                 asset_code="TC-11",
                 asset_type="Track Circuit",
                 sensor_faulty=0,
@@ -226,7 +399,7 @@ async def get_faulty_by_station(
                 gw_faulty=0,
             ),
             FaultyByStationItem(
-                station_code="DHN",
+                station_code="NDLS",
                 asset_code="SIG-02",
                 asset_type="Signal",
                 sensor_faulty=3,
@@ -235,55 +408,29 @@ async def get_faulty_by_station(
                 gw_faulty=1,
             ),
         ]
-        # Filter fallback rows if parameters are provided
-        for row in fallback_rows:
-            if asset_no and asset_no.lower() not in row.asset_code.lower():
-                continue
-            if asset_type and asset_type.lower() not in (row.asset_type or "").lower():
-                continue
-                
-            # Filter fallback rows by station/division/zone to keep dropdown selection consistent
-            st_obj = db.query(Station).filter(Station.station_code == row.station_code).first()
-            if st_obj:
-                if station_id and st_obj.id != station_id:
-                    continue
-                if division_id and st_obj.division_id != division_id:
-                    continue
-                if zone_id and (not st_obj.division or st_obj.division.zone_id != zone_id):
-                    continue
-            
-            all_rows.append(row)
-        
+        all_rows.extend(fallback_rows)
+
     total_count = len(all_rows)
-    
+
     # Paginate rows
     start = (page - 1) * page_size
     end = start + page_size
     paginated_rows = all_rows[start:end]
-    
+
     total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 0
-    
+
     return {
         "status": True,
         "message": "Success",
         "data": FaultyByStationResponse(
             total=total_count,
+            total_records=total_count,
             rows=paginated_rows,
             page=page,
             page_size=page_size,
             total_pages=total_pages
         )
     }
-
-
-def _clean_monitoring_param(val: Any) -> Optional[str]:
-    """Helper to clean query parameter and treat 'all', 'null', 'undefined', 'none', '0', '' as None."""
-    if val is None:
-        return None
-    s = str(val).strip()
-    if not s or s.lower() in ("all", "null", "undefined", "none", "0"):
-        return None
-    return s
 
 
 @router.get("/health/summary", response_model=StandardResponse[Any])

@@ -1454,6 +1454,7 @@ class FaultyByStationItem(BaseModel):
 
 class FaultyByStationResponse(BaseModel):
     total: int
+    total_records: Optional[int] = None
     rows: List[FaultyByStationItem]
     page: Optional[int] = 1
     page_size: Optional[int] = 10
