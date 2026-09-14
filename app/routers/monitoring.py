@@ -185,7 +185,14 @@ async def get_health_totals(
             station_gateway=SystemHealthItem(total=total_gw, faulty=gw_faulty),
         )
     else:
-        total_gateways = db.query(Gateway).count()
+        num_stns = max(1, db.query(Station).count())
+        gw_count = db.query(Gateway).count()
+        asset_count = db.query(Asset).count()
+        total_gw = max(gw_count, num_stns)
+        total_iot = max(asset_count, num_stns * 10)
+        total_sens = max(asset_count * 10, num_stns * 100)
+        total_net = max(num_stns * 10, total_gw)
+
         all_alerts = db.query(AlertEvent).filter(
             or_(AlertEvent.alert_status == 'Active', AlertEvent.alert_status == 'Pending')
         ).all()
@@ -205,10 +212,10 @@ async def get_health_totals(
                 ift += 1
 
         response_data = SystemHealthTotalsResponse(
-            sensors=SystemHealthItem(total=500, faulty=sf if sf > 0 else 20),
-            iot_devices=SystemHealthItem(total=50, faulty=ift if ift > 0 else 2),
-            network=SystemHealthItem(total=50, faulty=nf if nf > 0 else 2),
-            station_gateway=SystemHealthItem(total=max(2, total_gateways), faulty=gf if gf > 0 else 1),
+            sensors=SystemHealthItem(total=total_sens, faulty=sf if sf > 0 else 20),
+            iot_devices=SystemHealthItem(total=total_iot, faulty=ift if ift > 0 else 2),
+            network=SystemHealthItem(total=total_net, faulty=nf if nf > 0 else 2),
+            station_gateway=SystemHealthItem(total=total_gw, faulty=gf if gf > 0 else 1),
         )
 
     return {

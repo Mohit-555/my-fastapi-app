@@ -1,0 +1,311 @@
+erDiagram
+    %% =========================================================================
+    %% GEOGRAPHICAL & ORGANIZATIONAL HIERARCHY
+    %% =========================================================================
+    zones ||--o{ divisions : "contains"
+    divisions ||--o{ stations : "contains"
+    zones |o--o{ users : "scopes_user"
+    divisions |o--o{ users : "scopes_user"
+
+    %% =========================================================================
+    %% HARDWARE, TELEMETRY & INGESTION
+    %% =========================================================================
+    stations ||--o{ gateways : "houses"
+    gateways ||--o{ slave_cards : "controls"
+    gateways ||--o{ telemetry : "transmits"
+    gateways ||--o{ assets : "communicates_with"
+    slave_cards ||--o{ asset_parameters : "connects_channel"
+
+    %% =========================================================================
+    %% ASSET MANAGEMENT & METADATA
+    %% =========================================================================
+    asset_type_master ||--o{ alert_cause_master : "categorizes"
+    asset_type_master ||--o{ assets : "classifies"
+    stations ||--o{ assets : "contains"
+    stations ||--o{ asset_inventory : "aggregates"
+    stations ||--o{ thresholds : "overrides"
+    assets ||--o{ asset_parameters : "owns"
+    assets ||--o{ alert_events : "generates"
+    assets ||--o{ maintenance_modes : "scheduled_in"
+
+    %% =========================================================================
+    %% ALERTS, MONITORING & OPERATIONS
+    %% =========================================================================
+    stations ||--o{ alert_events : "records"
+    stations ||--o{ equipment_rooms : "monitors"
+    stations ||--o{ maintenance_modes : "manages"
+
+    %% =========================================================================
+    %% RBAC & AUTHENTICATION
+    %% =========================================================================
+    roles ||--o{ users : "assigned_to"
+    users ||--o{ refresh_tokens : "issues"
+    roles ||--o{ role_menus : "grants_access"
+    menus ||--o{ role_menus : "permission_for"
+
+    %% =========================================================================
+    %% TABLE SCHEMAS & ATTRIBUTES
+    %% =========================================================================
+
+    zones {
+        int id PK
+        string zone_name
+        string zone_code UK "Unique zone code (e.g. NR, WR)"
+        string zone_id_hex UK "2-byte hex ID"
+        string headquarters
+        string description
+        string status "Active / Inactive"
+    }
+
+    divisions {
+        int id PK
+        string division_name
+        string division_code "e.g. DLI, BCT"
+        string division_id_hex "2-byte hex ID"
+        int zone_id FK
+        string headquarters
+        string description
+        string status
+    }
+
+    stations {
+        int id PK
+        string station_name
+        string station_code "e.g. NDLS, MMCT"
+        string station_id_hex "2-byte hex ID"
+        int division_id FK
+        string category
+        string address
+        string description
+        string status
+        json asset_types "Enabled asset types list"
+    }
+
+    gateways {
+        int id PK
+        string stngw_id UK "Indexed 8-char Master Gateway ID"
+        string imei "Cellular IMEI"
+        int station_id FK
+        string mtls_cn "mTLS Client Certificate Common Name"
+        datetime created_at
+    }
+
+    slave_cards {
+        int id PK
+        int gateway_id FK
+        string card_address "1-byte hex (e.g. 81)"
+        string card_type "Voltage, Analog, DI, etc."
+        datetime created_at
+    }
+
+    telemetry {
+        int id PK
+        int gateway_id FK
+        string para_id "8-char hex parameter ID (indexed)"
+        float prv "Parameter Reading Value"
+        string prt "Hardware timestamp string"
+        text raw_payload
+        datetime received_at
+        boolean is_processed "Pipeline processing status"
+    }
+
+    telemetry_waveforms {
+        int id PK
+        string para_id "8-char hex parameter ID (indexed)"
+        string prt "Timestamp of operation"
+        json raw "Raw 230+ sample signature array"
+        datetime received_at
+    }
+
+    asset_type_master {
+        int id PK
+        string asset_type_id UK "Hex byte (00=Point Machine, 01=DC Track...)"
+        string asset_type_code UK "Code e.g. POINT_MACHINE"
+        string asset_type_name
+        boolean is_equipment_room
+        datetime created_at
+    }
+
+    alert_cause_master {
+        string cause_code PK "Standardized fault cause code"
+        text cause_detail "Detailed explanation of failure"
+        string asset_type_id FK
+        string alert_category "FAILURE or PREDICTIVE"
+        datetime created_at
+    }
+
+    assets {
+        int id PK
+        string smms_asset_code UK "SMMS Unique Code"
+        string smms_asset_name
+        string asset_number_code "e.g. PT-101"
+        string asset_number_id "1-byte hex 00-FF"
+        string asset_type_hex FK "Links to asset_type_master"
+        string station_gateway_id FK "Links to gateways.stngw_id"
+        int station_id FK
+        string make
+        string model
+        string attr1
+        string attr2
+        string location "Physical field location"
+        boolean is_active
+        string vendor_code
+        datetime last_sync
+        datetime created_at
+        datetime updated_at
+    }
+
+    asset_parameters {
+        int id PK
+        string para_id UK "8-char hex identifier (indexed)"
+        int asset_id FK
+        string prloc "Location box termination (e.g. LB-01)"
+        boolean is_assigned
+        int slave_card_id FK
+        string channel_number "CH1 to CH12"
+        datetime created_at
+        datetime updated_at
+    }
+
+    asset_inventory {
+        int id PK
+        int station_id FK
+        string asset_type_hex
+        string asset_make
+        int count
+        datetime created_at
+        datetime updated_at
+    }
+
+    thresholds {
+        int id PK
+        string asset_type_hex "Bytes 0-1 of para_id"
+        string parameter_type_hex "Bytes 4-5 of para_id"
+        int station_id FK "NULL = Global RDSO default"
+        float warning_low
+        float warning_high
+        float critical_low
+        float critical_high
+        string unit "A, V, ms, degC, etc."
+        string description
+        datetime created_at
+        datetime updated_at
+    }
+
+    alert_events {
+        int id PK
+        int station_id FK
+        int asset_id FK
+        string alert_type "Failure / Predictive"
+        string asset_type_hex
+        string asset_no
+        string cause
+        string alert_status "Active / Acknowledged / Rectified"
+        string feedback "T / PT / F / M"
+        boolean acknowledged
+        text remark
+        datetime alert_time
+        datetime rectification_time
+        datetime feedback_time
+        string maintainer_name
+        string designation
+        string mobile
+        string escalation_level
+        datetime escalated_at
+        string escalated_to
+        string vendor_code
+        datetime created_at
+        datetime updated_at
+    }
+
+    equipment_rooms {
+        int id PK
+        int station_id FK
+        string room_type "RR, IPS, BATT"
+        float temperature
+        float humidity
+        string door_status "OPEN / CLOSED"
+        datetime updated_at
+    }
+
+    maintenance_modes {
+        int id PK
+        int station_id FK
+        int asset_id FK
+        string asset_type_hex
+        string asset_no
+        datetime from_time
+        datetime to_time
+        boolean is_cleared
+        datetime cleared_at
+        datetime created_at
+    }
+
+    users {
+        int id PK
+        string full_name
+        string employee_id UK "Unique Railway Employee ID"
+        string designation
+        int role_id FK
+        int zone_id FK "Jurisdiction scope"
+        int division_id FK "Jurisdiction scope"
+        string mobile_number
+        string email UK
+        string hashed_password
+        int reporting_officer_id
+        boolean is_active
+        datetime created_at
+    }
+
+    refresh_tokens {
+        int id PK
+        int user_id FK
+        string token_hash UK "SHA-256 hash of refresh token"
+        boolean remember_me
+        datetime expires_at
+        datetime revoked_at
+        datetime created_at
+    }
+
+    roles {
+        int id PK
+        string name UK "Technician, JE, SE, ADRM, DRM, Admin"
+        string display_name
+        int level "Hierarchy ranking"
+        string description
+        boolean is_active
+        datetime created_at
+    }
+
+    menus {
+        int id PK
+        string name "Label in UI navigation"
+        string slug UK "Unique slug e.g. alerts.live"
+        string parent_slug "Parent slug for hierarchical trees"
+        string icon
+        int sort_order
+        boolean is_active
+    }
+
+    role_menus {
+        int id PK
+        int role_id FK
+        int menu_id FK
+        string permission "view / edit / full"
+    }
+
+    api_logs {
+        int id PK
+        string method
+        string endpoint
+        text query_params
+        text request_body
+        text response_body
+        int status_code
+        string employee_id
+        string ip_address
+        int response_time_ms
+        text error_detail
+        datetime created_at
+    }
+
