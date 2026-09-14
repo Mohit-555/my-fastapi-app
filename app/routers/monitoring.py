@@ -602,17 +602,29 @@ def get_health_summary(
             "division": d_code,
             "station": s_code,
             "asset_type": display_asset_type,
+            # Sensors
             "total_sensors": total_sensors,
+            "totalSensors": total_sensors,
             "avail_sensors_pct": avail_sensors_pct,
+            "sensorsAvail": 100.0,
+            # IoTs
             "total_iots": total_iots,
+            "totalIoTs": total_iots,
             "avail_iots_pct": avail_iots_pct,
             "avail_iots": avail_iots_pct,
+            "iotsAvail": 100.0,
+            # Network
             "total_network": total_network,
+            "totalNetwork": total_network,
             "avail_network_pct": avail_network_pct,
             "avail_network": avail_network_pct,
+            "networkAvail": 100.0,
+            # Gateway
             "total_gateway": total_gateway,
+            "totalGateway": total_gateway,
             "avail_gateway_pct": avail_gateway_pct,
-            "avail_gateway": avail_gateway_pct
+            "avail_gateway": avail_gateway_pct,
+            "gatewayAvail": 100
         })
 
     total_records = len(rows)
