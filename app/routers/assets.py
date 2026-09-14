@@ -7,7 +7,7 @@ Assets router — serves:
 import csv
 import io
 from datetime import date, datetime
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
@@ -97,6 +97,133 @@ def _resolve_asset_types_to_hex(db: Session, asset_type: Optional[str]) -> Optio
         return ",".join(hexes)
 
     return None
+
+
+def _parse_list_param(param: Any) -> Optional[List[Any]]:
+    if param is None:
+        return None
+    if isinstance(param, (list, tuple)):
+        result = []
+        for item in param:
+            if isinstance(item, str):
+                result.extend([p.strip() for p in item.split(",") if p.strip()])
+            else:
+                result.append(item)
+        return result if result else None
+    if isinstance(param, str):
+        parts = [p.strip() for p in param.split(",") if p.strip()]
+        return parts if parts else None
+    return [param]
+
+
+def _resolve_location_ids(
+    db: Session,
+    zones: Any = None,
+    divisions: Any = None,
+    stations: Any = None
+) -> tuple[Optional[List[int]], Optional[List[int]], Optional[List[int]]]:
+    """Resolve zone/division/station codes or IDs to database IDs in a cascading manner."""
+    zone_ids = None
+    division_ids = None
+    station_ids = None
+
+    zones_list = _parse_list_param(zones)
+    divisions_list = _parse_list_param(divisions)
+    stations_list = _parse_list_param(stations)
+
+    # 1. Resolve Zones
+    if zones_list is not None:
+        zone_ids = []
+        for item in zones_list:
+            s_item = str(item).strip()
+            if not s_item or s_item.upper() == "ALL" or s_item == "0":
+                continue
+            if s_item.isdigit():
+                z = db.query(Zone).filter(Zone.id == int(s_item)).first()
+                if z and z.id not in zone_ids:
+                    zone_ids.append(z.id)
+            z_codes = db.query(Zone).filter(
+                (Zone.zone_code.ilike(s_item)) | (Zone.zone_name.ilike(s_item))
+            ).all()
+            for z in z_codes:
+                if z.id not in zone_ids:
+                    zone_ids.append(z.id)
+        if not zone_ids and not any(str(x).upper() in ("ALL", "0", "") for x in zones_list):
+            zone_ids = []
+        elif any(str(x).upper() in ("ALL", "0", "") for x in zones_list) and not zone_ids:
+            zone_ids = None
+
+    # 2. Resolve Divisions
+    if divisions_list is not None:
+        division_ids = []
+        for item in divisions_list:
+            s_item = str(item).strip()
+            if not s_item or s_item.upper() == "ALL" or s_item == "0":
+                continue
+            query = db.query(Division)
+            if zone_ids is not None:
+                query = query.filter(Division.zone_id.in_(zone_ids))
+            if s_item.isdigit():
+                d = query.filter(Division.id == int(s_item)).first()
+                if d and d.id not in division_ids:
+                    division_ids.append(d.id)
+            d_codes = query.filter(
+                (Division.division_code.ilike(s_item)) | (Division.division_name.ilike(s_item))
+            ).all()
+            for d in d_codes:
+                if d.id not in division_ids:
+                    division_ids.append(d.id)
+        if not division_ids and not any(str(x).upper() in ("ALL", "0", "") for x in divisions_list):
+            division_ids = []
+        elif any(str(x).upper() in ("ALL", "0", "") for x in divisions_list) and not division_ids:
+            division_ids = None
+
+    # 3. Resolve Stations
+    if stations_list is not None:
+        station_ids = []
+        for item in stations_list:
+            s_item = str(item).strip()
+            if not s_item or s_item.upper() == "ALL" or s_item == "0":
+                continue
+            query = db.query(Station).join(Division, Division.id == Station.division_id)
+            if division_ids is not None:
+                query = query.filter(Station.division_id.in_(division_ids))
+            elif zone_ids is not None:
+                query = query.filter(Division.zone_id.in_(zone_ids))
+
+            if s_item.isdigit():
+                s = query.filter(Station.id == int(s_item)).first()
+                if s and s.id not in station_ids:
+                    station_ids.append(s.id)
+            s_codes = query.filter(
+                (Station.station_code.ilike(s_item)) | (Station.station_name.ilike(s_item))
+            ).all()
+            for s in s_codes:
+                if s.id not in station_ids:
+                    station_ids.append(s.id)
+        if not station_ids and not any(str(x).upper() in ("ALL", "0", "") for x in stations_list):
+            station_ids = []
+        elif any(str(x).upper() in ("ALL", "0", "") for x in stations_list) and not station_ids:
+            station_ids = None
+
+    return zone_ids, division_ids, station_ids
+
+
+def _resolve_asset_make(db: Session, raw_make: Optional[str]) -> Optional[str]:
+    if not raw_make:
+        return None
+    s = str(raw_make).strip()
+    if not s or s.upper() in ("ALL", "0"):
+        return None
+    if s.isdigit():
+        make_idx = int(s)
+        makes_inv = db.query(AssetInventory.asset_make).distinct().all()
+        makes_asset = db.query(Asset.make).distinct().all()
+        makes_set = {r[0].strip() for r in makes_inv if r[0]} | {r[0].strip() for r in makes_asset if r[0]}
+        sorted_makes = sorted(list(makes_set)) or ["Alstom", "Ansaldo", "CEL", "Siemens", "Kernex", "Medha"]
+        if 1 <= make_idx <= len(sorted_makes):
+            return sorted_makes[make_idx - 1]
+    return s
 
 
 # ── Asset Type Endpoints ──────────────────────────────────────────────────────
@@ -227,11 +354,14 @@ def list_representations():
 
 def _asset_detail_query(
     db: Session,
-    zone_id: Optional[int],
-    division_id: Optional[int],
-    station_id: Optional[int],
-    asset_type_hex: Optional[str],
-    asset_make: Optional[str],
+    zone_id: Optional[Union[int, str]] = None,
+    division_id: Optional[Union[int, str]] = None,
+    station_id: Optional[Union[int, str]] = None,
+    asset_type_hex: Optional[str] = None,
+    asset_make: Optional[str] = None,
+    zone_ids: Optional[List[int]] = None,
+    division_ids: Optional[List[int]] = None,
+    station_ids: Optional[List[int]] = None,
 ):
     q = (
         db.query(
@@ -248,12 +378,21 @@ def _asset_detail_query(
         .join(Zone, Zone.id == Division.zone_id)
     )
 
-    if zone_id is not None:
+    if zone_ids is not None:
+        q = q.filter(Zone.id.in_(zone_ids))
+    elif zone_id is not None:
         q = q.filter(Zone.id == zone_id)
-    if division_id is not None:
+
+    if division_ids is not None:
+        q = q.filter(Division.id.in_(division_ids))
+    elif division_id is not None:
         q = q.filter(Division.id == division_id)
-    if station_id is not None:
+
+    if station_ids is not None:
+        q = q.filter(Station.id.in_(station_ids))
+    elif station_id is not None:
         q = q.filter(Station.id == station_id)
+
     if asset_type_hex:
         hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
         if len(hex_list) == 1:
@@ -305,11 +444,19 @@ def _asset_detail_rows(raw_rows) -> List[AssetDetailRow]:
 
 @router.get("/detail", response_model=StandardResponse[AssetDetailResponse])
 def get_asset_detail(
-    zone_id: Optional[int] = Query(None),
-    division_id: Optional[int] = Query(None),
-    station_id: Optional[int] = Query(None),
+    zone_id: Optional[Union[int, str]] = Query(None),
+    zone_code: Optional[str] = Query(None),
+    zone: Optional[str] = Query(None),
+    division_id: Optional[Union[int, str]] = Query(None),
+    division_code: Optional[str] = Query(None),
+    division: Optional[str] = Query(None),
+    station_id: Optional[Union[int, str]] = Query(None),
+    station_code: Optional[str] = Query(None),
+    station: Optional[str] = Query(None),
     asset_type: Optional[str] = Query(None),
+    asset_type_hex: Optional[str] = Query(None),
     asset_make: Optional[str] = Query(None),
+    make: Optional[str] = Query(None),
     view: str = Query("table", description="Frontend view mode. Currently supports table data."),
     db: Session = Depends(get_db),
 ):
@@ -319,14 +466,22 @@ def get_asset_detail(
     Filters map to the UI controls: Zone, Division, Station, Asset Type,
     View, and Asset Make.
     """
-    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
+    z_param = zone_id if zone_id is not None else (zone_code if zone_code is not None else zone)
+    d_param = division_id if division_id is not None else (division_code if division_code is not None else division)
+    s_param = station_id if station_id is not None else (station_code if station_code is not None else station)
+    zone_ids, division_ids, station_ids = _resolve_location_ids(db, z_param, d_param, s_param)
+
+    raw_type = asset_type or asset_type_hex
+    resolved_hex = _resolve_asset_types_to_hex(db, raw_type)
+    resolved_make = _resolve_asset_make(db, asset_make or make)
+
     raw_rows = _asset_detail_query(
         db=db,
-        zone_id=zone_id,
-        division_id=division_id,
-        station_id=station_id,
-        asset_type_hex=asset_type_hex,
-        asset_make=asset_make,
+        asset_type_hex=resolved_hex,
+        asset_make=resolved_make,
+        zone_ids=zone_ids,
+        division_ids=division_ids,
+        station_ids=station_ids,
     ).all()
     rows = _asset_detail_rows(raw_rows)
     response_data = AssetDetailResponse(
@@ -343,22 +498,38 @@ def get_asset_detail(
 
 @router.get("/detail/download")
 def download_asset_detail(
-    zone_id: Optional[int] = Query(None),
-    division_id: Optional[int] = Query(None),
-    station_id: Optional[int] = Query(None),
+    zone_id: Optional[Union[int, str]] = Query(None),
+    zone_code: Optional[str] = Query(None),
+    zone: Optional[str] = Query(None),
+    division_id: Optional[Union[int, str]] = Query(None),
+    division_code: Optional[str] = Query(None),
+    division: Optional[str] = Query(None),
+    station_id: Optional[Union[int, str]] = Query(None),
+    station_code: Optional[str] = Query(None),
+    station: Optional[str] = Query(None),
     asset_type: Optional[str] = Query(None),
+    asset_type_hex: Optional[str] = Query(None),
     asset_make: Optional[str] = Query(None),
+    make: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """Download the Asset Detail report as CSV."""
-    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
+    z_param = zone_id if zone_id is not None else (zone_code if zone_code is not None else zone)
+    d_param = division_id if division_id is not None else (division_code if division_code is not None else division)
+    s_param = station_id if station_id is not None else (station_code if station_code is not None else station)
+    zone_ids, division_ids, station_ids = _resolve_location_ids(db, z_param, d_param, s_param)
+
+    raw_type = asset_type or asset_type_hex
+    resolved_hex = _resolve_asset_types_to_hex(db, raw_type)
+    resolved_make = _resolve_asset_make(db, asset_make or make)
+
     raw_rows = _asset_detail_query(
         db=db,
-        zone_id=zone_id,
-        division_id=division_id,
-        station_id=station_id,
-        asset_type_hex=asset_type_hex,
-        asset_make=asset_make,
+        asset_type_hex=resolved_hex,
+        asset_make=resolved_make,
+        zone_ids=zone_ids,
+        division_ids=division_ids,
+        station_ids=station_ids,
     ).all()
     rows = _asset_detail_rows(raw_rows)
 
@@ -619,24 +790,62 @@ def get_asset_filters(db: Session = Depends(get_db)):
 
 @router.get("/inventory", response_model=StandardResponse[List[AssetInventoryResponse]])
 def list_asset_inventory(
-    station_id: Optional[int] = Query(None),
-    asset_type: Optional[str] = Query(None),
-    asset_make: Optional[str] = Query(None),
+    zone_id:        Optional[Union[int, str]] = Query(None, description="Filter by zone ID/code/name"),
+    zone_code:      Optional[str]             = Query(None, description="Filter by zone code"),
+    zone:           Optional[str]             = Query(None, description="Filter by zone code or name"),
+    division_id:    Optional[Union[int, str]] = Query(None, description="Filter by division ID/code/name"),
+    division_code:  Optional[str]             = Query(None, description="Filter by division code"),
+    division:       Optional[str]             = Query(None, description="Filter by division code or name"),
+    station_id:     Optional[Union[int, str]] = Query(None, description="Filter by station ID/code/name"),
+    station_code:   Optional[str]             = Query(None, description="Filter by station code"),
+    station:        Optional[str]             = Query(None, description="Filter by station code or name"),
+    asset_type:     Optional[Union[int, str]] = Query(None, description="Filter by asset type (ID, hex, or name)"),
+    asset_type_hex: Optional[str]             = Query(None, description="Filter by asset type hex code"),
+    asset_make:     Optional[Union[int, str]] = Query(None, description="Filter by asset make (ID, name, or 'ALL')"),
+    make:           Optional[Union[int, str]] = Query(None, description="Filter by asset make"),
     db: Session = Depends(get_db),
 ):
     """List raw asset inventory records used by the Asset Detail report."""
-    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
+    z_param = zone_id if zone_id is not None else (zone_code if zone_code is not None else zone)
+    d_param = division_id if division_id is not None else (division_code if division_code is not None else division)
+    s_param = station_id if station_id is not None else (station_code if station_code is not None else station)
+    zone_ids, division_ids, station_ids = _resolve_location_ids(db, z_param, d_param, s_param)
+
+    raw_type = asset_type if asset_type is not None else asset_type_hex
+    raw_type_str = str(raw_type) if raw_type is not None else None
+    resolved_type_hex = _resolve_asset_types_to_hex(db, raw_type_str)
+    resolved_make = _resolve_asset_make(db, str(asset_make) if asset_make is not None else (str(make) if make is not None else None))
+
     q = db.query(AssetInventory)
-    if station_id is not None:
-        q = q.filter(AssetInventory.station_id == station_id)
-    if asset_type_hex:
-        hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
+    if zone_ids is not None or division_ids is not None or station_ids is not None:
+        q = (
+            q.join(Station, Station.id == AssetInventory.station_id)
+            .join(Division, Division.id == Station.division_id)
+            .join(Zone, Zone.id == Division.zone_id)
+        )
+        if station_ids is not None:
+            q = q.filter(Station.id.in_(station_ids))
+        if division_ids is not None:
+            q = q.filter(Division.id.in_(division_ids))
+        if zone_ids is not None:
+            q = q.filter(Zone.id.in_(zone_ids))
+    elif s_param is not None:
+        if str(s_param).isdigit():
+            q = q.filter(AssetInventory.station_id == int(s_param))
+        else:
+            q = q.join(Station, Station.id == AssetInventory.station_id).filter(
+                (Station.station_code.ilike(str(s_param))) | (Station.station_name.ilike(str(s_param)))
+            )
+
+    if resolved_type_hex:
+        hex_list = [h.strip().upper() for h in resolved_type_hex.split(",") if h.strip()]
         if len(hex_list) == 1:
             q = q.filter(AssetInventory.asset_type_hex == hex_list[0])
         elif len(hex_list) > 1:
             q = q.filter(AssetInventory.asset_type_hex.in_(hex_list))
-    if asset_make:
-        q = q.filter(func.lower(AssetInventory.asset_make) == asset_make.lower())
+    if resolved_make:
+        q = q.filter(func.lower(AssetInventory.asset_make) == resolved_make.lower())
+
     rows = q.order_by(AssetInventory.station_id, AssetInventory.asset_type_hex, AssetInventory.asset_make).all()
     return {
         "status": True,
@@ -953,10 +1162,17 @@ def _build_response(record: Asset) -> AssetResponse:
 
 @router.get("/utilization", response_model=StandardResponse[Any])
 def get_asset_utilization(
-    zone: Optional[str] = Query(None, description="Zone code"),
-    division: Optional[str] = Query(None, description="Division code"),
-    station: Optional[str] = Query(None, description="Station code"),
+    zone_id: Optional[Union[int, str]] = Query(None, description="Zone ID or code"),
+    zone_code: Optional[str] = Query(None, description="Zone code"),
+    zone: Optional[str] = Query(None, description="Zone code or name"),
+    division_id: Optional[Union[int, str]] = Query(None, description="Division ID or code"),
+    division_code: Optional[str] = Query(None, description="Division code"),
+    division: Optional[str] = Query(None, description="Division code or name"),
+    station_id: Optional[Union[int, str]] = Query(None, description="Station ID or code"),
+    station_code: Optional[str] = Query(None, description="Station code"),
+    station: Optional[str] = Query(None, description="Station code or name"),
     asset_type: Optional[str] = Query(None, description="Asset type name or hex code"),
+    asset_type_hex: Optional[str] = Query(None, description="Asset type hex code"),
     asset_no: Optional[str] = Query(None, description="Asset number"),
     from_date: Optional[str] = Query(None, description="Start date DD/MM/YYYY"),
     to_date: Optional[str] = Query(None, description="End date DD/MM/YYYY"),
@@ -968,31 +1184,43 @@ def get_asset_utilization(
     Asset Utilization API — Returns list of assets with operation counts matching filters.
     """
     from app.models.models import Telemetry
-    
-    query = db.query(Asset).join(Station, Station.id == Asset.station_id).join(Division, Division.id == Station.division_id).join(Zone, Zone.id == Division.zone_id)
-    
-    if isinstance(zone, str) and zone:
-        query = query.filter(Zone.zone_code.ilike(f"%{zone}%"))
-    if isinstance(division, str) and division:
-        query = query.filter(Division.division_code.ilike(f"%{division}%"))
-    if isinstance(station, str) and station:
-        query = query.filter((Station.station_code.ilike(f"%{station}%")) | (Station.station_name.ilike(f"%{station}%")))
+
+    z_param = zone_id if zone_id is not None else (zone_code if zone_code is not None else zone)
+    d_param = division_id if division_id is not None else (division_code if division_code is not None else division)
+    s_param = station_id if station_id is not None else (station_code if station_code is not None else station)
+    zone_ids, division_ids, station_ids = _resolve_location_ids(db, z_param, d_param, s_param)
+
+    query = (
+        db.query(Asset)
+        .join(Station, Station.id == Asset.station_id)
+        .join(Division, Division.id == Station.division_id)
+        .join(Zone, Zone.id == Division.zone_id)
+    )
+
+    if station_ids is not None:
+        query = query.filter(Station.id.in_(station_ids))
+    if division_ids is not None:
+        query = query.filter(Division.id.in_(division_ids))
+    if zone_ids is not None:
+        query = query.filter(Zone.id.in_(zone_ids))
+
     if isinstance(asset_no, str) and asset_no:
         query = query.filter(Asset.asset_number_code.ilike(f"%{asset_no}%"))
-        
-    asset_hex = _resolve_asset_types_to_hex(db, asset_type)
+
+    raw_type = asset_type or asset_type_hex
+    asset_hex = _resolve_asset_types_to_hex(db, raw_type)
     if asset_hex:
         hex_list = [h.strip() for h in asset_hex.split(",") if h.strip()]
         query = query.filter(Asset.asset_type_hex.in_(hex_list))
-        
+
     # 1. Paginate assets first to avoid executing hundreds of heavy count queries
     total_records = query.count()
     total_pages = (total_records + page_size - 1) // page_size if total_records else 0
     offset = (page - 1) * page_size
     paginated_assets = query.order_by(Asset.id).offset(offset).limit(page_size).all()
-    
+
     rows = []
-    
+
     # Parse dates if provided
     start_dt = None
     end_dt = None
@@ -1006,23 +1234,23 @@ def get_asset_utilization(
             end_dt = datetime.strptime(to_date, "%d/%m/%Y") if "/" in to_date else datetime.strptime(to_date, "%Y-%m-%d")
         except Exception:
             pass
-            
+
     for idx, ast in enumerate(paginated_assets, start=offset + 1):
         # Resolve parameter IDs for this specific asset
         asset_prefix = f"{ast.asset_type_hex}{ast.asset_number_id}" if (ast.asset_type_hex and ast.asset_number_id) else None
-        
+
         # Look up explicitly assigned parameter IDs from AssetParameter
         assigned_pids = [
             r[0] for r in db.query(AssetParameter.para_id).filter(AssetParameter.asset_id == ast.id).all()
         ]
-        
+
         # Count distinct operation events/timestamps specifically for this asset
         t_query = db.query(func.count(func.distinct(Telemetry.prt))).join(
             Gateway, Gateway.id == Telemetry.gateway_id
         ).filter(
             Gateway.station_id == ast.station_id
         )
-        
+
         # Filter specifically by this asset's parameters or prefix
         if assigned_pids:
             if asset_prefix:
@@ -1035,18 +1263,18 @@ def get_asset_utilization(
             t_query = t_query.filter(Telemetry.para_id.startswith(asset_prefix))
         else:
             t_query = t_query.filter(Telemetry.para_id == "__NONE__")
-            
+
         if start_dt:
             t_query = t_query.filter(Telemetry.received_at >= start_dt)
         if end_dt:
             t_query = t_query.filter(Telemetry.received_at <= end_dt)
-            
+
         ops_count = t_query.scalar() or 0
-        
+
         # Get readable asset type name
         val = ASSET_TYPE_MAP.get(ast.asset_type_hex, ast.asset_type_hex)
         type_name = val[1] if isinstance(val, (tuple, list)) else str(val)
-        
+
         rows.append({
             "sr_no": idx,
             "zone": ast.station.division.zone.zone_code,
@@ -1056,7 +1284,7 @@ def get_asset_utilization(
             "asset_no": ast.asset_number_code,
             "number_of_operations": ops_count
         })
-        
+
     return {
         "status": True,
         "message": "Success",
@@ -1072,10 +1300,17 @@ def get_asset_utilization(
 
 @router.get("/utilization/download")
 def download_asset_utilization(
+    zone_id: Optional[Union[int, str]] = Query(None),
+    zone_code: Optional[str] = Query(None),
     zone: Optional[str] = Query(None),
+    division_id: Optional[Union[int, str]] = Query(None),
+    division_code: Optional[str] = Query(None),
     division: Optional[str] = Query(None),
+    station_id: Optional[Union[int, str]] = Query(None),
+    station_code: Optional[str] = Query(None),
     station: Optional[str] = Query(None),
     asset_type: Optional[str] = Query(None),
+    asset_type_hex: Optional[str] = Query(None),
     asset_no: Optional[str] = Query(None),
     from_date: Optional[str] = Query(None),
     to_date: Optional[str] = Query(None),
@@ -1085,8 +1320,10 @@ def download_asset_utilization(
     Export Asset Utilization data to CSV format.
     """
     res = get_asset_utilization(
-        zone=zone, division=division, station=station,
-        asset_type=asset_type, asset_no=asset_no,
+        zone_id=zone_id, zone_code=zone_code, zone=zone,
+        division_id=division_id, division_code=division_code, division=division,
+        station_id=station_id, station_code=station_code, station=station,
+        asset_type=asset_type, asset_type_hex=asset_type_hex, asset_no=asset_no,
         from_date=from_date, to_date=to_date,
         page=1, page_size=100000, db=db
     )
@@ -1113,10 +1350,21 @@ def download_asset_utilization(
 
 @router.get("", response_model=StandardResponse[AssetListResponse])
 def list_assets(
-    station_id:     Optional[int]  = Query(None, description="Filter by station"),
-    asset_type:     Optional[str]  = Query(None, description="Filter by asset type (ID or hex)"),
-    is_active:      Optional[bool] = Query(None, description="Filter by active status"),
-    search:         Optional[str]  = Query(
+    zone_id:        Optional[Union[int, str]] = Query(None, description="Filter by zone ID/code/name"),
+    zone_code:      Optional[str]             = Query(None, description="Filter by zone code"),
+    zone:           Optional[str]             = Query(None, description="Filter by zone code or name"),
+    division_id:    Optional[Union[int, str]] = Query(None, description="Filter by division ID/code/name"),
+    division_code:  Optional[str]             = Query(None, description="Filter by division code"),
+    division:       Optional[str]             = Query(None, description="Filter by division code or name"),
+    station_id:     Optional[Union[int, str]] = Query(None, description="Filter by station ID/code/name"),
+    station_code:   Optional[str]             = Query(None, description="Filter by station code"),
+    station:        Optional[str]             = Query(None, description="Filter by station code or name"),
+    asset_type:     Optional[Union[int, str]] = Query(None, description="Filter by asset type (ID, hex, or name)"),
+    asset_type_hex: Optional[str]             = Query(None, description="Filter by asset type hex code"),
+    asset_make:     Optional[Union[int, str]] = Query(None, description="Filter by asset make (ID, name, or 'ALL')"),
+    make:           Optional[Union[int, str]] = Query(None, description="Filter by asset make"),
+    is_active:      Optional[bool]            = Query(None, description="Filter by active status"),
+    search:         Optional[str]             = Query(
         None,
         description="Search by asset_number_code, smms_asset_code, or smms_asset_name"
     ),
@@ -1127,24 +1375,60 @@ def list_assets(
     """
     List all physical asset instances with optional filters and pagination.
 
-    - `station_id` — filter to one station
-    - `asset_type` — e.g. database ID, name, or hex (Point Machine, etc.)
+    - `zone_id` / `zone_code` / `zone` — filter to one or more zones
+    - `division_id` / `division_code` / `division` — filter to one or more divisions
+    - `station_id` / `station_code` / `station` — filter to one or more stations
+    - `asset_type` / `asset_type_hex` — filter by asset type (ID, hex, or name)
+    - `asset_make` / `make` — filter by make (ID or name)
     - `is_active` — `true` / `false`
     - `search` — partial match on asset_number_code, smms_asset_code, or smms_asset_name
     """
-    asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
+    z_param = zone_id if zone_id is not None else (zone_code if zone_code is not None else zone)
+    d_param = division_id if division_id is not None else (division_code if division_code is not None else division)
+    s_param = station_id if station_id is not None else (station_code if station_code is not None else station)
+    zone_ids, division_ids, station_ids = _resolve_location_ids(db, z_param, d_param, s_param)
+
+    raw_type = asset_type if asset_type is not None else asset_type_hex
+    raw_type_str = str(raw_type) if raw_type is not None else None
+    resolved_type_hex = _resolve_asset_types_to_hex(db, raw_type_str)
+    resolved_make = _resolve_asset_make(db, str(asset_make) if asset_make is not None else (str(make) if make is not None else None))
+
     q = db.query(Asset)
 
-    if station_id is not None:
-        q = q.filter(Asset.station_id == station_id)
-    if asset_type_hex:
-        hex_list = [h.strip().upper() for h in asset_type_hex.split(",") if h.strip()]
+    # Join location tables if any location filter is provided
+    if zone_ids is not None or division_ids is not None or station_ids is not None:
+        q = (
+            q.join(Station, Station.id == Asset.station_id)
+            .join(Division, Division.id == Station.division_id)
+            .join(Zone, Zone.id == Division.zone_id)
+        )
+        if station_ids is not None:
+            q = q.filter(Station.id.in_(station_ids))
+        if division_ids is not None:
+            q = q.filter(Division.id.in_(division_ids))
+        if zone_ids is not None:
+            q = q.filter(Zone.id.in_(zone_ids))
+    elif s_param is not None:
+        if str(s_param).isdigit():
+            q = q.filter(Asset.station_id == int(s_param))
+        else:
+            q = q.join(Station, Station.id == Asset.station_id).filter(
+                (Station.station_code.ilike(str(s_param))) | (Station.station_name.ilike(str(s_param)))
+            )
+
+    if resolved_type_hex:
+        hex_list = [h.strip().upper() for h in resolved_type_hex.split(",") if h.strip()]
         if len(hex_list) == 1:
             q = q.filter(Asset.asset_type_hex == hex_list[0])
         elif len(hex_list) > 1:
             q = q.filter(Asset.asset_type_hex.in_(hex_list))
+
+    if resolved_make:
+        q = q.filter(func.lower(Asset.make) == resolved_make.lower())
+
     if is_active is not None:
         q = q.filter(Asset.is_active == is_active)
+
     if search:
         term = f"%{search.strip()}%"
         q = q.filter(
