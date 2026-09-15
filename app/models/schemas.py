@@ -439,10 +439,10 @@ class TelemetryHistoryColumn(BaseModel):
 
 
 class TelemetryHistoryResponse(BaseModel):
-    Zone: Optional[str] = "NR"
-    Division: Optional[str] = "PRYG"
-    Asset_Type: Optional[str] = "Point Machine"
-    Asset_No: Optional[str] = "PT-101"
+    Zone: Optional[str] = None
+    Division: Optional[str] = None
+    Asset_Type: Optional[str] = None
+    Asset_No: Optional[str] = None
     Time: Optional[str] = None
     Status: Optional[str] = "Predictive"
     live_data: Optional[List[dict]] = None

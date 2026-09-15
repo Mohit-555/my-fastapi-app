@@ -433,6 +433,10 @@ def _setup_sse_asset_sync(station_id: int, asset_number: str):
         if subq:
             initial_last_seen_id = min(r[0] for r in subq) - 1
 
+        resolved_zone = asset.station.division.zone.zone_code if asset.station and asset.station.division and asset.station.division.zone else "NR"
+        resolved_div = asset.station.division.division_code if asset.station and asset.station.division else ""
+        resolved_stn = asset.station.station_code if asset.station else ""
+
         return {
             "gateway_id": gateway_id,
             "gw_stngw_id": asset.gateway.stngw_id,
@@ -441,6 +445,9 @@ def _setup_sse_asset_sync(station_id: int, asset_number: str):
             "asset_type_hex": asset.asset_type_hex,
             "asset_type_name": asset.asset_type.asset_type_name if asset.asset_type else None,
             "initial_last_seen_id": initial_last_seen_id,
+            "zone_code": resolved_zone,
+            "division_code": resolved_div,
+            "station_code": resolved_stn,
         }
     finally:
         db.close()
@@ -475,6 +482,9 @@ def _poll_telemetry_sync(
     asset_type_name: Optional[str],
     asset_number: str,
     gw_stngw_id: str,
+    zone_code: str = "NR",
+    division_code: str = "",
+    station_code: str = "",
 ):
     db = SessionLocal()
     try:
@@ -596,8 +606,9 @@ def _poll_telemetry_sync(
                 param_info = PARAMETER_TYPE_MAP.get(last_pid[4:6]) if len(last_pid) == 8 else None
 
                 payload = {
-                    "Zone": "NR",
-                    "Division": "PRYG",
+                    "Zone": zone_code,
+                    "Division": division_code,
+                    "Station": station_code,
                     "Asset_Type": asset_type_name or "Point Machine",
                     "Asset_No": asset_number or "PT-101",
                     "Time": datetime.now().strftime("%H:%M:%S"),
@@ -640,6 +651,9 @@ async def _sse_event_generator(request: Request, station_id: int, asset_number: 
     prefix = asset_data["prefix"]
     asset_type_hex = asset_data["asset_type_hex"]
     asset_type_name = asset_data["asset_type_name"]
+    zone_code = asset_data.get("zone_code", "NR")
+    division_code = asset_data.get("division_code", "")
+    station_code = asset_data.get("station_code", "")
 
     yield ": ping\n\n"
 
@@ -661,6 +675,9 @@ async def _sse_event_generator(request: Request, station_id: int, asset_number: 
                 asset_type_name=asset_type_name,
                 asset_number=asset_number,
                 gw_stngw_id=gw_stngw_id,
+                zone_code=zone_code,
+                division_code=division_code,
+                station_code=station_code,
             )
             
             consecutive_errors = 0
@@ -815,9 +832,9 @@ async def live_telemetry_stream(
                     elif field == "Temperature": item["temp"] = r.prv
             rows.append(item)
 
-    resolved_zone = asset.station.division.zone.zone_code if asset.station and asset.station.division and asset.station.division.zone else "NR"
-    resolved_div = asset.station.division.division_code if asset.station and asset.station.division else "PRYG"
-    resolved_stn = asset.station.station_name if asset.station else "Station"
+    resolved_zone = asset.station.division.zone.zone_code if asset.station and asset.station.division and asset.station.division.zone else (zone_code or "NR")
+    resolved_div = asset.station.division.division_code if asset.station and asset.station.division else (division_code or "")
+    resolved_stn = asset.station.station_name if asset.station else (station_code or "Station")
 
     return {
         "status": True,
@@ -1143,7 +1160,7 @@ def get_telemetry_history(
     )
 
     resolved_zone = zone_code or "NR"
-    resolved_div = division_code or "PRYG"
+    resolved_div = division_code or ""
     resolved_stn_name = None
     eff_station_id = station_id
 
