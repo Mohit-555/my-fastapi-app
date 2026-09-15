@@ -24,7 +24,11 @@ from app.models.schemas import (
     TelemetryLiveCardResponse, LiveParameterItem, ThrowTimeCyclePoint,
     StandardResponse
 )
-from app.constants import ASSET_TYPE_MAP, PARAMETER_TYPE_MAP, PARAMETER_REPR_MAP, ASSET_TYPE_DISPLAY_GROUPS
+from app.constants import (
+    ASSET_TYPE_MAP, PARAMETER_TYPE_MAP, PARAMETER_REPR_MAP, ASSET_TYPE_DISPLAY_GROUPS,
+    ASSET_PARAMETER_CATALOG, GENERIC_PARAMETER_TYPE_MAP
+)
+from app.services.parameter_config_service import param_config_service
 
 router = APIRouter(prefix="/telemetry", tags=["Telemetry Query"])
 
@@ -998,6 +1002,50 @@ def _fetch_history_data(
     return gateway_map, grouped
 
 
+def _resolve_telemetry_param(pid: str) -> tuple[str, str, str]:
+    """
+    Resolve (parameter_name, unit, parameter_type_hex) from an 8-character para_id.
+    Handles hardware suffixes, parameter_config_service, and constants catalog.
+    """
+    if not pid or len(pid) < 8:
+        return ("Unknown", "", "00")
+    
+    suffix = pid[4:].upper()
+    pt_hex = pid[4:6].upper()
+
+    # 1. Known hardware/simulator telemetry representations
+    if suffix in ("000C", "0001", "0100", "01"):
+        return ("Avg Current", "A", "01")
+    if suffix in ("000D", "0002", "0200", "02"):
+        return ("Peak Current", "A", "02")
+    if suffix in ("9060", "9061", "0300", "03"):
+        return ("Stroke Time", "ms", "03")
+    if suffix in ("2020", "2021", "0400", "04"):
+        return ("Battery Voltage", "V", "04")
+    if suffix in ("5000", "F000", "0500", "05"):
+        return ("Temperature", "°C", "05")
+
+    # 2. Check parameter_config_service
+    try:
+        cfg = param_config_service.get_parameter_config(pid)
+        if cfg and cfg.parameter_representation_name:
+            return (cfg.parameter_representation_name, cfg.unit or "", cfg.parameter_type_id or pt_hex)
+    except Exception:
+        pass
+
+    # 3. Check ASSET_PARAMETER_CATALOG
+    if pt_hex in ASSET_PARAMETER_CATALOG:
+        entry = ASSET_PARAMETER_CATALOG[pt_hex]
+        return (entry[1], entry[2] or "", pt_hex)
+
+    # 4. Check GENERIC_PARAMETER_TYPE_MAP
+    if pt_hex in GENERIC_PARAMETER_TYPE_MAP:
+        entry = GENERIC_PARAMETER_TYPE_MAP[pt_hex]
+        return (entry[1], entry[2] or "", pt_hex)
+
+    return (f"Param_{suffix}", "", pt_hex)
+
+
 def _build_history_columns_and_rows(
     db: Session,
     gateway_map: dict,
@@ -1007,28 +1055,27 @@ def _build_history_columns_and_rows(
     """
     Pivot grouped telemetry into history table columns and rows.
 
-    Columns  = one per unique parameter_type (e.g. I_AVG, I_PEAK, V_BATT …)
+    Columns  = one per unique parameter (e.g. Avg Current, Peak Current, Battery Voltage …)
     Rows     = one per (timestamp, asset_number_hex, stngw_id)
     """
     # ── Build columns from discovered para_ids ────────────────────────────────
-    # key: parameter_type_hex → TelemetryHistoryColumn
     col_map: dict[str, TelemetryHistoryColumn] = {}
+    pid_to_col: dict[str, str] = {}
+
     for (gw_id, pid) in grouped:
-        pt_hex = pid[4:6]
-        if pt_hex in col_map:
-            continue
-        param_info = PARAMETER_TYPE_MAP.get(pt_hex)
-        if not param_info:
-            continue
-        p_name = param_info[1]
-        p_unit = param_info[2]
+        p_name, p_unit, pt_hex = _resolve_telemetry_param(pid)
         col_key = f"{p_name} ({p_unit})" if p_unit else p_name
+        pid_to_col[pid] = col_key
 
-        gw = gateway_map[gw_id]
+        if col_key in col_map:
+            continue
+
+        gw = gateway_map.get(gw_id)
         at_hex = pid[0:2]
-        threshold = _get_threshold(db, at_hex, pt_hex, gw.station_id or station_id)
+        gw_station_id = (gw.station_id if gw else None) or station_id
+        threshold = _get_threshold(db, at_hex, pt_hex, gw_station_id)
 
-        col_map[pt_hex] = TelemetryHistoryColumn(
+        col_map[col_key] = TelemetryHistoryColumn(
             key=col_key,
             parameter_name=p_name,
             parameter_unit=p_unit,
@@ -1043,16 +1090,15 @@ def _build_history_columns_and_rows(
 
     # ── Pivot rows ────────────────────────────────────────────────────────────
     # Each unique (display_ts, asset_number_hex, stngw_id, row_dt) becomes one row.
-    # row_index: (display_ts, an_hex, stngw_id, row_dt) → {col_key: value}
     row_index: dict[tuple, dict] = {}
 
     for (gw_id, pid), telem_rows in grouped.items():
-        pt_hex = pid[4:6]
-        an_hex = pid[2:4]
-        if pt_hex not in col_map:
+        if pid not in pid_to_col:
             continue
-        col_key = col_map[pt_hex].key
-        gw = gateway_map[gw_id]
+        col_key = pid_to_col[pid]
+        gw = gateway_map.get(gw_id)
+        stngw_id = gw.stngw_id if gw else ""
+        an_hex = pid[2:4]
 
         for row in telem_rows:
             # Determine actual datetime for precise sorting and grouping
@@ -1060,7 +1106,6 @@ def _build_history_columns_and_rows(
             if row.prt:
                 parsed_prt = _parse_telemetry_datetime(row.prt, None)
                 if parsed_prt:
-                    # If prt was only HH:MM or HH:MM:SS, combine with received_at date
                     if row.received_at and ":" in row.prt and len(row.prt.strip()) <= 8:
                         row_dt = datetime.combine(row.received_at.date(), parsed_prt.time())
                     else:
@@ -1071,7 +1116,7 @@ def _build_history_columns_and_rows(
                 row_dt = datetime.utcnow()
 
             display_ts = row_dt.strftime("%Y-%m-%d %H:%M:%S")
-            index_key = (display_ts, an_hex, gw.stngw_id, row_dt)
+            index_key = (display_ts, an_hex, stngw_id, row_dt)
             if index_key not in row_index:
                 row_index[index_key] = {}
             row_index[index_key][col_key] = row.prv
@@ -1228,6 +1273,33 @@ def get_telemetry_history(
             row_item[clean_k] = v
             if "temp" in clean_k.lower():
                 row_item["Temperature"] = v
+
+        # Standard frontend aliases
+        if "Avg_Current" in row_item or "Current_DC" in row_item or "I_avg" in row_item:
+            v_val = row_item.get("Avg_Current", row_item.get("Current_DC", row_item.get("I_avg")))
+            row_item["Avg_Current"] = v_val
+            row_item["I_avg"] = v_val
+
+        if "Peak_Current" in row_item or "I_peak" in row_item:
+            v_val = row_item.get("Peak_Current", row_item.get("I_peak"))
+            row_item["Peak_Current"] = v_val
+            row_item["I_peak"] = v_val
+
+        if "Battery_Voltage" in row_item or "Voltage_DC" in row_item or "V_batt" in row_item:
+            v_val = row_item.get("Battery_Voltage", row_item.get("Voltage_DC", row_item.get("V_batt")))
+            row_item["Battery_Voltage"] = v_val
+            row_item["V_batt"] = v_val
+
+        if "Stroke_Time" in row_item or "Time" in row_item or "stroke_ms" in row_item:
+            v_val = row_item.get("Stroke_Time", row_item.get("Time", row_item.get("stroke_ms")))
+            row_item["Stroke_Time"] = v_val
+            row_item["stroke_ms"] = v_val
+
+        if "Temperature" in row_item or "Motor_Temperature" in row_item or "temp" in row_item:
+            v_val = row_item.get("Temperature", row_item.get("Motor_Temperature", row_item.get("temp")))
+            row_item["Temperature"] = v_val
+            row_item["temp"] = v_val
+
         live_data_list.append(row_item)
 
     response_data = TelemetryHistoryResponse(
