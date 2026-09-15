@@ -91,12 +91,17 @@ def _resolve_station_ids(
     return None  # no filter → all
 
 
-def _parse_telemetry_datetime(dt_str: Optional[str], default: datetime) -> datetime:
+def _parse_telemetry_datetime(dt_str: Optional[str], default: Optional[datetime] = None) -> Optional[datetime]:
     if not dt_str:
         return default
     
     dt_str_clean = dt_str.strip().rstrip('Z')
-    for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"):
+    for fmt in (
+        "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M",
+        "%d/%m/%Y %H:%M:%S.%f", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M",
+        "%d-%m-%Y %H:%M:%S.%f", "%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M",
+    ):
         try:
             return datetime.strptime(dt_str_clean, fmt)
         except ValueError:
@@ -846,9 +851,9 @@ def _fetch_history_data(
     asset_number_hex: Optional[str],
     parameter_type: Optional[str],
     parameter_type_hex: Optional[str],
-    from_time: datetime,
-    to_time: datetime,
-    limit: int = 10000,
+    from_time: Optional[datetime] = None,
+    to_time: Optional[datetime] = None,
+    limit: int = 50000,
 ):
     """
     Shared data-fetch logic for history table and CSV download.
@@ -928,9 +933,11 @@ def _fetch_history_data(
     # Fetch telemetry
     telem_filter = [
         Telemetry.gateway_id.in_(gateway_ids),
-        Telemetry.received_at >= from_time,
-        Telemetry.received_at <= to_time,
     ]
+    if from_time is not None:
+        telem_filter.append(Telemetry.received_at >= from_time)
+    if to_time is not None:
+        telem_filter.append(Telemetry.received_at <= to_time)
 
     if asset_type_hexes and len(asset_type_hexes) == 1:
         at_h = asset_type_hexes[0]
@@ -947,7 +954,7 @@ def _fetch_history_data(
     rows_all = (
         db.query(Telemetry)
         .filter(*telem_filter)
-        .order_by(Telemetry.received_at.asc())
+        .order_by(Telemetry.received_at.desc())
         .limit(limit)
         .all()
     )
@@ -1018,8 +1025,8 @@ def _build_history_columns_and_rows(
     columns = sorted(col_map.values(), key=lambda c: c.parameter_type_hex)
 
     # ── Pivot rows ────────────────────────────────────────────────────────────
-    # Each unique (timestamp_str, asset_number_hex, stngw_id) becomes one row.
-    # row_index: (ts, an_hex, stngw_id) → {col_key: value}
+    # Each unique (display_ts, asset_number_hex, stngw_id, row_dt) becomes one row.
+    # row_index: (display_ts, an_hex, stngw_id, row_dt) → {col_key: value}
     row_index: dict[tuple, dict] = {}
 
     for (gw_id, pid), telem_rows in grouped.items():
@@ -1031,21 +1038,38 @@ def _build_history_columns_and_rows(
         gw = gateway_map[gw_id]
 
         for row in telem_rows:
-            ts = row.prt or row.received_at.isoformat()
-            index_key = (ts, an_hex, gw.stngw_id)
+            # Determine actual datetime for precise sorting and grouping
+            row_dt = None
+            if row.prt:
+                parsed_prt = _parse_telemetry_datetime(row.prt, None)
+                if parsed_prt:
+                    # If prt was only HH:MM or HH:MM:SS, combine with received_at date
+                    if row.received_at and ":" in row.prt and len(row.prt.strip()) <= 8:
+                        row_dt = datetime.combine(row.received_at.date(), parsed_prt.time())
+                    else:
+                        row_dt = parsed_prt
+            if not row_dt and row.received_at:
+                row_dt = row.received_at
+            if not row_dt:
+                row_dt = datetime.utcnow()
+
+            display_ts = row_dt.strftime("%Y-%m-%d %H:%M:%S")
+            index_key = (display_ts, an_hex, gw.stngw_id, row_dt)
             if index_key not in row_index:
                 row_index[index_key] = {}
             row_index[index_key][col_key] = row.prv
 
-    # Sort by timestamp ascending
+    # Sort rows DESCENDING by true datetime (latest/newest records first)
     history_rows = [
         TelemetryHistoryRow(
-            timestamp=ts,
+            timestamp=display_ts,
             asset_number_hex=an_hex,
             stngw_id=stngw_id,
             values=vals,
         )
-        for (ts, an_hex, stngw_id), vals in sorted(row_index.items(), key=lambda x: x[0][0], reverse=True)
+        for (display_ts, an_hex, stngw_id, row_dt), vals in sorted(
+            row_index.items(), key=lambda x: x[0][3], reverse=True
+        )
     ]
 
     return columns, history_rows
@@ -1082,31 +1106,26 @@ def get_telemetry_history(
     if from_date:
         if from_time:
             if ":" in from_time and "T" not in from_time:
-                eff_from_dt = _parse_telemetry_datetime(f"{from_date} {from_time}", datetime.utcnow())
+                eff_from_dt = _parse_telemetry_datetime(f"{from_date} {from_time}", None)
             else:
-                eff_from_dt = _parse_telemetry_datetime(from_time, datetime.utcnow())
+                eff_from_dt = _parse_telemetry_datetime(from_time, None)
         else:
-            eff_from_dt = _parse_telemetry_datetime(from_date, datetime.utcnow() - timedelta(hours=24))
-    else:
-        if from_time:
-            eff_from_dt = _parse_telemetry_datetime(from_time, datetime.utcnow() - timedelta(hours=24))
-        else:
-            eff_from_dt = datetime.utcnow() - timedelta(hours=24)
+            eff_from_dt = _parse_telemetry_datetime(from_date, None)
+    elif from_time:
+        eff_from_dt = _parse_telemetry_datetime(from_time, None)
 
     if to_date:
         if to_time:
             if ":" in to_time and "T" not in to_time:
-                eff_to_dt = _parse_telemetry_datetime(f"{to_date} {to_time}", datetime.utcnow())
+                eff_to_dt = _parse_telemetry_datetime(f"{to_date} {to_time}", None)
             else:
-                eff_to_dt = _parse_telemetry_datetime(to_time, datetime.utcnow())
+                eff_to_dt = _parse_telemetry_datetime(to_time, None)
         else:
-            parsed_date = _parse_telemetry_datetime(to_date, datetime.utcnow())
-            eff_to_dt = datetime.combine(parsed_date.date(), datetime.max.time())
-    else:
-        if to_time:
-            eff_to_dt = _parse_telemetry_datetime(to_time, datetime.utcnow())
-        else:
-            eff_to_dt = datetime.utcnow()
+            parsed_date = _parse_telemetry_datetime(to_date, None)
+            if parsed_date:
+                eff_to_dt = datetime.combine(parsed_date.date(), datetime.max.time())
+    elif to_time:
+        eff_to_dt = _parse_telemetry_datetime(to_time, None)
 
     gateway_map, grouped = _fetch_history_data(
         db=db,
@@ -1141,21 +1160,29 @@ def get_telemetry_history(
             resolved_div = stn.division.division_code
             if stn.division.zone:
                 resolved_zone = stn.division.zone.zone_code
+    elif station_code:
+        resolved_stn_name = station_code
+
+    resolved_asset_type = asset_type or "Point Machine"
+    if resolved_asset_type.upper() == "EOP":
+        resolved_asset_type = "Point Machine"
+
+    resolved_asset_no = asset_no or asset_number_hex or "PM-101"
 
     if not grouped:
         empty_response = TelemetryHistoryResponse(
             Zone=resolved_zone,
             Division=resolved_div,
-            Asset_Type=asset_type or "Point Machine",
-            Asset_No=asset_no or asset_number_hex or "PT-101",
-            Time=eff_to_dt.strftime("%H:%M:%S"),
+            Asset_Type=resolved_asset_type,
+            Asset_No=resolved_asset_no,
+            Time=eff_to_dt.strftime("%H:%M:%S") if eff_to_dt else datetime.now().strftime("%H:%M:%S"),
             Status="Predictive",
             live_data=[],
             station_id=eff_station_id,
             station_name=resolved_stn_name,
-            asset_number=asset_no or asset_number_hex,
-            from_time=eff_from_dt.isoformat(),
-            to_time=eff_to_dt.isoformat(),
+            asset_number=resolved_asset_no,
+            from_time=eff_from_dt.isoformat() if eff_from_dt else None,
+            to_time=eff_to_dt.isoformat() if eff_to_dt else None,
             columns=[],
             total=0,
             page=page,
@@ -1186,23 +1213,19 @@ def get_telemetry_history(
                 row_item["Temperature"] = v
         live_data_list.append(row_item)
 
-    resolved_asset_type = asset_type or "Point Machine"
-    if resolved_asset_type.upper() == "EOP":
-        resolved_asset_type = "Point Machine"
-
     response_data = TelemetryHistoryResponse(
         Zone=resolved_zone,
         Division=resolved_div,
         Asset_Type=resolved_asset_type,
-        Asset_No=asset_no or asset_number_hex or "PM-101",
+        Asset_No=resolved_asset_no,
         Time=datetime.now().strftime("%H:%M:%S"),
         Status="Predictive",
         live_data=live_data_list,
         station_id=eff_station_id,
         station_name=resolved_stn_name,
-        asset_number=asset_no or asset_number_hex,
-        from_time=eff_from_dt.isoformat(),
-        to_time=eff_to_dt.isoformat(),
+        asset_number=resolved_asset_no,
+        from_time=eff_from_dt.isoformat() if eff_from_dt else None,
+        to_time=eff_to_dt.isoformat() if eff_to_dt else None,
         columns=columns,
         total=total,
         page=page,
@@ -1246,31 +1269,26 @@ def download_telemetry_history(
     if from_date:
         if from_time:
             if ":" in from_time and "T" not in from_time:
-                eff_from_dt = _parse_telemetry_datetime(f"{from_date} {from_time}", datetime.utcnow())
+                eff_from_dt = _parse_telemetry_datetime(f"{from_date} {from_time}", None)
             else:
-                eff_from_dt = _parse_telemetry_datetime(from_time, datetime.utcnow())
+                eff_from_dt = _parse_telemetry_datetime(from_time, None)
         else:
-            eff_from_dt = _parse_telemetry_datetime(from_date, datetime.utcnow() - timedelta(hours=24))
-    else:
-        if from_time:
-            eff_from_dt = _parse_telemetry_datetime(from_time, datetime.utcnow() - timedelta(hours=24))
-        else:
-            eff_from_dt = datetime.utcnow() - timedelta(hours=24)
+            eff_from_dt = _parse_telemetry_datetime(from_date, None)
+    elif from_time:
+        eff_from_dt = _parse_telemetry_datetime(from_time, None)
 
     if to_date:
         if to_time:
             if ":" in to_time and "T" not in to_time:
-                eff_to_dt = _parse_telemetry_datetime(f"{to_date} {to_time}", datetime.utcnow())
+                eff_to_dt = _parse_telemetry_datetime(f"{to_date} {to_time}", None)
             else:
-                eff_to_dt = _parse_telemetry_datetime(to_time, datetime.utcnow())
+                eff_to_dt = _parse_telemetry_datetime(to_time, None)
         else:
-            parsed_date = _parse_telemetry_datetime(to_date, datetime.utcnow())
-            eff_to_dt = datetime.combine(parsed_date.date(), datetime.max.time())
-    else:
-        if to_time:
-            eff_to_dt = _parse_telemetry_datetime(to_time, datetime.utcnow())
-        else:
-            eff_to_dt = datetime.utcnow()
+            parsed_date = _parse_telemetry_datetime(to_date, None)
+            if parsed_date:
+                eff_to_dt = datetime.combine(parsed_date.date(), datetime.max.time())
+    elif to_time:
+        eff_to_dt = _parse_telemetry_datetime(to_time, None)
 
     gateway_map, grouped = _fetch_history_data(
         db=db,
