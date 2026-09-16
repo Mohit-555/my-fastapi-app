@@ -33,6 +33,122 @@ from app.services.parameter_config_service import param_config_service
 router = APIRouter(prefix="/telemetry", tags=["Telemetry Query"])
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Dual-Mode Parameter Resolution (RDSO Canonical + Legacy Simulator Aliases)
+#
+# RDSO Canonical: What the para_id means per Annexure A of RDSO/SPN/257/2025
+# Legacy Alias:   What the current simulator / frontend expects
+#
+# Strategy: return BOTH so we never break existing UI while becoming
+#           spec-compliant for real gateway data.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Key format: <param_type_hex><repr_hex> OR <param_type_hex>_<asset_type_hex>
+RDSO_PARAM_MAP = {
+    # ── Point Machine (asset_type = 00) ──
+    "000A": {"primary": "VPT_110_DC_LOC_N", "display": "110V DC Loc Normal",   "unit": "V"},
+    "000B": {"primary": "VPT_110_DC_LOC_R", "display": "110V DC Loc Reverse",  "unit": "V"},
+    "000C": {"primary": "IPT_N",            "display": "Normal Current",       "unit": "A"},
+    "000D": {"primary": "IPT_R",            "display": "Reverse Current",      "unit": "A"},
+    "000E": {"primary": "VPT_NWKR",         "display": "NWKR Voltage",         "unit": "V"},
+    "000F": {"primary": "VPT_RWKR",         "display": "RWKR Voltage",         "unit": "V"},
+    "9060": {"primary": "TPT_N",            "display": "Normal Stroke Time",   "unit": "ms"},
+    "9061": {"primary": "TPT_R",            "display": "Reverse Stroke Time",  "unit": "ms"},
+    "2020": {"primary": "VPT_24_DC_LOC",    "display": "24V DC Loc",           "unit": "V"},
+    "2021": {"primary": "VPT_24_DC_LOC",    "display": "24V DC Loc",           "unit": "V"},
+    "5000": {"primary": "TEMP_PT",          "display": "Motor Temperature",    "unit": "°C"},
+
+    # ── DC Track Circuit (asset_type = 20) ──
+    "3001": {"primary": "VTC_TFC_IP",       "display": "TFC Input Voltage",    "unit": "V"},
+    "2002": {"primary": "VTC_TFC_OP",       "display": "TFC Output Voltage",   "unit": "V"},
+    "0103": {"primary": "ITC_TFC_OP",       "display": "TFC Output Current",   "unit": "mA"},
+    "010B": {"primary": "ITC_RELAY_END",    "display": "Relay End Current",    "unit": "mA"},
+    "200C": {"primary": "VTC_TR",           "display": "Track Relay Voltage",  "unit": "V"},
+    "200D": {"primary": "VTC_24_DC_LOC",    "display": "24V DC Loc",           "unit": "V"},
+
+    # ── Main Signal (asset_type = 10) ──
+    "3001_SIG": {"primary": "VSIG_DG",      "display": "Green Aspect Voltage", "unit": "V"},
+    "3002_SIG": {"primary": "VSIG_HG",      "display": "Yellow Aspect Voltage","unit": "V"},
+    "3003_SIG": {"primary": "VSIG_HHG",     "display": "Double Yellow Voltage","unit": "V"},
+    "3004_SIG": {"primary": "VSIG_RG",      "display": "Red Aspect Voltage",   "unit": "V"},
+    "1105":     {"primary": "ISIG_DG",      "display": "Green Aspect Current", "unit": "mA"},
+    "1106":     {"primary": "ISIG_HG",      "display": "Yellow Aspect Current","unit": "mA"},
+    "1107":     {"primary": "ISIG_HHG",     "display": "Double Yellow Current","unit": "mA"},
+    "1108":     {"primary": "ISIG_RG",      "display": "Red Aspect Current",   "unit": "mA"},
+
+    # ── Equipment Rooms (asset_type = F0-F6) ──
+    "5001": {"primary": "TEMPRR",           "display": "Room Temperature",     "unit": "°C"},
+    "5102": {"primary": "HUMDRR",           "display": "Room Humidity",        "unit": "%"},
+    "4000": {"primary": "DOORRR",           "display": "Door Status",          "unit": ""},
+}
+
+# Legacy alias mappings — the existing simulator/frontend keys
+LEGACY_ALIAS_MAP = {
+    "000C": {"key": "I_avg",     "display": "Avg Current",     "field": "Avg_Current"},
+    "000D": {"key": "I_peak",    "display": "Peak Current",    "field": "Peak_Current"},
+    "9060": {"key": "stroke_ms", "display": "Stroke Time",     "field": "Stroke_Time"},
+    "9061": {"key": "stroke_ms", "display": "Stroke Time",     "field": "Stroke_Time"},
+    "2020": {"key": "V_batt",    "display": "Battery Voltage", "field": "Battery_Voltage"},
+    "2021": {"key": "V_batt",    "display": "Battery Voltage", "field": "Battery_Voltage"},
+    "5000": {"key": "temp",      "display": "Temperature",     "field": "Temperature"},
+    "F000": {"key": "temp",      "display": "Temperature",     "field": "Temperature"},
+}
+
+
+def _resolve_parameter_dual_mode(pid: str) -> dict:
+    """
+    Resolve a para_id into BOTH RDSO canonical and legacy alias naming.
+
+    Returns:
+      {
+        "primary_name":   "IPT_N",
+        "display_name":   "Normal Current",
+        "unit":           "A",
+        "legacy_key":     "I_avg",
+        "legacy_display": "Avg Current",
+        "legacy_field":   "Avg_Current"
+      }
+    """
+    if not pid or len(pid) < 8:
+        return {
+            "primary_name": None, "display_name": "Unknown",
+            "unit": "", "legacy_key": None,
+            "legacy_display": None, "legacy_field": None,
+        }
+
+    at_hex = pid[0:2].upper()
+    pt_hex = pid[4:6].upper()
+    suffix = pid[4:].upper()  # bytes 4-7
+
+    # Most specific first: suffix (param_type + representation)
+    spec = RDSO_PARAM_MAP.get(suffix)
+
+    # Fallback: asset-type–specific key (used for signals)
+    if not spec:
+        spec = RDSO_PARAM_MAP.get(f"{suffix}_{at_hex}")
+    if not spec:
+        spec = RDSO_PARAM_MAP.get(pt_hex)
+
+    alias = LEGACY_ALIAS_MAP.get(suffix) or LEGACY_ALIAS_MAP.get(pt_hex)
+
+    if not spec:
+        return {
+            "primary_name": f"PARAM_{suffix}",
+            "display_name": f"Param {suffix}",
+            "unit": "", "legacy_key": None,
+            "legacy_display": None, "legacy_field": None,
+        }
+
+    return {
+        "primary_name": spec["primary"],
+        "display_name": spec["display"],
+        "unit": spec.get("unit", ""),
+        "legacy_key": alias["key"] if alias else None,
+        "legacy_display": alias["display"] if alias else None,
+        "legacy_field": alias["field"] if alias else None,
+    }
+
+
 def _blank_to_none(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
@@ -458,23 +574,26 @@ def _setup_sse_asset_sync(station_id: int, asset_number: str):
 
 
 def _map_pid_to_field(pid: str, current_item: dict) -> Optional[str]:
+    """
+    Map a para_id to the frontend field name.
+    Uses dual-mode: returns RDSO canonical field OR legacy alias.
+    Kept for backward compatibility with the existing live payload builder.
+    """
     if not pid or len(pid) < 8:
         return None
-    type_code = pid[4:6]
-    suffix = pid[4:].upper()
-    if suffix == "000C" or type_code == "01" or suffix in ("0100", "0001", "000A"):
-        return "Avg_Current"
-    elif suffix == "000D" or type_code == "02" or suffix in ("0200", "0002", "000B"):
-        if current_item.get("Avg_Current") is not None and current_item.get("Peak_Current") is None:
-            return "Peak_Current"
-        return "Avg_Current" if current_item.get("Avg_Current") is None else "Peak_Current"
-    elif type_code == "03" or suffix in ("9060", "9061", "0300", "0003"):
-        return "Stroke_Time"
-    elif type_code == "04" or suffix in ("2020", "2021", "0400", "0004", "0020"):
-        return "Battery_Voltage"
-    elif type_code == "05" or suffix in ("5000", "F000", "0500", "0005", "5001"):
-        return "Temperature"
-    return None
+
+    dual = _resolve_parameter_dual_mode(pid)
+    if dual["legacy_field"]:
+        return dual["legacy_field"]
+
+    # Fallback for unknown types — use parameter_type_hex convention
+    pt_hex = pid[4:6].upper()
+    return {
+        "00": "Avg_Current", "01": "Avg_Current",
+        "02": "Peak_Current", "03": "Stroke_Time",
+        "04": "Battery_Voltage", "05": "Temperature",
+        "50": "Temperature", "51": "Humidity",
+    }.get(pt_hex)
 
 
 def _poll_telemetry_sync(
@@ -523,6 +642,7 @@ def _poll_telemetry_sync(
                 "9060": "stroke_ms","9061":"stroke_ms","03":"stroke_ms",
                 "2020": "V_batt", "2021": "V_batt", "04": "V_batt",
                 "5000": "temp",   "F000": "temp",   "05": "temp",
+                "0500": "temp",   "50": "temp",
             }
 
             for ts_key, rows in ts_groups.items():
@@ -571,6 +691,7 @@ def _poll_telemetry_sync(
                             "9060": "03", "9061": "03", "stroke_ms": "03",
                             "2020": "04", "2021": "04", "V_batt": "04",
                             "5000": "05", "F000": "05", "temp": "05",
+                            "0500": "05", "0005": "05", "50": "05",
                         }
                         db_type_hex = _SUFFIX_CATALOG.get(suffix) or _SUFFIX_CATALOG.get(fk) or type_code
                         if fk and fk not in field_thresholds:
@@ -607,7 +728,8 @@ def _poll_telemetry_sync(
                         if status != "Failure":
                             status = "Predictive"
 
-                param_info = PARAMETER_TYPE_MAP.get(last_pid[4:6]) if len(last_pid) == 8 else None
+                # ── DUAL-MODE: resolve both RDSO canonical and legacy names ──
+                dual = _resolve_parameter_dual_mode(last_pid)
 
                 payload = {
                     "Zone": zone_code,
@@ -622,8 +744,16 @@ def _poll_telemetry_sync(
                     "stngw_id": gw_stngw_id,
                     "asset_type_hex": asset_type_hex,
                     "asset_type_name": asset_type_name,
-                    "parameter_name": param_info[1] if param_info else "Telemetry Data",
-                    "parameter_unit": param_info[2] if param_info else None,
+
+                    # ── NEW: RDSO canonical fields ──
+                    "primary_name":   dual["primary_name"],
+                    "parameter_name": dual["display_name"],     # was param_info[1]
+                    "parameter_unit": dual["unit"],             # was param_info[2]
+
+                    # ── LEGACY: keep old aliases for current frontend ──
+                    "legacy_key":     dual["legacy_key"],
+                    "legacy_display": dual["legacy_display"],
+
                     "points": points_data,
                     "field_thresholds": field_thresholds if field_thresholds else None,
                 }
@@ -1004,46 +1134,42 @@ def _fetch_history_data(
 
 def _resolve_telemetry_param(pid: str) -> tuple[str, str, str]:
     """
-    Resolve (parameter_name, unit, parameter_type_hex) from an 8-character para_id.
-    Handles hardware suffixes, parameter_config_service, and constants catalog.
+    Resolve (parameter_name, unit, parameter_type_hex) from a para_id.
+    Uses dual-mode resolver with fallback to parameter_config_service.
     """
     if not pid or len(pid) < 8:
         return ("Unknown", "", "00")
-    
-    suffix = pid[4:].upper()
+
     pt_hex = pid[4:6].upper()
 
-    # 1. Known hardware/simulator telemetry representations
-    if suffix in ("000C", "0001", "0100", "01"):
-        return ("Avg Current", "A", "01")
-    if suffix in ("000D", "0002", "0200", "02"):
-        return ("Peak Current", "A", "02")
-    if suffix in ("9060", "9061", "0300", "03"):
-        return ("Stroke Time", "ms", "03")
-    if suffix in ("2020", "2021", "0400", "04"):
-        return ("Battery Voltage", "V", "04")
-    if suffix in ("5000", "F000", "0500", "05"):
-        return ("Temperature", "°C", "05")
+    # 1. Dual-mode resolver (RDSO canonical preferred)
+    dual = _resolve_parameter_dual_mode(pid)
+    if dual["primary_name"] and not dual["primary_name"].startswith("PARAM_"):
+        return (dual["display_name"], dual["unit"], pt_hex)
 
-    # 2. Check parameter_config_service
+    # 2. parameter_config_service fallback
     try:
         cfg = param_config_service.get_parameter_config(pid)
         if cfg and cfg.parameter_representation_name:
-            return (cfg.parameter_representation_name, cfg.unit or "", cfg.parameter_type_id or pt_hex)
+            return (cfg.parameter_representation_name,
+                    cfg.unit or "",
+                    cfg.parameter_type_id or pt_hex)
     except Exception:
         pass
 
-    # 3. Check ASSET_PARAMETER_CATALOG
+    # 3. Legacy alias fallback
+    if dual["legacy_display"]:
+        return (dual["legacy_display"], dual["unit"], pt_hex)
+
+    # 4. Constants catalog fallback
     if pt_hex in ASSET_PARAMETER_CATALOG:
         entry = ASSET_PARAMETER_CATALOG[pt_hex]
         return (entry[1], entry[2] or "", pt_hex)
-
-    # 4. Check GENERIC_PARAMETER_TYPE_MAP
     if pt_hex in GENERIC_PARAMETER_TYPE_MAP:
         entry = GENERIC_PARAMETER_TYPE_MAP[pt_hex]
         return (entry[1], entry[2] or "", pt_hex)
 
-    return (f"Param_{suffix}", "", pt_hex)
+    return (f"Param_{pid[4:]}", "", pt_hex)
 
 
 def _build_history_columns_and_rows(
@@ -1274,31 +1400,73 @@ def get_telemetry_history(
             if "temp" in clean_k.lower():
                 row_item["Temperature"] = v
 
-        # Standard frontend aliases
-        if "Avg_Current" in row_item or "Current_DC" in row_item or "I_avg" in row_item:
-            v_val = row_item.get("Avg_Current", row_item.get("Current_DC", row_item.get("I_avg")))
-            row_item["Avg_Current"] = v_val
-            row_item["I_avg"] = v_val
+        # Standard frontend aliases (supporting both RDSO canonical and legacy keys)
+        # 1. Normal Current / Avg Current
+        v_cur_n = (
+            row_item.get("Normal_Current")
+            or row_item.get("Avg_Current")
+            or row_item.get("Current_DC")
+            or row_item.get("I_avg")
+            or row_item.get("IPT_N")
+        )
+        if v_cur_n is not None:
+            row_item["Normal_Current"] = v_cur_n
+            row_item["Avg_Current"] = v_cur_n
+            row_item["I_avg"] = v_cur_n
 
-        if "Peak_Current" in row_item or "I_peak" in row_item:
-            v_val = row_item.get("Peak_Current", row_item.get("I_peak"))
-            row_item["Peak_Current"] = v_val
-            row_item["I_peak"] = v_val
+        # 2. Reverse Current / Peak Current
+        v_cur_r = (
+            row_item.get("Reverse_Current")
+            or row_item.get("Peak_Current")
+            or row_item.get("I_peak")
+            or row_item.get("IPT_R")
+        )
+        if v_cur_r is not None:
+            row_item["Reverse_Current"] = v_cur_r
+            row_item["Peak_Current"] = v_cur_r
+            row_item["I_peak"] = v_cur_r
 
-        if "Battery_Voltage" in row_item or "Voltage_DC" in row_item or "V_batt" in row_item:
-            v_val = row_item.get("Battery_Voltage", row_item.get("Voltage_DC", row_item.get("V_batt")))
-            row_item["Battery_Voltage"] = v_val
-            row_item["V_batt"] = v_val
+        # 3. Voltage (24V DC Loc / Battery Voltage / Voltage DC / V_batt)
+        v_volt = (
+            row_item.get("Battery_Voltage")
+            or row_item.get("24V_DC_Loc")
+            or row_item.get("Voltage_DC")
+            or row_item.get("V_batt")
+            or row_item.get("VPT_24_DC_LOC")
+            or next((val for key, val in row_item.items() if any(w in key.lower() for w in ["volt", "24v", "loc"])), None)
+        )
+        if v_volt is not None:
+            row_item["Battery_Voltage"] = v_volt
+            row_item["Voltage_DC"] = v_volt
+            row_item["V_batt"] = v_volt
+            row_item["24V_DC_Loc"] = v_volt
 
-        if "Stroke_Time" in row_item or "Time" in row_item or "stroke_ms" in row_item:
-            v_val = row_item.get("Stroke_Time", row_item.get("Time", row_item.get("stroke_ms")))
-            row_item["Stroke_Time"] = v_val
-            row_item["stroke_ms"] = v_val
+        # 4. Stroke Time (Normal / Reverse Stroke Time / Stroke Time / stroke_ms)
+        v_stroke = (
+            row_item.get("Normal_Stroke_Time")
+            or row_item.get("Reverse_Stroke_Time")
+            or row_item.get("Stroke_Time")
+            or row_item.get("stroke_ms")
+            or row_item.get("TPT_N")
+            or row_item.get("TPT_R")
+            or next((val for key, val in row_item.items() if "stroke" in key.lower()), None)
+        )
+        if v_stroke is not None:
+            row_item["Stroke_Time"] = v_stroke
+            row_item["stroke_ms"] = v_stroke
 
-        if "Temperature" in row_item or "Motor_Temperature" in row_item or "temp" in row_item:
-            v_val = row_item.get("Temperature", row_item.get("Motor_Temperature", row_item.get("temp")))
-            row_item["Temperature"] = v_val
-            row_item["temp"] = v_val
+        # 5. Temperature
+        v_temp = (
+            row_item.get("Temperature")
+            or row_item.get("Motor_Temperature")
+            or row_item.get("temp")
+            or row_item.get("TEMP_PT")
+            or next((val for key, val in row_item.items() if "temp" in key.lower()), None)
+        )
+        if v_temp is not None:
+            row_item["Temperature"] = v_temp
+            row_item["Motor_Temperature"] = v_temp
+            row_item["temp"] = v_temp
 
         live_data_list.append(row_item)
 
