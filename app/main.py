@@ -224,7 +224,16 @@ app.include_router(statistics.router, dependencies=protected_route)
 
 @app.get("/", tags=["Health"])
 def root():
-    return {"status": "ok", "message": "RDPMS API is running", "version": "1.1.0"}
+    return {
+        "status": True,
+        "message": "Success",
+        "data": {
+            "status": "ok",
+            "message": "RDPMS API is running",
+            "version": "1.1.0",
+        },
+        "version": "1.1.0",
+    }
 
 
 @app.get("/metrics", tags=["Metrics"])

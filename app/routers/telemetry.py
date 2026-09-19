@@ -92,6 +92,12 @@ LEGACY_ALIAS_MAP = {
     "2021": {"key": "V_batt",    "display": "Battery Voltage", "field": "Battery_Voltage"},
     "5000": {"key": "temp",      "display": "Temperature",     "field": "Temperature"},
     "F000": {"key": "temp",      "display": "Temperature",     "field": "Temperature"},
+    "0001": {"key": "I_avg",     "display": "Avg Current",     "field": "Avg_Current"},
+    "0002": {"key": "I_peak",    "display": "Peak Current",    "field": "Peak_Current"},
+    "0003": {"key": "stroke_ms", "display": "Stroke Time",     "field": "Stroke_Time"},
+    "0004": {"key": "V_batt",    "display": "Battery Voltage", "field": "Battery_Voltage"},
+    "0005": {"key": "temp",      "display": "Temperature",     "field": "Temperature"},
+    "0500": {"key": "temp",      "display": "Temperature",     "field": "Temperature"},
 }
 
 
@@ -1743,7 +1749,7 @@ def vc_telemetry_history(payload: TelemetryHistoryReportRequest, db: Session = D
             "division": div_list
         })
 
-    return {
+    res_data = {
         "vcc": "XYZ",
         "vcn": "XYZ TECHNOLOGIES",
         "start_date": payload.start_date,
@@ -1751,6 +1757,12 @@ def vc_telemetry_history(payload: TelemetryHistoryReportRequest, db: Session = D
         "end_date": payload.end_date,
         "end_time": payload.end_time,
         "zone": zone_list
+    }
+    return {
+        **res_data,
+        "status": True,
+        "message": "Success",
+        "data": res_data,
     }
 
 
@@ -1797,7 +1809,7 @@ def _handle_get_asset_telemetry(
                 "prt": ts_str
             })
 
-    return {
+    res_data = {
         "resi": "RES-" + (payload_rqi or uuid.uuid4().hex[:12]),
         "vcc": payload_vcc or "XYZ",
         "zc": zc,
@@ -1809,6 +1821,12 @@ def _handle_get_asset_telemetry(
                 "parameters": telemetry_data_list
             }
         ]
+    }
+    return {
+        **res_data,
+        "status": True,
+        "message": "Success",
+        "data": res_data,
     }
 
 

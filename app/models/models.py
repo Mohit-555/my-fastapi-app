@@ -78,7 +78,7 @@ class Gateway(Base):
     # bound to a specific certificate" — set this once the gateway's cert
     # is issued, so a leaked API key alone can't impersonate this gateway.
     mtls_cn = Column(String(200), nullable=True)
-    created_at = Column(DateTime, default=datetime.now(UTC))
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
     slave_cards = relationship("SlaveCard", back_populates="gateway")
     station = relationship("Station", back_populates="gateways")
@@ -105,7 +105,7 @@ class SlaveCard(Base):
     gateway_id = Column(Integer, ForeignKey("gateways.id"), nullable=False, index=True)
     card_address = Column(String(2), nullable=False)  # 1-byte hex, e.g. "81"
     card_type = Column(String(20), nullable=True)      # e.g. "Voltage", "Analog", "DI"
-    created_at = Column(DateTime, default=datetime.now(UTC))
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
     gateway = relationship("Gateway", back_populates="slave_cards")
     channels = relationship("AssetParameter", back_populates="slave_card")
@@ -668,4 +668,4 @@ class ApiLog(Base):
     ip_address      = Column(String(50), nullable=True)
     response_time_ms= Column(Integer, nullable=True)               # milliseconds
     error_detail    = Column(Text, nullable=True)                  # exception message if any
-    created_at      = Column(DateTime, default=datetime.now(UTC), index=True)
+    created_at      = Column(DateTime, default=lambda: datetime.now(UTC), index=True)

@@ -100,14 +100,25 @@ class AlertProcessor:
                     # Get asset parameter mapping from batch mapping
                     para_id_key = telemetry.para_id.upper() if telemetry.para_id else None
                     asset_param = asset_params.get(para_id_key)
-                    if not asset_param or not asset_param.asset_id:
-                        # Mark as processed anyway (no asset mapping)
-                        telemetry.is_processed = True
-                        continue
-                    
-                    # Get asset from batch mapping
-                    asset = assets.get(asset_param.asset_id)
+                    asset = None
+                    if asset_param and asset_param.asset_id:
+                        asset = assets.get(asset_param.asset_id)
+
+                    # Fallback: resolve asset from para_id prefix (asset_type_hex + asset_number_id)
+                    if not asset and para_id_key and len(para_id_key) >= 4 and gateway and gateway.station_id:
+                        at_hex = para_id_key[0:2]
+                        an_hex = para_id_key[2:4]
+                        asset = db.query(Asset).filter(
+                            Asset.station_id == gateway.station_id,
+                            Asset.asset_type_hex == at_hex,
+                            Asset.asset_number_id == an_hex
+                        ).first()
+                        if asset and asset_param and not asset_param.asset_id:
+                            asset_param.asset_id = asset.id
+                            asset_param.is_assigned = True
+
                     if not asset:
+                        # Mark as processed anyway (no asset mapping)
                         telemetry.is_processed = True
                         continue
                     

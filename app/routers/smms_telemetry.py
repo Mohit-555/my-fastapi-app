@@ -44,14 +44,19 @@ async def get_asset_telemetry(
     # Get gateway for station
     gateway = db.query(Gateway).filter(Gateway.station_id == station.id).first()
     if not gateway:
-        return {
+        res_data = {
             "resi": "error",
             "vcc": settings.VENDOR_CODE,
             "zc": zc,
             "dc": dc,
             "sc": sc,
             "telemetry_data": [],
-            "message": "Success"
+        }
+        return {
+            "status": False,
+            "message": f"Gateway not found for station {sc}",
+            "data": res_data,
+            **res_data,
         }
     
     # Parse para_ids
@@ -129,7 +134,7 @@ async def get_asset_telemetry(
                 "parameters": parameters
             })
     
-    return {
+    res_data = {
         "resi": "success",
         "vcc": settings.VENDOR_CODE,
         "zc": zc,
@@ -137,4 +142,10 @@ async def get_asset_telemetry(
         "sc": sc,
         "timestamp": datetime.utcnow().isoformat(),
         "telemetry_data": telemetry_data
+    }
+    return {
+        **res_data,
+        "status": True,
+        "message": "Success",
+        "data": res_data,
     }

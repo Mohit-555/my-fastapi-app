@@ -277,9 +277,60 @@ class StationResponse(BaseModel):
 class GatewayResponse(BaseModel):
     id: int
     stngw_id: str
-    imei: Optional[str]
-    station_id: Optional[int]
-    created_at: datetime
+    imei: Optional[str] = None
+    station_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    station_code: Optional[str] = None
+    station_name: Optional[str] = None
+    division_id: Optional[int] = None
+    division_code: Optional[str] = None
+    division_name: Optional[str] = None
+    zone_id: Optional[int] = None
+    zone_code: Optional[str] = None
+    zone_name: Optional[str] = None
+    status: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def pre_validate(cls, data: any) -> any:
+        if not isinstance(data, dict):
+            stn = getattr(data, "station", None)
+            div = getattr(stn, "division", None) if stn else None
+            zn = getattr(div, "zone", None) if div else None
+
+            st_id = getattr(data, "station_id", None)
+            st_code = getattr(stn, "station_code", None) if stn else None
+            st_name = getattr(stn, "station_name", None) if stn else None
+            d_id = getattr(div, "id", None) if div else None
+            d_code = getattr(div, "division_code", None) if div else None
+            d_name = getattr(div, "division_name", None) if div else None
+            z_id = getattr(zn, "id", None) if zn else None
+            z_code = getattr(zn, "zone_code", None) if zn else None
+            z_name = getattr(zn, "zone_name", None) if zn else None
+            status_val = "Linked" if st_id is not None else "Unlinked"
+
+            return {
+                "id": int(data.id) if data.id is not None else 0,
+                "stngw_id": data.stngw_id,
+                "imei": data.imei,
+                "station_id": int(st_id) if st_id is not None else None,
+                "created_at": data.created_at,
+                "station_code": st_code,
+                "station_name": st_name,
+                "division_id": int(d_id) if d_id is not None else None,
+                "division_code": d_code,
+                "division_name": d_name,
+                "zone_id": int(z_id) if z_id is not None else None,
+                "zone_code": z_code,
+                "zone_name": z_name,
+                "status": status_val,
+            }
+        else:
+            st_id = data.get("station_id")
+            if "status" not in data:
+                data["status"] = "Linked" if st_id is not None else "Unlinked"
+            return data
+
     class Config:
         from_attributes = True
 
@@ -1396,6 +1447,7 @@ class SlaveCardUpdate(BaseModel):
 class SlaveCardResponse(SlaveCardBase):
     id: int
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
     gatewayId: int = 0
     cardAddress: str = ""
@@ -1416,6 +1468,8 @@ class SlaveCardResponse(SlaveCardBase):
         self.stngwId = self.stngw_id
         self.stationId = self.station_id
         self.stationName = self.station_name
+        if not self.updated_at:
+            self.updated_at = self.created_at
         return self
 
     class Config:

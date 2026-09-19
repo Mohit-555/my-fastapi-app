@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from typing import List
+from sqlalchemy import func, or_
+from typing import List, Optional, Any, Union
 
 from app.database import get_db
 from app.services.websocket_manager import safe_notify_dashboard
@@ -306,7 +307,7 @@ def receive_gateway_data(payload: GatewayDataPayload, db: Session = Depends(get_
         # concurrent retry landing at the same instant. Roll back this
         # request's writes; the original delivery already succeeded.
         db.rollback()
-        return {
+        res_data = {
             "status": "accepted",
             "stngw_id": stngw_id,
             "station_id": gateway.station_id,
@@ -314,15 +315,27 @@ def receive_gateway_data(payload: GatewayDataPayload, db: Session = Depends(get_
             "duplicates_skipped": saved_count + duplicate_count,
             "note": "Entire batch rolled back — a concurrent duplicate delivery was detected at the database level.",
         }
+        return {
+            **res_data,
+            "status": True,
+            "message": "Success",
+            "data": res_data,
+        }
     if saved_count > 0:
         safe_notify_dashboard("telemetry_ingested")
 
-    return {
+    res_data = {
         "status": "accepted",
         "stngw_id": stngw_id,
         "station_id": gateway.station_id,
         "records_saved": saved_count,
         "duplicates_skipped": duplicate_count,
+    }
+    return {
+        **res_data,
+        "status": True,
+        "message": "Success",
+        "data": res_data,
     }
 
 
@@ -399,17 +412,102 @@ def link_gateway_station(
 
 @router.get("/list", response_model=StandardResponse[GatewayListResponse])
 def list_gateways(
+    zone_id: Optional[int] = Query(None, description="Filter by Zone ID"),
+    division_id: Optional[int] = Query(None, description="Filter by Division ID"),
+    station_id: Optional[int] = Query(None, description="Filter by Station ID"),
+    zone: Optional[str] = Query(None, description="Filter by Zone Code or Name"),
+    division: Optional[str] = Query(None, description="Filter by Division Code or Name"),
+    station: Optional[str] = Query(None, description="Filter by Station Code or Name"),
+    stngw_id: Optional[str] = Query(None, description="Filter by Gateway ID (stngw_id)"),
+    status: Optional[str] = Query(None, description="Filter by status: Linked / Unlinked"),
+    search: Optional[str] = Query(None, description="Search across Gateway ID, IMEI, or Station Code"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all registered gateways with pagination"""
+    """List all registered gateways with comprehensive filtering and pagination."""
     q = db.query(Gateway)
+
+    joined_station = False
+    joined_division = False
+    joined_zone = False
+
+    def join_station():
+        nonlocal q, joined_station
+        if not joined_station:
+            q = q.join(Station, Gateway.station_id == Station.id)
+            joined_station = True
+
+    def join_division():
+        nonlocal q, joined_division
+        join_station()
+        if not joined_division:
+            q = q.join(Division, Station.division_id == Division.id)
+            joined_division = True
+
+    def join_zone():
+        nonlocal q, joined_zone
+        join_division()
+        if not joined_zone:
+            q = q.join(Zone, Division.zone_id == Zone.id)
+            joined_zone = True
+
+    # Role-based scoping
     if current_user.division_id is not None:
-        q = q.join(Station, Gateway.station_id == Station.id).filter(Station.division_id == current_user.division_id)
+        join_station()
+        q = q.filter(Station.division_id == current_user.division_id)
     elif current_user.zone_id is not None:
-        q = q.join(Station, Gateway.station_id == Station.id).join(Division, Station.division_id == Division.id).filter(Division.zone_id == current_user.zone_id)
+        join_division()
+        q = q.filter(Division.zone_id == current_user.zone_id)
+
+    # Filter by IDs
+    if station_id is not None and station_id != 0:
+        q = q.filter(Gateway.station_id == station_id)
+
+    if division_id is not None and division_id != 0:
+        join_station()
+        q = q.filter(Station.division_id == division_id)
+
+    if zone_id is not None and zone_id != 0:
+        join_division()
+        q = q.filter(Division.zone_id == zone_id)
+
+    # Filter by codes / names
+    if station and station.strip() and station.strip().upper() != "ALL":
+        join_station()
+        stn_term = station.strip().upper()
+        q = q.filter(or_(func.upper(Station.station_code) == stn_term, func.upper(Station.station_name) == stn_term))
+
+    if division and division.strip() and division.strip().upper() != "ALL":
+        join_division()
+        div_term = division.strip().upper()
+        q = q.filter(or_(func.upper(Division.division_code) == div_term, func.upper(Division.division_name) == div_term))
+
+    if zone and zone.strip() and zone.strip().upper() != "ALL":
+        join_zone()
+        zn_term = zone.strip().upper()
+        q = q.filter(or_(func.upper(Zone.zone_code) == zn_term, func.upper(Zone.zone_name) == zn_term))
+
+    if stngw_id and stngw_id.strip() and stngw_id.strip().upper() != "ALL":
+        q = q.filter(Gateway.stngw_id.ilike(f"%{stngw_id.strip()}%"))
+
+    if status and status.strip() and status.strip().upper() != "ALL":
+        st_val = status.strip().lower()
+        if st_val == "linked":
+            q = q.filter(Gateway.station_id.isnot(None))
+        elif st_val == "unlinked":
+            q = q.filter(Gateway.station_id.is_(None))
+
+    if search and search.strip():
+        join_station()
+        term = f"%{search.strip()}%"
+        q = q.filter(or_(
+            Gateway.stngw_id.ilike(term),
+            Gateway.imei.ilike(term),
+            Station.station_code.ilike(term),
+            Station.station_name.ilike(term),
+        ))
 
     total = q.count()
     total_pages = (total + page_size - 1) // page_size if total else 0
