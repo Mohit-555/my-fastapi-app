@@ -126,7 +126,6 @@ def get_channel_filter_options(
     }
 
 
-@router.get("", response_model=StandardResponse[ChannelAssignmentListResponse])
 @router.get("/", response_model=StandardResponse[ChannelAssignmentListResponse])
 def list_channel_assignments(
     zone_id: Optional[int] = Query(None, description="Filter by Zone ID"),
@@ -170,7 +169,6 @@ def list_channel_assignments(
     }
 
 
-@router.post("", response_model=StandardResponse[ChannelAssignmentResponse], status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=StandardResponse[ChannelAssignmentResponse], status_code=status.HTTP_201_CREATED)
 def create_channel_assignment(
     payload: ChannelAssignmentCreate,
@@ -212,7 +210,6 @@ def get_channel_assignment(
     }
 
 
-@router.patch("/{assignment_id}", response_model=StandardResponse[ChannelAssignmentResponse])
 @router.put("/{assignment_id}", response_model=StandardResponse[ChannelAssignmentResponse])
 def update_channel_assignment(
     assignment_id: int,

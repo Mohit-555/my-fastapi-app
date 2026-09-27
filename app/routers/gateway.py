@@ -514,7 +514,6 @@ def preview_gateway_hierarchy(
 
 
 @router.post("/", response_model=StandardResponse[GatewayResponse], status_code=status.HTTP_201_CREATED)
-@router.post("", response_model=StandardResponse[GatewayResponse], status_code=status.HTTP_201_CREATED)
 def create_gateway(
     payload: GatewayCreate,
     db: Session = Depends(get_db),
