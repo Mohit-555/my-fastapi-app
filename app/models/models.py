@@ -59,11 +59,39 @@ class Station(Base):
 
     division = relationship("Division", back_populates="stations")
     gateways = relationship("Gateway", back_populates="station", cascade="all, delete-orphan")
+    rtus = relationship("RTU", back_populates="station", cascade="all, delete-orphan")
     asset_inventory = relationship("AssetInventory", back_populates="station", cascade="all, delete-orphan")
     assets = relationship("Asset", back_populates="station", cascade="all, delete-orphan")
     alert_events = relationship("AlertEvent", back_populates="station", cascade="all, delete-orphan")
     equipment_rooms = relationship("EquipmentRoom", back_populates="station", cascade="all, delete-orphan")
     maintenance_modes = relationship("MaintenanceMode", back_populates="station", cascade="all, delete-orphan")
+
+
+class RTU(Base):
+    """
+    Remote Terminal Unit (RTU) — physical hardware enclosure/cabinet installed
+    at a Station or relay room (RDSO/SPN/257/2025).
+    Houses 1 or more Master Cards (Gateways).
+    Hierarchy: Zone -> Division -> Station -> RTU -> Master Card (Gateway) -> Slave Cards -> Channels
+    """
+    __tablename__ = "rtus"
+
+    id = Column(Integer, primary_key=True, index=True)
+    station_id = Column(Integer, ForeignKey("stations.id"), nullable=False, index=True)
+    rtu_name = Column(String(100), nullable=False)
+    rtu_code = Column(String(50), unique=True, nullable=True, index=True)
+    location = Column(String(200), nullable=False, default="Relay Room")
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+
+    station = relationship("Station", back_populates="rtus")
+    master_cards = relationship("Gateway", back_populates="rtu")
+
+    __table_args__ = (
+        UniqueConstraint("station_id", "rtu_name", name="uq_station_rtu_name"),
+    )
 
 
 class Gateway(Base):
@@ -73,6 +101,7 @@ class Gateway(Base):
     stngw_id = Column(String(8), unique=True, nullable=False, index=True)
     imei = Column(String(20), nullable=True)
     station_id = Column(Integer, ForeignKey("stations.id"), nullable=True)
+    rtu_id = Column(Integer, ForeignKey("rtus.id"), nullable=True, index=True)
     # Certificate Common Name this gateway's client cert must present, when
     # settings.REQUIRE_MTLS is True (Annexure B §6). NULL means "not yet
     # bound to a specific certificate" — set this once the gateway's cert
@@ -82,6 +111,7 @@ class Gateway(Base):
 
     slave_cards = relationship("SlaveCard", back_populates="gateway")
     station = relationship("Station", back_populates="gateways")
+    rtu = relationship("RTU", back_populates="master_cards")
     telemetry = relationship("Telemetry", back_populates="gateway", cascade="all, delete-orphan")
     assets = relationship("Asset", back_populates="gateway", cascade="all, delete-orphan", primaryjoin="Gateway.stngw_id == Asset.station_gateway_id")
 

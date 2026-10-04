@@ -378,6 +378,7 @@ class GatewayResponse(BaseModel):
     gateway_number: Optional[int] = None
     gateway_number_hex: Optional[str] = None
     status: Optional[str] = None
+    rtu_id: Optional[int] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -388,6 +389,7 @@ class GatewayResponse(BaseModel):
             zn = getattr(div, "zone", None) if div else None
 
             st_id = getattr(data, "station_id", None)
+            r_id = getattr(data, "rtu_id", None)
             st_code = getattr(stn, "station_code", None) if stn else None
             st_name = getattr(stn, "station_name", None) if stn else None
             st_hex = getattr(stn, "station_id_hex", None) if stn else None
@@ -416,6 +418,7 @@ class GatewayResponse(BaseModel):
                 "stngw_id": data.stngw_id,
                 "imei": data.imei,
                 "station_id": int(st_id) if st_id is not None else None,
+                "rtu_id": int(r_id) if r_id is not None else None,
                 "created_at": data.created_at,
                 "station_code": st_code,
                 "station_name": st_name,
@@ -455,6 +458,141 @@ class GatewayListResponse(BaseModel):
     page_size: int
     total_pages: int
     rows: List[GatewayResponse]
+
+
+# ─── RTU (Remote Terminal Unit) ───────────────────────────────────────────────
+
+class RTUMasterCardCreate(BaseModel):
+    card_number: Optional[int] = Field(1, description="Card index inside RTU (1, 2, ...)")
+    gateway_number_hex: str = Field(..., description="2-hex char GG (e.g. '01', '02')")
+    imei: Optional[str] = Field(None, max_length=20, description="Modem 15-digit IMEI")
+
+    @field_validator("gateway_number_hex")
+    @classmethod
+    def validate_gg(cls, v: str) -> str:
+        clean = v.strip().upper().zfill(2)
+        if len(clean) != 2 or not all(c in "0123456789ABCDEF" for c in clean):
+            raise ValueError("Gateway number hex must be exactly 2 hexadecimal characters")
+        return clean
+
+    @field_validator("imei")
+    @classmethod
+    def validate_imei(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            return None
+        if not (10 <= len(cleaned) <= 20 and cleaned.isdigit()):
+            raise ValueError("IMEI must be a valid numeric string between 10 and 20 digits")
+        return cleaned
+
+
+class RTUCreate(BaseModel):
+    station_id: int
+    rtu_name: str = Field(..., max_length=100, description="e.g. 'RTU-01'")
+    location: str = Field("Relay Room", max_length=200, description="Physical location")
+    description: Optional[str] = None
+    master_cards: List[RTUMasterCardCreate] = Field(default_factory=list)
+    master_card_ids: Optional[List[int]] = Field(
+        default=None,
+        validation_alias=AliasChoices("master_card_ids", "master_cards_id", "masterCardIds", "masterCardsId"),
+        description="Array of existing Master Card (Gateway) IDs to link",
+    )
+
+
+class RTUUpdate(BaseModel):
+    rtu_name: Optional[str] = None
+    location: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+    master_card_ids: Optional[List[int]] = Field(
+        default=None,
+        validation_alias=AliasChoices("master_card_ids", "master_cards_id", "masterCardIds", "masterCardsId"),
+        description="Array of existing Master Card (Gateway) IDs to link",
+    )
+
+
+class RTUAddMasterCard(BaseModel):
+    gateway_number_hex: str = Field(..., description="2-hex char GG (e.g. '01', '02')")
+    imei: Optional[str] = Field(None, max_length=20, description="Modem 15-digit IMEI")
+
+    @field_validator("gateway_number_hex")
+    @classmethod
+    def validate_gg(cls, v: str) -> str:
+        clean = v.strip().upper().zfill(2)
+        if len(clean) != 2 or not all(c in "0123456789ABCDEF" for c in clean):
+            raise ValueError("Gateway number hex must be exactly 2 hexadecimal characters")
+        return clean
+
+    @field_validator("imei")
+    @classmethod
+    def validate_imei(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            return None
+        if not (10 <= len(cleaned) <= 20 and cleaned.isdigit()):
+            raise ValueError("IMEI must be a valid numeric string between 10 and 20 digits")
+        return cleaned
+
+
+class RTUMasterCardResponse(BaseModel):
+    id: int
+    stngw_id: str
+    imei: Optional[str] = None
+    gateway_number_hex: Optional[str] = None
+    slave_cards_count: int = 0
+    channels_count: int = 0
+    status: str = "Active"
+
+
+class RTUResponse(BaseModel):
+    id: int
+    rtu_name: str
+    rtu_code: Optional[str] = None
+    location: str
+    description: Optional[str] = None
+    is_active: bool
+    station_id: int
+    station_code: Optional[str] = None
+    station_name: Optional[str] = None
+    station_id_hex: Optional[str] = None
+    division_id: Optional[int] = None
+    division_code: Optional[str] = None
+    division_name: Optional[str] = None
+    zone_id: Optional[int] = None
+    zone_code: Optional[str] = None
+    zone_name: Optional[str] = None
+    master_cards_count: int = 0
+    master_card_ids: List[int] = []
+    master_cards: List[RTUMasterCardResponse] = []
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RTUListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    rows: List[RTUResponse]
+
+
+class RTUPreviewStngwIdResponse(BaseModel):
+    stngw_id: str
+    zone_hex: str
+    division_hex: str
+    station_hex: str
+    gateway_number_hex: str
+    is_valid: bool
+    station_code: Optional[str] = None
+    station_name: Optional[str] = None
+    can_provision: bool = True
+    error: Optional[str] = None
 
 
 # ─── Telemetry (Gateway Ingestion) ────────────────────────────────────────────
