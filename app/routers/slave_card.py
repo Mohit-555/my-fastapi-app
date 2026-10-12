@@ -5,12 +5,23 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
+from pydantic import BaseModel, Field
 from app.database import get_db
 from app.models.models import SlaveCard, Gateway, Station, Division, Zone, AssetParameter, User
 from app.models.schemas import SlaveCardCreate, SlaveCardUpdate, SlaveCardResponse, SlaveCardListResponse, StandardResponse
 from app.auth_utils import get_current_user
+from app.services.channel_assignment_service import ChannelAssignmentService
 
 router = APIRouter(prefix="/slave-cards", tags=["Slave Card Management"])
+
+class ChannelConfigItem(BaseModel):
+    channel_number: str = Field(..., max_length=10)
+    para_id: Optional[str] = Field(None, max_length=8)
+    asset_id: Optional[int] = None
+    prloc: Optional[str] = Field(None, max_length=50)
+
+class BulkChannelsRequest(BaseModel):
+    channels: List[ChannelConfigItem]
 
 
 def _check_slave_card_ownership(slave_card_id: int, user: User, db: Session, action: str = "read") -> SlaveCard:
@@ -345,5 +356,67 @@ def delete_slave_card(
         "status": True,
         "message": f"Slave card '{stngw_id}/{card_address}' deleted successfully",
         "data": None,
+    }
+
+
+@router.post("/{slave_card_id}/channels", response_model=StandardResponse[Any])
+@router.put("/{slave_card_id}/channels", response_model=StandardResponse[Any])
+def configure_slave_card_channels(
+    slave_card_id: int,
+    payload: BulkChannelsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Configure all channels (CH1..CH12) directly for a slave card.
+    Allows setting para_id (and optional asset/prloc) per channel in one request.
+    """
+    card = _check_slave_card_ownership(slave_card_id, current_user, db, action="write")
+
+    for ch_item in payload.channels:
+        ch_num = ch_item.channel_number.strip().upper()
+        clean_pid = ch_item.para_id.strip().upper() if ch_item.para_id and ch_item.para_id.strip() else None
+
+        if clean_pid:
+            param = db.query(AssetParameter).filter(AssetParameter.para_id == clean_pid).first()
+            if not param:
+                param = AssetParameter(
+                    para_id=clean_pid,
+                    slave_card_id=card.id,
+                    channel_number=ch_num,
+                    asset_id=ch_item.asset_id,
+                    prloc=ch_item.prloc.strip() if ch_item.prloc else None,
+                    is_assigned=(ch_item.asset_id is not None),
+                )
+                db.add(param)
+            else:
+                param.slave_card_id = card.id
+                param.channel_number = ch_num
+                if ch_item.asset_id is not None:
+                    param.asset_id = ch_item.asset_id
+                    param.is_assigned = True
+                if ch_item.prloc:
+                    param.prloc = ch_item.prloc.strip()
+        else:
+            # Unlink if previously assigned to this channel
+            existing = db.query(AssetParameter).filter(
+                AssetParameter.slave_card_id == card.id,
+                AssetParameter.channel_number == ch_num,
+            ).all()
+            for p in existing:
+                p.slave_card_id = None
+                p.channel_number = None
+
+    db.commit()
+
+    available_data = ChannelAssignmentService.get_available_channels(
+        db=db,
+        slave_card_id=card.id,
+        user=current_user,
+    )
+    return {
+        "status": True,
+        "message": f"Channels for card '{card.card_address}' configured successfully",
+        "data": available_data,
     }
 

@@ -1,4 +1,5 @@
 from datetime import datetime, UTC
+import re
 from typing import List, Optional, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload
@@ -10,10 +11,16 @@ from app.models.schemas import (
     RTUCreate,
     RTUUpdate,
     RTUAddMasterCard,
+    RTUBulkCreateRequest,
+    RTUBulkCreateResponse,
     RTUResponse,
     RTUListResponse,
     RTUMasterCardResponse,
     RTUPreviewStngwIdResponse,
+    RTUFullHierarchyResponse,
+    RTUMasterCardHierarchyItem,
+    RTUSlaveCardHierarchyItem,
+    RTUChannelHierarchyItem,
     StandardResponse,
 )
 from app.auth_utils import get_current_user
@@ -57,6 +64,8 @@ def _build_rtu_response(rtu: RTU, db: Session) -> RTUResponse:
         rtu_code=rtu.rtu_code,
         location=rtu.location,
         description=rtu.description,
+        latitude=rtu.latitude,
+        longitude=rtu.longitude,
         is_active=rtu.is_active,
         station_id=rtu.station_id,
         station_code=stn.station_code if stn else None,
@@ -225,6 +234,89 @@ def list_rtus(
     }
 
 
+@router.post("/bulk-create", response_model=StandardResponse[RTUBulkCreateResponse], status_code=status.HTTP_201_CREATED)
+def bulk_create_rtus(
+    payload: RTUBulkCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Bulk auto-create N RTUs for a station (e.g. 35 -> RTU-01 to RTU-35).
+    Safe: Checks existing RTU names for this station and continues numbering sequence.
+    """
+    station = db.query(Station).filter(Station.id == payload.station_id).first()
+    if not station:
+        raise HTTPException(status_code=404, detail=f"Station with ID {payload.station_id} not found.")
+
+    # Find existing RTU names for this station
+    existing_rtus = db.query(RTU).filter(RTU.station_id == payload.station_id).all()
+    existing_names = {r.rtu_name.strip().upper() for r in existing_rtus}
+
+    prefix = payload.prefix.strip() if payload.prefix else "RTU-"
+
+    # Auto-detect starting index if not provided
+    if payload.start_index is not None:
+        start_idx = payload.start_index
+    else:
+        max_idx = 0
+        for r in existing_rtus:
+            m = re.search(r"(\d+)$", r.rtu_name.strip())
+            if m:
+                try:
+                    num = int(m.group(1))
+                    if num > max_idx:
+                        max_idx = num
+                except ValueError:
+                    pass
+        start_idx = max_idx + 1
+
+    created_rtus = []
+    current_idx = start_idx
+    created_count = 0
+
+    while created_count < payload.count:
+        rtu_name = f"{prefix}{current_idx:02d}"
+        if rtu_name.upper() not in existing_names:
+            rtu_code = f"RTU-{station.station_code}-{current_idx:02d}".upper()
+            code_suffix = 1
+            cand_code = rtu_code
+            while db.query(RTU).filter(RTU.rtu_code == cand_code).first():
+                cand_code = f"{rtu_code}-{code_suffix}"
+                code_suffix += 1
+
+            new_rtu = RTU(
+                station_id=station.id,
+                rtu_name=rtu_name,
+                rtu_code=cand_code,
+                location=payload.location.strip() if payload.location else "Relay Room",
+                description=f"Auto-generated RTU unit {current_idx}",
+                is_active=True,
+            )
+            db.add(new_rtu)
+            existing_names.add(rtu_name.upper())
+            created_rtus.append(new_rtu)
+            created_count += 1
+        current_idx += 1
+
+    db.commit()
+    for r in created_rtus:
+        db.refresh(r)
+
+    rtu_responses = [_build_rtu_response(r, db) for r in created_rtus]
+
+    return {
+        "status": True,
+        "message": f"Successfully auto-generated {len(created_rtus)} RTUs for station '{station.station_name}'.",
+        "data": {
+            "station_id": station.id,
+            "station_code": station.station_code,
+            "station_name": station.station_name,
+            "created_count": len(created_rtus),
+            "rtus": rtu_responses,
+        },
+    }
+
+
 @router.get("/{rtu_id}", response_model=StandardResponse[RTUResponse])
 def get_rtu(
     rtu_id: int,
@@ -242,6 +334,110 @@ def get_rtu(
         "status": True,
         "message": "Success",
         "data": _build_rtu_response(rtu, db),
+    }
+
+
+@router.get("/{rtu_id}/hierarchy", response_model=StandardResponse[RTUFullHierarchyResponse])
+def get_rtu_hierarchy(
+    rtu_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get deep drill-down hardware hierarchy for an RTU:
+    RTU -> Master Cards (Gateways) -> Slave Cards -> Channels (12 per card) -> para_id.
+    Single unified entry point for hardware configuration.
+    """
+    rtu = db.query(RTU).filter(RTU.id == rtu_id).first()
+    if not rtu:
+        raise HTTPException(status_code=404, detail=f"RTU with ID {rtu_id} not found.")
+
+    rtu_resp = _build_rtu_response(rtu, db)
+
+    mc_items = []
+    for mc in rtu.master_cards:
+        slave_cards = db.query(SlaveCard).filter(SlaveCard.gateway_id == mc.id).order_by(SlaveCard.card_address).all()
+        sc_items = []
+        for sc in slave_cards:
+            ap_rows = (
+                db.query(AssetParameter)
+                .options(joinedload(AssetParameter.asset))
+                .filter(AssetParameter.slave_card_id == sc.id)
+                .all()
+            )
+            ap_by_ch = {}
+            for ap in ap_rows:
+                if ap.channel_number:
+                    norm_ch = ap.channel_number.strip().upper()
+                    if not norm_ch.startswith("CH"):
+                        norm_ch = f"CH{norm_ch}"
+                    ap_by_ch[norm_ch] = ap
+
+            total_chs = 16 if (sc.card_type or "").upper() == "DI" else 12
+            ch_items = []
+            for i in range(1, total_chs + 1):
+                ch_key = f"CH{i}"
+                ap = ap_by_ch.get(ch_key)
+                if ap:
+                    asset = ap.asset
+                    asset_type_name = None
+                    if asset and asset.asset_type_hex:
+                        from app.constants import ASSET_TYPE_MAP
+                        info = ASSET_TYPE_MAP.get(asset.asset_type_hex)
+                        asset_type_name = info[1] if info else None
+                    ch_items.append(
+                        RTUChannelHierarchyItem(
+                            id=ap.id,
+                            channel_number=ch_key,
+                            para_id=ap.para_id,
+                            is_assigned=bool(ap.is_assigned and ap.asset_id),
+                            asset_id=ap.asset_id,
+                            asset_number_code=asset.asset_number_code if asset else None,
+                            asset_type_name=asset_type_name,
+                            prloc=ap.prloc,
+                        )
+                    )
+                else:
+                    ch_items.append(
+                        RTUChannelHierarchyItem(
+                            id=None,
+                            channel_number=ch_key,
+                            para_id=None,
+                            is_assigned=False,
+                            asset_id=None,
+                            asset_number_code=None,
+                            asset_type_name=None,
+                            prloc=None,
+                        )
+                    )
+
+            sc_items.append(
+                RTUSlaveCardHierarchyItem(
+                    id=sc.id,
+                    card_address=sc.card_address,
+                    card_type=sc.card_type,
+                    total_channels=total_chs,
+                    channels=ch_items,
+                )
+            )
+
+        mc_items.append(
+            RTUMasterCardHierarchyItem(
+                id=mc.id,
+                stngw_id=mc.stngw_id,
+                imei=mc.imei,
+                status="Active" if mc.station_id else "Unassigned",
+                slave_cards=sc_items,
+            )
+        )
+
+    return {
+        "status": True,
+        "message": "Success",
+        "data": {
+            "rtu": rtu_resp,
+            "master_cards": mc_items,
+        },
     }
 
 
@@ -334,6 +530,8 @@ def create_rtu(
         rtu_code=rtu_code,
         location=payload.location.strip(),
         description=payload.description.strip() if payload.description else None,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
         is_active=True,
     )
     db.add(rtu)
@@ -374,7 +572,7 @@ def update_rtu(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Update metadata of an RTU (name, location, description, is_active) and its linked Master Cards.
+    Update metadata of an RTU (name, location, description, latitude, longitude, is_active) and its linked Master Cards.
     """
     rtu = db.query(RTU).filter(RTU.id == rtu_id).first()
     if not rtu:
@@ -396,6 +594,10 @@ def update_rtu(
         rtu.location = payload.location.strip()
     if payload.description is not None:
         rtu.description = payload.description.strip() if payload.description else None
+    if payload.latitude is not None:
+        rtu.latitude = payload.latitude
+    if payload.longitude is not None:
+        rtu.longitude = payload.longitude
     if payload.is_active is not None:
         rtu.is_active = payload.is_active
 

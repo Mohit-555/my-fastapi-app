@@ -155,13 +155,24 @@ async def validation_exception_handler(request, exc):
 async def global_exception_handler(request, exc):
     import traceback
     traceback.print_exc()
+    origin = request.headers.get("origin")
+    headers = {}
+    if origin:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+        headers["Access-Control-Allow-Methods"] = "*"
+        headers["Access-Control-Allow-Headers"] = "*"
     return JSONResponse(
         status_code=500,
         content={
             "status": False,
             "message": f"Internal Server Error: {str(exc)}"
         },
+        headers=headers,
     )
+
+# API request/response logger — disable via API_LOGGING_ENABLED=false in .env once stable
+app.add_middleware(ApiLoggerMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -172,14 +183,15 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# API request/response logger — disable via API_LOGGING_ENABLED=false in .env once stable
-app.add_middleware(ApiLoggerMiddleware)
 
 protected_route = [Depends(get_current_user)]
 admin_route = [Depends(require_admin)]

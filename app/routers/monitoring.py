@@ -336,6 +336,9 @@ async def get_faulty_by_station(
     for (st_id, a_no), alert_list in grouped.items():
         station = db.query(Station).filter(Station.id == st_id).first()
         station_code = station.station_code if station else "UNKNOWN"
+        div_code = station.division.division_code if station and station.division else "LKO"
+        gw = db.query(Gateway).filter(Gateway.station_id == st_id).first()
+        rtu_val = gw.stngw_id if gw and gw.stngw_id else (gw.rtu_id if gw and gw.rtu_id else f"GW-{station_code}-01")
 
         # Resolve asset type display name
         asset_type_hex = alert_list[0].asset_type_hex
@@ -380,6 +383,8 @@ async def get_faulty_by_station(
                 iot_faulty=iot_faulty,
                 net_faulty=net_faulty,
                 gw_faulty=gw_faulty,
+                rtu=rtu_val,
+                division=div_code,
             )
         )
 
@@ -395,6 +400,8 @@ async def get_faulty_by_station(
                 iot_faulty=1,
                 net_faulty=0,
                 gw_faulty=0,
+                rtu="GW-MJA-01",
+                division="PRYG",
             ),
             FaultyByStationItem(
                 station_code="LKO",
@@ -404,6 +411,8 @@ async def get_faulty_by_station(
                 iot_faulty=1,
                 net_faulty=1,
                 gw_faulty=0,
+                rtu="GW-LKO-01",
+                division="LKO",
             ),
             FaultyByStationItem(
                 station_code="NDLS",
@@ -413,6 +422,8 @@ async def get_faulty_by_station(
                 iot_faulty=0,
                 net_faulty=0,
                 gw_faulty=1,
+                rtu="GW-NDLS-01",
+                division="DLI",
             ),
         ]
         all_rows.extend(fallback_rows)
@@ -552,10 +563,14 @@ def get_health_summary(
         station_types.setdefault(sid, set()).add(name)
 
     rows = []
-    for idx, st in enumerate(stations, start=1):
+    sr_idx = 1
+    for st in stations:
         z_code = st.division.zone.zone_code if st.division and st.division.zone else "NR"
         d_code = st.division.division_code if st.division else "LKO"
         s_code = st.station_code
+
+        gw = db.query(Gateway).filter(Gateway.station_id == st.id).first()
+        rtu_code = gw.stngw_id if gw and gw.stngw_id else (gw.rtu_id if gw and gw.rtu_id else f"GW-{s_code}-01")
 
         # Count actual sensors/IoT/gateway from related equipment records
         sensor_count = db.query(EquipmentRoom).filter(
@@ -580,52 +595,108 @@ def get_health_summary(
         total_gateway = gateway_count or 1
 
         # Compute real availability: active_count / total
-        # Note: Sending "100.0" avoids "100.0%%" since frontend UI template appends '%'
         avail_sensors_pct = "100.0"
         avail_iots_pct = "100.0"
         avail_network_pct = "100.0"
         avail_gateway_pct = "100.0"
 
-        st_types = station_types.get(st.id, set())
-        if st_types:
-            display_asset_type = ", ".join(sorted(st_types))
-        elif resolved_filter_name:
-            display_asset_type = resolved_filter_name
-        elif target_asset_type and not target_asset_type.isdigit():
-            display_asset_type = target_asset_type
-        else:
-            display_asset_type = "-"
+        # Query assets for this station
+        asset_q = db.query(Asset).filter(Asset.station_id == st.id)
+        if filter_hexes:
+            asset_q = asset_q.filter(Asset.asset_type_hex.in_(filter_hexes))
+        st_assets = asset_q.all()
 
-        rows.append({
-            "sr_no": idx,
-            "zone": z_code,
-            "division": d_code,
-            "station": s_code,
-            "asset_type": display_asset_type,
-            # Sensors
-            "total_sensors": total_sensors,
-            "totalSensors": total_sensors,
-            "avail_sensors_pct": avail_sensors_pct,
-            "sensorsAvail": 100.0,
-            # IoTs
-            "total_iots": total_iots,
-            "totalIoTs": total_iots,
-            "avail_iots_pct": avail_iots_pct,
-            "avail_iots": avail_iots_pct,
-            "iotsAvail": 100.0,
-            # Network
-            "total_network": total_network,
-            "totalNetwork": total_network,
-            "avail_network_pct": avail_network_pct,
-            "avail_network": avail_network_pct,
-            "networkAvail": 100.0,
-            # Gateway
-            "total_gateway": total_gateway,
-            "totalGateway": total_gateway,
-            "avail_gateway_pct": avail_gateway_pct,
-            "avail_gateway": avail_gateway_pct,
-            "gatewayAvail": 100
-        })
+        if st_assets:
+            for ast in st_assets:
+                a_no = ast.asset_number_code or ast.smms_asset_code or f"AST-{ast.id}"
+                # Resolve asset type display
+                a_type = "Point Machine"
+                if ast.asset_type_hex:
+                    for grp_name, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
+                        if ast.asset_type_hex.upper() in [h.upper() for h in hexes]:
+                            a_type = grp_name
+                            break
+                    else:
+                        val = ASSET_TYPE_MAP.get(ast.asset_type_hex, ast.asset_type_hex)
+                        a_type = val[1] if isinstance(val, (tuple, list)) else str(val)
+
+                rows.append({
+                    "sr_no": sr_idx,
+                    "division": d_code,
+                    "rtu": rtu_code,
+                    "asset_no": a_no,
+                    "zone": z_code,
+                    "station": s_code,
+                    "asset_type": a_type,
+                    # Sensors
+                    "total_sensors": total_sensors,
+                    "totalSensors": total_sensors,
+                    "avail_sensors_pct": avail_sensors_pct,
+                    "sensorsAvail": 100.0,
+                    # IoTs
+                    "total_iots": total_iots,
+                    "totalIoTs": total_iots,
+                    "avail_iots_pct": avail_iots_pct,
+                    "avail_iots": avail_iots_pct,
+                    "iotsAvail": 100.0,
+                    # Network
+                    "total_network": total_network,
+                    "totalNetwork": total_network,
+                    "avail_network_pct": avail_network_pct,
+                    "avail_network": avail_network_pct,
+                    "networkAvail": 100.0,
+                    # Gateway
+                    "total_gateway": total_gateway,
+                    "totalGateway": total_gateway,
+                    "avail_gateway_pct": avail_gateway_pct,
+                    "avail_gateway": avail_gateway_pct,
+                    "gatewayAvail": 100
+                })
+                sr_idx += 1
+        else:
+            st_types = station_types.get(st.id, set())
+            if st_types:
+                display_asset_type = ", ".join(sorted(st_types))
+            elif resolved_filter_name:
+                display_asset_type = resolved_filter_name
+            elif target_asset_type and not target_asset_type.isdigit():
+                display_asset_type = target_asset_type
+            else:
+                display_asset_type = "-"
+
+            rows.append({
+                "sr_no": sr_idx,
+                "division": d_code,
+                "rtu": rtu_code,
+                "asset_no": "-",
+                "zone": z_code,
+                "station": s_code,
+                "asset_type": display_asset_type,
+                # Sensors
+                "total_sensors": total_sensors,
+                "totalSensors": total_sensors,
+                "avail_sensors_pct": avail_sensors_pct,
+                "sensorsAvail": 100.0,
+                # IoTs
+                "total_iots": total_iots,
+                "totalIoTs": total_iots,
+                "avail_iots_pct": avail_iots_pct,
+                "avail_iots": avail_iots_pct,
+                "iotsAvail": 100.0,
+                # Network
+                "total_network": total_network,
+                "totalNetwork": total_network,
+                "avail_network_pct": avail_network_pct,
+                "avail_network": avail_network_pct,
+                "networkAvail": 100.0,
+                # Gateway
+                "total_gateway": total_gateway,
+                "totalGateway": total_gateway,
+                "avail_gateway_pct": avail_gateway_pct,
+                "avail_gateway": avail_gateway_pct,
+                "gatewayAvail": 100
+            })
+            sr_idx += 1
 
     total_records = len(rows)
     total_pages = (total_records + page_size - 1) // page_size if total_records else 0
@@ -682,7 +753,7 @@ def download_health_summary(
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        "SR", "ZONE", "DIVISION", "STATION", "ASSET TYPE",
+        "SR", "RTU", "ASSET NO.",
         "TOTAL SENSORS", "% AVAIL. SENSORS",
         "TOTAL IOTS", "% AVAIL. IOTS",
         "TOTAL NETWORK", "% AVAIL. NETWORK",
@@ -695,8 +766,8 @@ def download_health_summary(
         n_pct = r["avail_network_pct"] if str(r["avail_network_pct"]).endswith("%") else f"{r['avail_network_pct']}%"
         g_pct = r["avail_gateway_pct"] if str(r["avail_gateway_pct"]).endswith("%") else f"{r['avail_gateway_pct']}%"
         writer.writerow([
-            r["sr_no"], r["zone"], r["division"], r["station"],
-            r["asset_type"], r["total_sensors"], s_pct,
+            r["sr_no"], r.get("rtu", "-"), r.get("asset_no", "-"),
+            r["total_sensors"], s_pct,
             r["total_iots"], i_pct,
             r["total_network"], n_pct,
             r["total_gateway"], g_pct

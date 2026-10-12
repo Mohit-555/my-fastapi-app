@@ -82,6 +82,8 @@ class RTU(Base):
     rtu_code = Column(String(50), unique=True, nullable=True, index=True)
     location = Column(String(200), nullable=False, default="Relay Room")
     description = Column(Text, nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))

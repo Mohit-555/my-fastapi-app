@@ -761,7 +761,8 @@ def list_gateways(
 ):
     """List all registered gateways with comprehensive filtering and pagination."""
     q = db.query(Gateway).options(
-        joinedload(Gateway.station).joinedload(Station.division).joinedload(Division.zone)
+        joinedload(Gateway.station).joinedload(Station.division).joinedload(Division.zone),
+        joinedload(Gateway.slave_cards)
     )
 
     joined_station = False

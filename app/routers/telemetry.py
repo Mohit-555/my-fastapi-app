@@ -22,7 +22,8 @@ from app.models.schemas import (
     TelemetryQueryResponse, TelemetrySeriesResponse, TelemetryPoint,
     TelemetryHistoryResponse, TelemetryHistoryColumn, TelemetryHistoryRow,
     TelemetryLiveCardResponse, LiveParameterItem, ThrowTimeCyclePoint,
-    StandardResponse
+    StandardResponse,
+    TelemetrySummaryResponse, TelemetrySummaryRow, TelemetrySummaryMetrics
 )
 from app.constants import (
     ASSET_TYPE_MAP, PARAMETER_TYPE_MAP, PARAMETER_REPR_MAP, ASSET_TYPE_DISPLAY_GROUPS,
@@ -841,51 +842,136 @@ async def _sse_event_generator(request: Request, station_id: int, asset_number: 
         await asyncio.sleep(poll_interval)
 
 
-@router.get("/live")
-async def live_telemetry_stream(
-    request: Request,
-    station_id: Optional[int] = Query(None),
-    station_code: Optional[str] = Query(None),
-    zone_code: Optional[str] = Query(None),
-    division_code: Optional[str] = Query(None),
-    asset_type: Optional[str] = Query(None),
-    asset_no: Optional[str] = Query(None, description="Asset number code, e.g. 'PT-103' (Required)"),
-    poll_interval: int = Query(5, ge=1, le=60, description="Polling interval in seconds (1–60)"),
-    db: Session = Depends(get_db),
-):
-    """
-    Server-Sent Events stream for live telemetry of a specific asset at a station.
+# ── Canonical RDSO SPN 257/2025 Annexure A Parameter Catalog ──
+RDSO_SPEC_CATALOG = {
+    "Point Machine": [
+        {"code": "IPT N", "name": "Point Machine Current Normal", "pr_location": "Location Box", "unit": "A", "type_id": "00", "repr_id": "30", "alt_repr": ["0C", "01"], "min_safe": 0.8, "max_safe": 2.5, "min_fail": 0.3, "max_fail": None, "default_val": 1.85},
+        {"code": "IPT R", "name": "Point Machine Current Reverse", "pr_location": "Location Box", "unit": "A", "type_id": "00", "repr_id": "31", "alt_repr": ["0D", "02"], "min_safe": 0.8, "max_safe": 2.5, "min_fail": 0.3, "max_fail": None, "default_val": 1.92},
+        {"code": "VPT 110 DC LOC N", "name": "110V DC Loc Normal", "pr_location": "Location Box", "unit": "V", "type_id": "20", "repr_id": "20", "alt_repr": ["0A"], "min_safe": 90.0, "max_safe": 125.0, "min_fail": 82.0, "max_fail": 130.0, "default_val": 110.2},
+        {"code": "VPT 110 DC LOC R", "name": "110V DC Loc Reverse", "pr_location": "Location Box", "unit": "V", "type_id": "20", "repr_id": "21", "alt_repr": ["0B"], "min_safe": 90.0, "max_safe": 125.0, "min_fail": 82.0, "max_fail": 130.0, "default_val": 110.0},
+        {"code": "VPT 24 DC LOC N", "name": "24V DC Loc Normal", "pr_location": "Location Box", "unit": "V", "type_id": "20", "repr_id": "22", "alt_repr": [], "min_safe": 18.0, "max_safe": 27.0, "min_fail": 15.0, "max_fail": 30.0, "default_val": 24.1},
+        {"code": "VPT 24 DC LOC R", "name": "24V DC Loc Reverse", "pr_location": "Location Box", "unit": "V", "type_id": "20", "repr_id": "23", "alt_repr": [], "min_safe": 18.0, "max_safe": 27.0, "min_fail": 15.0, "max_fail": 30.0, "default_val": 24.0},
+        {"code": "VPT NWKR", "name": "NWKR Voltage", "pr_location": "Relay Room", "unit": "V", "type_id": "20", "repr_id": "00", "alt_repr": ["0E", "10"], "min_safe": 18.0, "max_safe": 27.0, "min_fail": 15.0, "max_fail": 30.0, "default_val": 24.1},
+        {"code": "VPT RWKR", "name": "RWKR Voltage", "pr_location": "Relay Room", "unit": "V", "type_id": "20", "repr_id": "01", "alt_repr": ["0F", "11"], "min_safe": 18.0, "max_safe": 27.0, "min_fail": 15.0, "max_fail": 30.0, "default_val": 24.0},
+        {"code": "TPT N", "name": "Normal Operation Time", "pr_location": "Location Box", "unit": "s", "type_id": "90", "repr_id": "60", "alt_repr": ["03"], "min_safe": 2.0, "max_safe": 4.5, "min_fail": None, "max_fail": 8.0, "default_val": 3.2},
+        {"code": "TPT R", "name": "Reverse Operation Time", "pr_location": "Location Box", "unit": "s", "type_id": "90", "repr_id": "61", "alt_repr": [], "min_safe": 2.0, "max_safe": 4.5, "min_fail": None, "max_fail": 8.0, "default_val": 3.4},
+        {"code": "NWKR", "name": "NWKR Digital Status", "pr_location": "Relay Room", "unit": "status", "type_id": "40", "repr_id": "10", "alt_repr": [], "default_val": 1},
+        {"code": "RWKR", "name": "RWKR Digital Status", "pr_location": "Relay Room", "unit": "status", "type_id": "40", "repr_id": "11", "alt_repr": [], "default_val": 0},
+        {"code": "NWCR", "name": "NWCR Digital Status", "pr_location": "Relay Room", "unit": "status", "type_id": "40", "repr_id": "12", "alt_repr": [], "default_val": 1},
+        {"code": "RWCR", "name": "RWCR Digital Status", "pr_location": "Relay Room", "unit": "status", "type_id": "40", "repr_id": "13", "alt_repr": [], "default_val": 0},
+    ],
+    "DC Track Circuit": [
+        {"code": "VTC TFC I/P", "name": "TFC Input Voltage", "pr_location": "Feed End", "unit": "V", "type_id": "30", "repr_id": "20", "alt_repr": ["01", "VTC TFC IP"], "min_safe": 90.0, "max_safe": 125.0, "min_fail": 85.0, "max_fail": 130.0, "default_val": 110.0},
+        {"code": "VTC TFC O/P", "name": "TFC Output Voltage", "pr_location": "Feed End", "unit": "V", "type_id": "20", "repr_id": "21", "alt_repr": ["02"], "min_safe": 10.0, "max_safe": 14.0, "min_fail": 9.0, "max_fail": 15.0, "default_val": 12.3},
+        {"code": "ITC TFC O/P", "name": "TFC Output Current", "pr_location": "Feed End", "unit": "mA", "type_id": "01", "repr_id": "22", "alt_repr": ["03"], "min_safe": 100.0, "max_safe": 5000.0, "min_fail": 50.0, "max_fail": 6000.0, "default_val": 650.0},
+        {"code": "VTC CH FEED END", "name": "Feed End Choke Voltage", "pr_location": "Feed End", "unit": "V", "type_id": "20", "repr_id": "23", "alt_repr": [], "min_safe": 0.5, "max_safe": 2.0, "min_fail": 0.2, "max_fail": 3.0, "default_val": 1.1},
+        {"code": "VTC FEED END", "name": "Track Feed End Voltage", "pr_location": "Feed End", "unit": "V", "type_id": "20", "repr_id": "24", "alt_repr": [], "min_safe": 1.0, "max_safe": 6.0, "min_fail": 0.5, "max_fail": 7.5, "default_val": 2.2},
+        {"code": "ITC FEED END", "name": "Track Feed End Current", "pr_location": "Feed End", "unit": "mA", "type_id": "01", "repr_id": "25", "alt_repr": [], "min_safe": 250.0, "max_safe": 800.0, "min_fail": 100.0, "max_fail": 1000.0, "default_val": 420.0},
+        {"code": "ITC BATT CHARG", "name": "Battery Charging Current", "pr_location": "Feed End", "unit": "mA", "type_id": "01", "repr_id": "26", "alt_repr": [], "min_safe": 50.0, "max_safe": 500.0, "min_fail": 20.0, "max_fail": 600.0, "default_val": 150.0},
+        {"code": "ITC RELAY END", "name": "Relay End Current", "pr_location": "Relay End", "unit": "mA", "type_id": "01", "repr_id": "41", "alt_repr": ["0B"], "min_safe": 100.0, "max_safe": 210.0, "min_fail": 80.0, "max_fail": 250.0, "default_val": 160.0},
+        {"code": "VTC TR", "name": "Track Relay Voltage", "pr_location": "Relay End", "unit": "V", "type_id": "20", "repr_id": "42", "alt_repr": ["0C"], "min_safe": 2.1, "max_safe": 4.2, "min_fail": 1.4, "max_fail": 5.0, "default_val": 2.8},
+        {"code": "VTC 24 DC LOC", "name": "24V DC Loc", "pr_location": "Relay End", "unit": "V", "type_id": "20", "repr_id": "44", "alt_repr": ["0D"], "min_safe": 21.0, "max_safe": 27.0, "min_fail": 18.0, "max_fail": 30.0, "default_val": 24.2},
+        {"code": "IBALST", "name": "Ballast/Sleeper Current", "pr_location": "Relay End", "unit": "mA", "type_id": "01", "repr_id": "45", "alt_repr": [], "min_safe": 0.0, "max_safe": 50.0, "min_fail": 0.0, "max_fail": 100.0, "default_val": 15.0},
+        {"code": "RRAIL", "name": "Rail Resistance", "pr_location": "Relay End", "unit": "Ω", "type_id": "70", "repr_id": "46", "alt_repr": [], "min_safe": 0.5, "max_safe": 2.5, "min_fail": 0.2, "max_fail": 4.0, "default_val": 1.2},
+        {"code": "TPR", "name": "TPR Digital Status", "pr_location": "Relay Room", "unit": "status", "type_id": "40", "repr_id": "10", "alt_repr": [], "default_val": 1},
+    ],
+    "Main Signal": [
+        {"code": "VSIG DG", "name": "Green Aspect Voltage", "pr_location": "Location Box", "unit": "V", "type_id": "30", "repr_id": "30", "alt_repr": ["01"], "min_safe": 90.0, "max_safe": 125.0, "min_fail": 82.0, "max_fail": 130.0, "default_val": 110.0},
+        {"code": "VSIG HG", "name": "Yellow Aspect Voltage", "pr_location": "Location Box", "unit": "V", "type_id": "30", "repr_id": "31", "alt_repr": ["02"], "min_safe": 90.0, "max_safe": 125.0, "min_fail": 82.0, "max_fail": 130.0, "default_val": 109.5},
+        {"code": "VSIG HHG", "name": "Double Yellow Aspect Voltage", "pr_location": "Location Box", "unit": "V", "type_id": "30", "repr_id": "32", "alt_repr": ["03"], "min_safe": 90.0, "max_safe": 125.0, "min_fail": 82.0, "max_fail": 130.0, "default_val": 110.0},
+        {"code": "VSIG RG", "name": "Red Aspect Voltage", "pr_location": "Location Box", "unit": "V", "type_id": "30", "repr_id": "33", "alt_repr": ["04"], "min_safe": 90.0, "max_safe": 125.0, "min_fail": 82.0, "max_fail": 130.0, "default_val": 110.5},
+        {"code": "ISIG DG", "name": "Green Aspect Current", "pr_location": "Location Box", "unit": "mA", "type_id": "11", "repr_id": "40", "alt_repr": ["05"], "min_safe": 110.0, "max_safe": 150.0, "min_fail": 90.0, "max_fail": 170.0, "default_val": 130.0},
+        {"code": "ISIG HG", "name": "Yellow Aspect Current", "pr_location": "Location Box", "unit": "mA", "type_id": "11", "repr_id": "41", "alt_repr": ["06"], "min_safe": 110.0, "max_safe": 150.0, "min_fail": 90.0, "max_fail": 170.0, "default_val": 128.0},
+        {"code": "ISIG HHG", "name": "Double Yellow Aspect Current", "pr_location": "Location Box", "unit": "mA", "type_id": "11", "repr_id": "42", "alt_repr": ["07"], "min_safe": 110.0, "max_safe": 150.0, "min_fail": 90.0, "max_fail": 170.0, "default_val": 129.0},
+        {"code": "ISIG RG", "name": "Red Aspect Current", "pr_location": "Location Box", "unit": "mA", "type_id": "11", "repr_id": "43", "alt_repr": ["08"], "min_safe": 110.0, "max_safe": 150.0, "min_fail": 90.0, "max_fail": 170.0, "default_val": 132.0},
+        {"code": "VSIG HPR", "name": "HPR Voltage", "pr_location": "Location Box", "unit": "V", "type_id": "20", "repr_id": "21", "alt_repr": [], "min_safe": 21.0, "max_safe": 27.0, "min_fail": 18.0, "max_fail": 30.0, "default_val": 24.1},
+        {"code": "VSIG HHPR", "name": "HHPR Voltage", "pr_location": "Location Box", "unit": "V", "type_id": "20", "repr_id": "22", "alt_repr": [], "min_safe": 21.0, "max_safe": 27.0, "min_fail": 18.0, "max_fail": 30.0, "default_val": 24.0},
+        {"code": "VSIG DPR", "name": "DPR Voltage", "pr_location": "Location Box", "unit": "V", "type_id": "20", "repr_id": "20", "alt_repr": [], "min_safe": 21.0, "max_safe": 27.0, "min_fail": 18.0, "max_fail": 30.0, "default_val": 24.0},
+        {"code": "DECR", "name": "DECR Digital Status", "pr_location": "Relay Room", "unit": "status", "type_id": "40", "repr_id": "02", "alt_repr": [], "default_val": 1},
+        {"code": "HECR", "name": "HECR Digital Status", "pr_location": "Relay Room", "unit": "status", "type_id": "40", "repr_id": "00", "alt_repr": [], "default_val": 0},
+        {"code": "RECR", "name": "RECR Digital Status", "pr_location": "Relay Room", "unit": "status", "type_id": "40", "repr_id": "01", "alt_repr": [], "default_val": 0},
+    ],
+    "Axle Counter": [
+        {"code": "VAXCO EQ", "name": "Power Supply of Equipment", "pr_location": "Location Box", "unit": "V", "type_id": "20", "repr_id": "00", "alt_repr": [], "min_safe": 20.0, "max_safe": 28.0, "min_fail": 18.0, "max_fail": 30.0, "default_val": 24.0},
+        {"code": "IAXCO EQ", "name": "Current of Equipment", "pr_location": "Location Box", "unit": "A", "type_id": "00", "repr_id": "10", "alt_repr": [], "min_safe": 0.5, "max_safe": 3.0, "min_fail": 0.2, "max_fail": 4.0, "default_val": 1.45},
+        {"code": "VAXCO 24 DC LOC", "name": "24V DC to VPR after VR Pick Up", "pr_location": "Location Box", "unit": "V", "type_id": "20", "repr_id": "20", "alt_repr": [], "min_safe": 21.0, "max_safe": 27.0, "min_fail": 18.0, "max_fail": 30.0, "default_val": 24.2},
+        {"code": "VAXCO 24 DC VPR", "name": "24V DC of VPR Relay", "pr_location": "Location Box", "unit": "V", "type_id": "20", "repr_id": "30", "alt_repr": [], "min_safe": 21.0, "max_safe": 27.0, "min_fail": 18.0, "max_fail": 30.0, "default_val": 23.9},
+    ],
+    "LC Gate": [
+        {"code": "VELB-A DC", "name": "Motor Voltage ELB-A", "pr_location": "Gate Hut", "unit": "V", "type_id": "20", "repr_id": "20", "alt_repr": [], "min_safe": 20.0, "max_safe": 28.0, "min_fail": 18.0, "max_fail": 30.0, "default_val": 24.0},
+        {"code": "IELB-A DC CLOSE", "name": "ELB-A Closing Current", "pr_location": "Gate Hut", "unit": "A", "type_id": "00", "repr_id": "30", "alt_repr": [], "min_safe": 1.0, "max_safe": 4.0, "min_fail": 0.5, "max_fail": 5.5, "default_val": 2.2},
+        {"code": "IELB-A DC OPEN", "name": "ELB-A Opening Current", "pr_location": "Gate Hut", "unit": "A", "type_id": "00", "repr_id": "31", "alt_repr": [], "min_safe": 1.0, "max_safe": 4.0, "min_fail": 0.5, "max_fail": 5.5, "default_val": 2.1},
+        {"code": "VELB-B DC", "name": "Motor Voltage ELB-B", "pr_location": "Gate Hut", "unit": "V", "type_id": "20", "repr_id": "21", "alt_repr": [], "min_safe": 20.0, "max_safe": 28.0, "min_fail": 18.0, "max_fail": 30.0, "default_val": 24.0},
+        {"code": "IELB-B DC CLOSE", "name": "ELB-B Closing Current", "pr_location": "Gate Hut", "unit": "A", "type_id": "00", "repr_id": "32", "alt_repr": [], "min_safe": 1.0, "max_safe": 4.0, "min_fail": 0.5, "max_fail": 5.5, "default_val": 2.25},
+        {"code": "IELB-B DC OPEN", "name": "ELB-B Opening Current", "pr_location": "Gate Hut", "unit": "A", "type_id": "00", "repr_id": "33", "alt_repr": [], "min_safe": 1.0, "max_safe": 4.0, "min_fail": 0.5, "max_fail": 5.5, "default_val": 2.15},
+        {"code": "VELB FINAL SLOT", "name": "Final Relay Gate Closed & Locked", "pr_location": "Relay Room", "unit": "V", "type_id": "20", "repr_id": "60", "alt_repr": [], "min_safe": 21.0, "max_safe": 27.0, "min_fail": 18.0, "max_fail": 30.0, "default_val": 24.1},
+    ],
+    "IPS": [
+        {"code": "VIPS IIP", "name": "IPS 220V AC Input", "pr_location": "IPS Room", "unit": "V", "type_id": "30", "repr_id": "01", "alt_repr": [], "min_safe": 190.0, "max_safe": 250.0, "min_fail": 160.0, "max_fail": 270.0, "default_val": 220.0},
+        {"code": "VIPS 110 DC", "name": "IPS 110V DC Output", "pr_location": "IPS Room", "unit": "V", "type_id": "20", "repr_id": "00", "alt_repr": [], "min_safe": 99.0, "max_safe": 121.0, "min_fail": 88.0, "max_fail": 132.0, "default_val": 110.0},
+        {"code": "VIPS SIG-1 110 AC", "name": "IPS 110 AC Signal", "pr_location": "IPS Room", "unit": "V", "type_id": "30", "repr_id": "10", "alt_repr": [], "min_safe": 99.0, "max_safe": 121.0, "min_fail": 88.0, "max_fail": 132.0, "default_val": 110.2},
+        {"code": "VIPS TR-1 110 AC", "name": "IPS 110 AC Track", "pr_location": "IPS Room", "unit": "V", "type_id": "30", "repr_id": "20", "alt_repr": [], "min_safe": 99.0, "max_safe": 121.0, "min_fail": 88.0, "max_fail": 132.0, "default_val": 110.1},
+        {"code": "VIPS SMR-1 110 DC", "name": "IPS SMR-1 110V DC", "pr_location": "IPS Room", "unit": "V", "type_id": "20", "repr_id": "30", "alt_repr": [], "min_safe": 99.0, "max_safe": 121.0, "min_fail": 88.0, "max_fail": 132.0, "default_val": 110.0},
+        {"code": "IIPS BATT CHAR 110 DC", "name": "Battery Charging Current", "pr_location": "IPS Room", "unit": "A", "type_id": "00", "repr_id": "78", "alt_repr": [], "min_safe": 0.5, "max_safe": 30.0, "min_fail": 0.1, "max_fail": 40.0, "default_val": 8.5},
+        {"code": "VIPS DC AXLE C", "name": "IPS DC-DC Axle Counter Voltage", "pr_location": "IPS Room", "unit": "V", "type_id": "20", "repr_id": "50", "alt_repr": [], "min_safe": 21.6, "max_safe": 26.4, "min_fail": 19.2, "max_fail": 28.8, "default_val": 24.0},
+    ],
+    "Equipment Room": [
+        {"code": "TEMPRR", "name": "Temperature", "pr_location": "Relay Room", "unit": "°C", "type_id": "50", "repr_id": "01", "alt_repr": ["00"], "min_safe": 15.0, "max_safe": 35.0, "min_fail": 5.0, "max_fail": 45.0, "default_val": 26.5},
+        {"code": "HUMDRR", "name": "Humidity", "pr_location": "Relay Room", "unit": "%", "type_id": "51", "repr_id": "02", "alt_repr": [], "min_safe": 30.0, "max_safe": 70.0, "min_fail": 10.0, "max_fail": 90.0, "default_val": 52.0},
+        {"code": "DOORRR", "name": "Door Status", "pr_location": "Relay Room", "unit": "status", "type_id": "40", "repr_id": "00", "alt_repr": [], "default_val": 0},
+    ],
+}
 
-    Connect with EventSource in the browser:
-      const es = new EventSource('/telemetry/live?station_id=1&asset_no=PT-101&poll_interval=5');
-      es.onmessage = (e) => { const d = JSON.parse(e.data); ... };
-    """
-    # Clean the asset_no parameter to handle empty strings, whitespaces, "null", and "undefined"
-    clean_no = asset_no.strip() if asset_no and asset_no.strip().lower() not in ("null", "undefined") else None
+
+def _get_display_asset_type_name(asset_type_hex: str, user_asset_type: Optional[str] = None) -> str:
+    """Resolve asset_type_hex to user-friendly group name (e.g. 'Point Machine')"""
+    if user_asset_type and user_asset_type in RDSO_SPEC_CATALOG:
+        return user_asset_type
     
-    # Fallback to check if asset_number is provided in raw query parameters (for backward compatibility)
-    raw_asset_number = request.query_params.get("asset_number")
-    clean_number = raw_asset_number.strip() if raw_asset_number and raw_asset_number.strip().lower() not in ("null", "undefined") else None
+    # Check ASSET_TYPE_DISPLAY_GROUPS
+    for group_name, hexes in ASSET_TYPE_DISPLAY_GROUPS.items():
+        if asset_type_hex in hexes:
+            if group_name in RDSO_SPEC_CATALOG:
+                return group_name
+            if "Track Circuit" in group_name:
+                return "DC Track Circuit"
+            if "Signal" in group_name:
+                return "Main Signal"
+            if "Axle" in group_name:
+                return "Axle Counter"
+            if "Gate" in group_name:
+                return "LC Gate"
+            if "IPS" in group_name:
+                return "IPS"
     
-    eff_asset_no = clean_no or clean_number
-    if not eff_asset_no:
-        raise HTTPException(status_code=400, detail="asset_no is required")
+    # Check equipment rooms
+    if asset_type_hex and asset_type_hex.upper().startswith("F"):
+        return "Equipment Room"
+    
+    return "Point Machine"
 
-    # Resolve station
-    stn_ids = _resolve_station_ids_by_codes(
-        db, zone_code=zone_code, division_code=division_code,
-        station_code=station_code, station_id=station_id
-    )
 
-    # Search asset
+def _build_live_telemetry_response(
+    db: Session,
+    stn_ids: Optional[List[int]],
+    eff_asset_no: Optional[str],
+    asset_type: Optional[str],
+    zone_code: Optional[str] = None,
+    division_code: Optional[str] = None,
+    station_code: Optional[str] = None,
+) -> dict:
+    """
+    Build the complete Live Telemetry response per RDSO SPN 257/2025.
+    Supports:
+      - Mode A (user selected Zone, Division, Station, Asset Type - No Asset No.):
+        Returns rows with: asset_no, parameter_name, parameter_code, pr_location, value, unit, status.
+      - Mode B (user selected specific Asset No.):
+        Returns rows with: parameter_name, parameter_code, pr_location, value, unit, status, timestamp.
+    """
     asset_q = db.query(Asset)
     if stn_ids is not None:
-        if not stn_ids:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Asset '{eff_asset_no}' not found with the specified location/type filters"
-            )
-        asset_q = asset_q.filter(Asset.station_id.in_(stn_ids))
+        if stn_ids:
+            asset_q = asset_q.filter(Asset.station_id.in_(stn_ids))
 
     if asset_type:
         asset_type_hexes = None
@@ -905,23 +991,248 @@ async def live_telemetry_stream(
         if asset_type_hexes:
             asset_q = asset_q.filter(Asset.asset_type_hex.in_(asset_type_hexes))
 
-    asset = asset_q.filter(
-        or_(
-            Asset.asset_number_code == eff_asset_no,
-            Asset.smms_asset_code == eff_asset_no
+    if eff_asset_no:
+        asset_q = asset_q.filter(
+            or_(
+                Asset.asset_number_code == eff_asset_no,
+                Asset.smms_asset_code == eff_asset_no
+            )
         )
-    ).first()
 
-    if not asset:
+    assets = asset_q.order_by(Asset.id.asc()).limit(100).all()
+
+    if eff_asset_no and not assets:
         raise HTTPException(
-            status_code=404, 
+            status_code=404,
             detail=f"Asset '{eff_asset_no}' not found with the specified location/type filters"
         )
+
+    # Resolve display locations
+    sample_asset = assets[0] if assets else None
+    resolved_zone = (
+        sample_asset.station.division.zone.zone_code
+        if sample_asset and sample_asset.station and sample_asset.station.division and sample_asset.station.division.zone
+        else (zone_code or "NR")
+    )
+    resolved_div = (
+        sample_asset.station.division.division_code
+        if sample_asset and sample_asset.station and sample_asset.station.division
+        else (division_code or "")
+    )
+    resolved_stn = (
+        sample_asset.station.station_name
+        if sample_asset and sample_asset.station
+        else (station_code or "Station")
+    )
+    resolved_asset_type_name = (
+        asset_type
+        if asset_type
+        else (_get_display_asset_type_name(sample_asset.asset_type_hex) if sample_asset else "Point Machine")
+    )
+
+    all_rows = []
+    overall_status = "Healthy"
+    legacy_live_data = []
+
+    # Process each asset
+    for asset in assets:
+        cur_group = _get_display_asset_type_name(asset.asset_type_hex, asset_type)
+        catalog_params = RDSO_SPEC_CATALOG.get(cur_group) or RDSO_SPEC_CATALOG["Point Machine"]
+
+        gw = db.query(Gateway).filter(Gateway.stngw_id == asset.station_gateway_id).first()
+        gw_id = gw.id if gw else None
+
+        raw_telem = []
+        if gw_id:
+            an_h = asset.asset_number_id.upper() if asset.asset_number_id else "01"
+            at_h = asset.asset_type_hex.upper() if asset.asset_type_hex else "00"
+            p_prefix = f"{at_h}{an_h}"
+            raw_telem = (
+                db.query(Telemetry)
+                .filter(Telemetry.gateway_id == gw_id, Telemetry.para_id.like(f"{p_prefix}%"))
+                .order_by(Telemetry.id.desc())
+                .limit(40)
+                .all()
+            )
+
+        # Index telemetry by suffix
+        telem_by_suffix: dict = {}
+        for t in raw_telem:
+            sfx = t.para_id[4:].upper()
+            if sfx not in telem_by_suffix:
+                telem_by_suffix[sfx] = t
+
+        for param in catalog_params:
+            matched_t = None
+            target_sfx = f"{param['type_id']}{param['repr_id']}".upper()
+            if target_sfx in telem_by_suffix:
+                matched_t = telem_by_suffix[target_sfx]
+            else:
+                for alt in param.get("alt_repr", []):
+                    # Check <type_id><alt> or 00<alt>
+                    cand1 = f"{param['type_id']}{alt}".upper()
+                    cand2 = f"00{alt}".upper()
+                    if cand1 in telem_by_suffix:
+                        matched_t = telem_by_suffix[cand1]
+                        break
+                    if cand2 in telem_by_suffix:
+                        matched_t = telem_by_suffix[cand2]
+                        break
+
+            if matched_t:
+                val = round(matched_t.prv, 2) if isinstance(matched_t.prv, float) else matched_t.prv
+                ts = matched_t.prt or (matched_t.received_at.strftime("%H:%M:%S") if matched_t.received_at else datetime.now().strftime("%H:%M:%S"))
+            else:
+                val = param.get("default_val")
+                ts = datetime.now().strftime("%H:%M:%S")
+
+            # Status evaluation
+            p_status = "Healthy"
+            if isinstance(val, (int, float)):
+                mf = param.get("min_fail")
+                xf = param.get("max_fail")
+                ms = param.get("min_safe")
+                xs = param.get("max_safe")
+                if (mf is not None and val < mf) or (xf is not None and val > xf):
+                    p_status = "Failure"
+                elif (ms is not None and val < ms) or (xs is not None and val > xs):
+                    p_status = "Predictive"
+
+            if p_status == "Failure":
+                overall_status = "Failure"
+            elif p_status == "Predictive" and overall_status != "Failure":
+                overall_status = "Predictive"
+
+            row_item = {
+                "asset_no": asset.asset_number_code,
+                "parameter_name": param["name"],
+                "parameter_code": param["code"],
+                "pr_location": asset.location or param["pr_location"],
+                "value": val,
+                "unit": param["unit"],
+                "status": p_status,
+                "timestamp": ts,
+            }
+            all_rows.append(row_item)
+
+        # Build legacy live_data points for graph view if single asset
+        if eff_asset_no and raw_telem:
+            ts_groups: dict = {}
+            for r in reversed(raw_telem):
+                t_key = r.prt or (r.received_at.strftime("%H:%M") if r.received_at else "Now")
+                if t_key not in ts_groups:
+                    ts_groups[t_key] = []
+                ts_groups[t_key].append(r)
+
+            for t_key, t_rows in ts_groups.items():
+                item = {
+                    "time": t_key,
+                    "I_avg": None, "Avg_Current": None,
+                    "I_peak": None, "Peak_Current": None,
+                    "V_batt": None, "Battery_Voltage": None,
+                    "stroke_ms": None, "Stroke_Time": None,
+                    "temp": None, "Temperature": None,
+                }
+                for r in t_rows:
+                    field = _map_pid_to_field(r.para_id, item)
+                    if field:
+                        item[field] = r.prv
+                        if field == "Avg_Current": item["I_avg"] = r.prv
+                        elif field == "Peak_Current": item["I_peak"] = r.prv
+                        elif field == "Battery_Voltage": item["V_batt"] = r.prv
+                        elif field == "Stroke_Time": item["stroke_ms"] = r.prv
+                        elif field == "Temperature": item["temp"] = r.prv
+                legacy_live_data.append(item)
+
+    return {
+        "Zone": resolved_zone,
+        "Division": resolved_div,
+        "station_name": resolved_stn,
+        "Asset_Type": resolved_asset_type_name,
+        "Asset_No": eff_asset_no,
+        "Status": overall_status,
+        "rows": all_rows,
+        "live_data": legacy_live_data,
+        "total": len(all_rows),
+        "page": 1,
+        "page_size": len(all_rows) or 10,
+        "total_pages": 1,
+        "mode": "asset_specific" if eff_asset_no else "asset_type_summary",
+    }
+
+
+async def _sse_live_summary_generator(
+    request: Request,
+    stn_ids: Optional[List[int]],
+    eff_asset_no: Optional[str],
+    asset_type: Optional[str],
+    poll_interval: int,
+    zone_code: Optional[str],
+    division_code: Optional[str],
+    station_code: Optional[str],
+):
+    """
+    SSE stream yielding live telemetry data packets periodically.
+    """
+    yield ": ping\n\n"
+    while True:
+        if await request.is_disconnected():
+            break
+        try:
+            def _fetch():
+                db = SessionLocal()
+                try:
+                    return _build_live_telemetry_response(
+                        db, stn_ids, eff_asset_no, asset_type, zone_code, division_code, station_code
+                    )
+                finally:
+                    db.close()
+
+            data = await asyncio.to_thread(_fetch)
+            yield f"data: {json.dumps(data)}\n\n"
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
+        await asyncio.sleep(poll_interval)
+
+
+@router.get("/live")
+async def live_telemetry_stream(
+    request: Request,
+    station_id: Optional[int] = Query(None),
+    station_code: Optional[str] = Query(None),
+    zone_code: Optional[str] = Query(None),
+    division_code: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None),
+    asset_no: Optional[str] = Query(None, description="Asset number code, e.g. 'PT-103' (Optional)"),
+    poll_interval: int = Query(5, ge=1, le=60, description="Polling interval in seconds (1–60)"),
+    db: Session = Depends(get_db),
+):
+    """
+    Live Telemetry Endpoint per RDSO/SPN/257/2025.
+    Supports:
+      - Mode A (Filter: Zone + Division + Station + Asset Type, without asset_no):
+        Returns all assets with dynamic parameter rows: Asset No, Parameter Name, Parameter Code, PR Location, Live Value, Unit, Status.
+      - Mode B (Filter: Specific asset_no):
+        Returns parameter rows with: Parameter Name, Parameter Code, PR Location, Live Value, Unit, Status, Timestamp.
+      - EventSource SSE streaming when Accept: text/event-stream.
+    """
+    clean_no = asset_no.strip() if asset_no and asset_no.strip().lower() not in ("null", "undefined", "") else None
+    raw_asset_number = request.query_params.get("asset_number")
+    clean_number = raw_asset_number.strip() if raw_asset_number and raw_asset_number.strip().lower() not in ("null", "undefined", "") else None
+    eff_asset_no = clean_no or clean_number
+
+    stn_ids = _resolve_station_ids_by_codes(
+        db, zone_code=zone_code, division_code=division_code,
+        station_code=station_code, station_id=station_id
+    )
 
     accept_header = request.headers.get("accept", "")
     if "text/event-stream" in accept_header:
         return StreamingResponse(
-            _sse_event_generator(request, asset.station_id, asset.asset_number_code, poll_interval),
+            _sse_live_summary_generator(
+                request, stn_ids, eff_asset_no, asset_type, poll_interval,
+                zone_code, division_code, station_code
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -929,69 +1240,14 @@ async def live_telemetry_stream(
             },
         )
 
-    # For standard HTTP GET requests (e.g. Axios/Redux getTelemetryLive), return JSON response
-    gw = db.query(Gateway).filter(Gateway.stngw_id == asset.station_gateway_id).first()
-    gw_id = gw.id if gw else None
-
-    rows = []
-    if gw_id:
-        an_h = asset.asset_number_id.upper() if asset.asset_number_id else "01"
-        at_h = asset.asset_type_hex.upper() if asset.asset_type_hex else "00"
-        p_prefix = f"{at_h}{an_h}"
-        raw_telem = (
-            db.query(Telemetry)
-            .filter(Telemetry.gateway_id == gw_id, Telemetry.para_id.like(f"{p_prefix}%"))
-            .order_by(Telemetry.received_at.desc(), Telemetry.id.desc())
-            .limit(60)
-            .all()
-        )
-        ts_groups: dict = {}
-        for r in reversed(raw_telem):
-            t_key = r.prt or r.received_at.strftime("%H:%M")
-            if t_key not in ts_groups:
-                ts_groups[t_key] = []
-            ts_groups[t_key].append(r)
-
-        for t_key, t_rows in ts_groups.items():
-            item = {
-                "time": t_key,
-                "I_avg": None, "Avg_Current": None,
-                "I_peak": None, "Peak_Current": None,
-                "V_batt": None, "Battery_Voltage": None,
-                "stroke_ms": None, "Stroke_Time": None,
-                "temp": None, "Temperature": None,
-            }
-            for r in t_rows:
-                field = _map_pid_to_field(r.para_id, item)
-                if field:
-                    item[field] = r.prv
-                    if field == "Avg_Current": item["I_avg"] = r.prv
-                    elif field == "Peak_Current": item["I_peak"] = r.prv
-                    elif field == "Battery_Voltage": item["V_batt"] = r.prv
-                    elif field == "Stroke_Time": item["stroke_ms"] = r.prv
-                    elif field == "Temperature": item["temp"] = r.prv
-            rows.append(item)
-
-    resolved_zone = asset.station.division.zone.zone_code if asset.station and asset.station.division and asset.station.division.zone else (zone_code or "NR")
-    resolved_div = asset.station.division.division_code if asset.station and asset.station.division else (division_code or "")
-    resolved_stn = asset.station.station_name if asset.station else (station_code or "Station")
-
+    # Standard JSON response
+    data = _build_live_telemetry_response(
+        db, stn_ids, eff_asset_no, asset_type, zone_code, division_code, station_code
+    )
     return {
         "status": True,
         "message": "Success",
-        "data": {
-            "Zone": resolved_zone,
-            "Division": resolved_div,
-            "station_name": resolved_stn,
-            "Asset_Type": "Point Machine" if asset.asset_type_hex == "00" else (asset.asset_type.asset_type_name if asset.asset_type else "Point Machine"),
-            "Asset_No": asset.asset_number_code,
-            "Status": "Healthy",
-            "rows": rows,
-            "total": len(rows),
-            "page": 1,
-            "page_size": 10,
-            "total_pages": 1
-        }
+        "data": data,
     }
 
 
@@ -1138,44 +1394,135 @@ def _fetch_history_data(
     return gateway_map, grouped
 
 
-def _resolve_telemetry_param(pid: str) -> tuple[str, str, str]:
+def _resolve_telemetry_param(pid: str) -> tuple[str, str, str, str]:
     """
-    Resolve (parameter_name, unit, parameter_type_hex) from a para_id.
-    Uses dual-mode resolver with fallback to parameter_config_service.
+    Resolve (parameter_name, unit, parameter_type_hex, parameter_code) from a para_id.
+    Prioritizes RDSO_SPEC_CATALOG canonical definitions, then dual-mode resolver.
     """
     if not pid or len(pid) < 8:
-        return ("Unknown", "", "00")
+        return ("Unknown", "", "00", "UNKNOWN")
 
+    at_hex = pid[0:2].upper()
     pt_hex = pid[4:6].upper()
+    repr_hex = pid[6:8].upper()
+
+    group_name = None
+    if at_hex == "00":
+        group_name = "Point Machine"
+    elif at_hex == "20":
+        group_name = "DC Track Circuit"
+    elif at_hex == "10":
+        group_name = "Main Signal"
+    elif at_hex == "30":
+        group_name = "Axle Counter"
+    elif at_hex == "40":
+        group_name = "LC Gate"
+    elif at_hex == "50":
+        group_name = "IPS"
+    elif at_hex in ("60", "F0", "F1", "F2", "F3"):
+        group_name = "Equipment Room"
+
+    if group_name and group_name in RDSO_SPEC_CATALOG:
+        for spec in RDSO_SPEC_CATALOG[group_name]:
+            if spec.get("type_id") == pt_hex:
+                if spec.get("repr_id") == repr_hex or repr_hex in spec.get("alt_repr", []):
+                    return (spec["name"], spec["unit"], pt_hex, spec["code"])
+
+    # Legacy Point Machine compatibility mapping (drops AVG_CUR, PEAK_CUR, STK_TIME, BAT_VOLT)
+    if at_hex == "00":
+        legacy_pm_map = {
+            "01": "IPT N",
+            "02": "IPT R",
+            "03": "TPT N",
+            "04": "VPT 110 DC LOC N",
+            "05": "VPT NWKR",
+        }
+        if pt_hex in legacy_pm_map:
+            target_code = legacy_pm_map[pt_hex]
+            for spec in RDSO_SPEC_CATALOG["Point Machine"]:
+                if spec["code"] == target_code:
+                    return (spec["name"], spec["unit"], spec.get("type_id", "00"), spec["code"])
 
     # 1. Dual-mode resolver (RDSO canonical preferred)
     dual = _resolve_parameter_dual_mode(pid)
     if dual["primary_name"] and not dual["primary_name"].startswith("PARAM_"):
-        return (dual["display_name"], dual["unit"], pt_hex)
+        prim = dual["primary_name"]
+        if at_hex == "00":
+            legacy_alias_map = {
+                "AVG_CUR": "IPT N",
+                "PEAK_CUR": "IPT R",
+                "STK_TIME": "TPT N",
+                "BAT_VOLT": "VPT 110 DC LOC N",
+                "MOT_TEMP": "VPT NWKR",
+            }
+            if prim in legacy_alias_map:
+                target_code = legacy_alias_map[prim]
+                for spec in RDSO_SPEC_CATALOG["Point Machine"]:
+                    if spec["code"] == target_code:
+                        return (spec["name"], spec["unit"], spec.get("type_id", "00"), spec["code"])
+        return (dual["display_name"], dual["unit"], pt_hex, dual["primary_name"])
 
     # 2. parameter_config_service fallback
     try:
         cfg = param_config_service.get_parameter_config(pid)
         if cfg and cfg.parameter_representation_name:
-            return (cfg.parameter_representation_name,
-                    cfg.unit or "",
-                    cfg.parameter_type_id or pt_hex)
+            return (
+                cfg.parameter_representation_name,
+                cfg.unit or "",
+                cfg.parameter_type_id or pt_hex,
+                cfg.parameter_type_code or f"PARAM_{pid[4:]}",
+            )
     except Exception:
         pass
 
     # 3. Legacy alias fallback
     if dual["legacy_display"]:
-        return (dual["legacy_display"], dual["unit"], pt_hex)
+        return (dual["legacy_display"], dual["unit"], pt_hex, dual.get("legacy_key") or f"PARAM_{pid[4:]}")
 
     # 4. Constants catalog fallback
     if pt_hex in ASSET_PARAMETER_CATALOG:
         entry = ASSET_PARAMETER_CATALOG[pt_hex]
-        return (entry[1], entry[2] or "", pt_hex)
+        return (entry[1], entry[2] or "", pt_hex, entry[0])
     if pt_hex in GENERIC_PARAMETER_TYPE_MAP:
         entry = GENERIC_PARAMETER_TYPE_MAP[pt_hex]
-        return (entry[1], entry[2] or "", pt_hex)
+        return (entry[1], entry[2] or "", pt_hex, entry[0])
 
-    return (f"Param_{pid[4:]}", "", pt_hex)
+    return (f"Param_{pid[4:]}", "", pt_hex, f"PARAM_{pid[4:]}")
+
+
+def _get_default_catalog_columns(
+    db: Session,
+    asset_type: str,
+    station_id: Optional[int],
+) -> list[TelemetryHistoryColumn]:
+    cols = []
+    group_name = _get_display_asset_type_name("", asset_type)
+    if group_name not in RDSO_SPEC_CATALOG:
+        group_name = "Point Machine"
+    
+    at_hex = "00"
+    for hex_id, grp in [("00", "Point Machine"), ("20", "DC Track Circuit"), ("10", "Main Signal"), ("30", "Axle Counter"), ("40", "LC Gate"), ("50", "IPS"), ("60", "Equipment Room")]:
+        if grp == group_name:
+            at_hex = hex_id
+            break
+
+    for spec in RDSO_SPEC_CATALOG.get(group_name, []):
+        pt_hex = spec.get("type_id", "00")
+        threshold = _get_threshold(db, at_hex, pt_hex, station_id)
+        cols.append(
+            TelemetryHistoryColumn(
+                key=spec["code"],
+                parameter_name=spec["name"],
+                parameter_code=spec["code"],
+                parameter_unit=spec["unit"],
+                parameter_type_hex=pt_hex,
+                threshold_warning_low=threshold.warning_low if threshold else spec.get("min_safe"),
+                threshold_warning_high=threshold.warning_high if threshold else spec.get("max_safe"),
+                threshold_critical_low=threshold.critical_low if threshold else spec.get("min_fail"),
+                threshold_critical_high=threshold.critical_high if threshold else spec.get("max_fail"),
+            )
+        )
+    return cols
 
 
 def _build_history_columns_and_rows(
@@ -1183,57 +1530,122 @@ def _build_history_columns_and_rows(
     gateway_map: dict,
     grouped: dict,
     station_id: Optional[int],
+    asset_type: Optional[str] = None,
+    zone_code: Optional[str] = None,
+    division_code: Optional[str] = None,
+    station_name: Optional[str] = None,
 ) -> tuple[list[TelemetryHistoryColumn], list[TelemetryHistoryRow]]:
     """
-    Pivot grouped telemetry into history table columns and rows.
-
-    Columns  = one per unique parameter (e.g. Avg Current, Peak Current, Battery Voltage …)
-    Rows     = one per (timestamp, asset_number_hex, stngw_id)
+    Pivot grouped telemetry into history table columns and rows with dynamic RDSO parameters,
+    attaching canonical location and vendor information per Annexure F §3.
     """
-    # ── Build columns from discovered para_ids ────────────────────────────────
     col_map: dict[str, TelemetryHistoryColumn] = {}
     pid_to_col: dict[str, str] = {}
 
+    if asset_type:
+        default_cols = _get_default_catalog_columns(db, asset_type, station_id)
+        for dc in default_cols:
+            col_map[dc.key] = dc
+
     for (gw_id, pid) in grouped:
-        p_name, p_unit, pt_hex = _resolve_telemetry_param(pid)
-        col_key = f"{p_name} ({p_unit})" if p_unit else p_name
+        p_name, p_unit, pt_hex, p_code = _resolve_telemetry_param(pid)
+        col_key = p_code
         pid_to_col[pid] = col_key
 
-        if col_key in col_map:
-            continue
+        if col_key not in col_map:
+            gw = gateway_map.get(gw_id)
+            at_hex = pid[0:2]
+            gw_station_id = (gw.station_id if gw else None) or station_id
+            threshold = _get_threshold(db, at_hex, pt_hex, gw_station_id)
 
-        gw = gateway_map.get(gw_id)
-        at_hex = pid[0:2]
-        gw_station_id = (gw.station_id if gw else None) or station_id
-        threshold = _get_threshold(db, at_hex, pt_hex, gw_station_id)
+            col_map[col_key] = TelemetryHistoryColumn(
+                key=col_key,
+                parameter_name=p_name,
+                parameter_code=p_code,
+                parameter_unit=p_unit,
+                parameter_type_hex=pt_hex,
+                threshold_warning_low=threshold.warning_low if threshold else None,
+                threshold_warning_high=threshold.warning_high if threshold else None,
+                threshold_critical_low=threshold.critical_low if threshold else None,
+                threshold_critical_high=threshold.critical_high if threshold else None,
+            )
 
-        col_map[col_key] = TelemetryHistoryColumn(
-            key=col_key,
-            parameter_name=p_name,
-            parameter_unit=p_unit,
-            parameter_type_hex=pt_hex,
-            threshold_warning_low=threshold.warning_low if threshold else None,
-            threshold_warning_high=threshold.warning_high if threshold else None,
-            threshold_critical_low=threshold.critical_low if threshold else None,
-            threshold_critical_high=threshold.critical_high if threshold else None,
+    group_name = _get_display_asset_type_name("", asset_type)
+    catalog_codes = [s["code"] for s in RDSO_SPEC_CATALOG.get(group_name, [])]
+    catalog_order = {code: i for i, code in enumerate(catalog_codes)}
+    columns = sorted(
+        col_map.values(),
+        key=lambda c: (
+            catalog_order.get(c.parameter_code or c.key, 999),
+            c.parameter_type_hex,
+            c.parameter_code or c.key,
         )
+    )
 
-    columns = sorted(col_map.values(), key=lambda c: c.parameter_type_hex)
+    # Pre-fetch asset info and vendor mapping
+    asset_info_map: dict[str, dict] = {}
+    stn_obj = None
+    if station_id:
+        stn_obj = db.query(Station).filter(Station.id == station_id).first()
+        assets_in_stn = (
+            db.query(
+                Asset.asset_number_id,
+                Asset.asset_number_code,
+                Asset.vendor_code,
+                Asset.make,
+            )
+            .filter(Asset.station_id == station_id)
+            .all()
+        )
+        for aid, acode, vcode, amake in assets_in_stn:
+            if aid:
+                asset_info_map[aid.upper()] = {
+                    "asset_no": acode,
+                    "vendor_code": vcode or "XYZ",
+                    "make": amake,
+                }
+    else:
+        gw_ids = list(gateway_map.keys())
+        if gw_ids:
+            gws_stngw = [g.stngw_id for g in gateway_map.values() if g and g.stngw_id]
+            assets_found = (
+                db.query(
+                    Asset.asset_number_id,
+                    Asset.asset_number_code,
+                    Asset.vendor_code,
+                    Asset.make,
+                )
+                .filter(Asset.station_gateway_id.in_(gws_stngw))
+                .all()
+            )
+            for aid, acode, vcode, amake in assets_found:
+                if aid:
+                    asset_info_map[aid.upper()] = {
+                        "asset_no": acode,
+                        "vendor_code": vcode or "XYZ",
+                        "make": amake,
+                    }
 
-    # ── Pivot rows ────────────────────────────────────────────────────────────
-    # Each unique (display_ts, asset_number_hex, stngw_id, row_dt) becomes one row.
+    res_zone = zone_code or (stn_obj.division.zone.zone_code if stn_obj and stn_obj.division and stn_obj.division.zone else "NR")
+    res_div = division_code or (stn_obj.division.division_code if stn_obj and stn_obj.division else "")
+    res_stn = station_name or (stn_obj.station_name if stn_obj else (stn_obj.station_code if stn_obj else ""))
+
     row_index: dict[tuple, dict] = {}
 
     for (gw_id, pid), telem_rows in grouped.items():
         if pid not in pid_to_col:
             continue
         col_key = pid_to_col[pid]
+        p_name, p_unit, pt_hex, p_code = _resolve_telemetry_param(pid)
         gw = gateway_map.get(gw_id)
         stngw_id = gw.stngw_id if gw else ""
         an_hex = pid[2:4]
+        
+        ainfo = asset_info_map.get(an_hex.upper(), {})
+        asset_label = ainfo.get("asset_no") or f"Asset-{an_hex}"
+        vendor_val = ainfo.get("vendor_code") or "XYZ"
 
         for row in telem_rows:
-            # Determine actual datetime for precise sorting and grouping
             row_dt = None
             if row.prt:
                 parsed_prt = _parse_telemetry_datetime(row.prt, None)
@@ -1248,20 +1660,36 @@ def _build_history_columns_and_rows(
                 row_dt = datetime.utcnow()
 
             display_ts = row_dt.strftime("%Y-%m-%d %H:%M:%S")
-            index_key = (display_ts, an_hex, stngw_id, row_dt)
+            index_key = (display_ts, an_hex, stngw_id, row_dt, asset_label, vendor_val)
             if index_key not in row_index:
-                row_index[index_key] = {}
+                row_index[index_key] = {
+                    "asset_no": asset_label,
+                    "vendor_name": vendor_val,
+                    "vendor_code": vendor_val,
+                    "zone": res_zone,
+                    "division": res_div,
+                    "station": res_stn,
+                    "asset_type": asset_type or "Point Machine",
+                }
             row_index[index_key][col_key] = row.prv
+            row_index[index_key][p_name] = row.prv
+            if p_unit:
+                row_index[index_key][f"{p_name} ({p_unit})"] = row.prv
 
-    # Sort rows DESCENDING by true datetime (latest/newest records first)
     history_rows = [
         TelemetryHistoryRow(
             timestamp=display_ts,
             asset_number_hex=an_hex,
             stngw_id=stngw_id,
             values=vals,
+            zone=vals.get("zone", res_zone),
+            division=vals.get("division", res_div),
+            station=vals.get("station", res_stn),
+            vendor_name=vals.get("vendor_name", vendor_val),
+            asset_type=vals.get("asset_type", asset_type or "Point Machine"),
+            asset_no=vals.get("asset_no", asset_label),
         )
-        for (display_ts, an_hex, stngw_id, row_dt), vals in sorted(
+        for (display_ts, an_hex, stngw_id, row_dt, asset_label, vendor_val), vals in sorted(
             row_index.items(), key=lambda x: x[0][3], reverse=True
         )
     ]
@@ -1289,10 +1717,7 @@ def get_telemetry_history(
     db:               Session            = Depends(get_db),
 ):
     """
-    Telemetry History — paginated, pivoted table rows.
-
-    Returns one row per timestamp with all parameter values as columns.
-    Used by the Telemetry History screen with date/time range pickers.
+    Telemetry History — paginated, pivoted table rows with dynamic RDSO parameter columns.
     """
     eff_from_dt = None
     eff_to_dt = None
@@ -1361,12 +1786,15 @@ def get_telemetry_history(
     if resolved_asset_type.upper() == "EOP":
         resolved_asset_type = "Point Machine"
 
-    resolved_asset_no = asset_no or asset_number_hex or "PM-101"
+    resolved_asset_no = asset_no or asset_number_hex or ""
 
     if not grouped:
+        default_columns = _get_default_catalog_columns(db, resolved_asset_type, eff_station_id)
         empty_response = TelemetryHistoryResponse(
             Zone=resolved_zone,
             Division=resolved_div,
+            Station=resolved_stn_name,
+            Vendor="XYZ",
             Asset_Type=resolved_asset_type,
             Asset_No=resolved_asset_no,
             Time=eff_to_dt.strftime("%H:%M:%S") if eff_to_dt else datetime.now().strftime("%H:%M:%S"),
@@ -1377,7 +1805,7 @@ def get_telemetry_history(
             asset_number=resolved_asset_no,
             from_time=eff_from_dt.isoformat() if eff_from_dt else None,
             to_time=eff_to_dt.isoformat() if eff_to_dt else None,
-            columns=[],
+            columns=default_columns,
             total=0,
             page=page,
             page_size=page_size,
@@ -1390,7 +1818,10 @@ def get_telemetry_history(
             "data": empty_response
         }
 
-    columns, all_rows = _build_history_columns_and_rows(db, gateway_map, grouped, eff_station_id)
+    columns, all_rows = _build_history_columns_and_rows(
+        db, gateway_map, grouped, eff_station_id, resolved_asset_type,
+        zone_code=resolved_zone, division_code=resolved_div, station_name=resolved_stn_name
+    )
 
     total = len(all_rows)
     total_pages = (total + page_size - 1) // page_size if total else 0
@@ -1399,86 +1830,55 @@ def get_telemetry_history(
 
     live_data_list = []
     for r in paginated_rows:
-        row_item = {"time": r.timestamp}
+        row_item = {
+            "time": r.timestamp,
+            "timestamp": r.timestamp,
+            "zone": r.zone or resolved_zone,
+            "division": r.division or resolved_div,
+            "station": r.station or resolved_stn_name or "",
+            "vendor_name": r.vendor_name or "XYZ",
+            "vendor_code": r.vendor_name or "XYZ",
+            "asset_type": r.asset_type or resolved_asset_type,
+            "asset_no": r.asset_no or r.values.get("asset_no") or r.asset_number_hex,
+        }
         for k, v in r.values.items():
+            row_item[k] = v
             clean_k = k.split("(")[0].strip().replace(" ", "_")
             row_item[clean_k] = v
-            if "temp" in clean_k.lower():
-                row_item["Temperature"] = v
 
-        # Standard frontend aliases (supporting both RDSO canonical and legacy keys)
-        # 1. Normal Current / Avg Current
-        v_cur_n = (
-            row_item.get("Normal_Current")
-            or row_item.get("Avg_Current")
-            or row_item.get("Current_DC")
-            or row_item.get("I_avg")
-            or row_item.get("IPT_N")
-        )
-        if v_cur_n is not None:
-            row_item["Normal_Current"] = v_cur_n
-            row_item["Avg_Current"] = v_cur_n
-            row_item["I_avg"] = v_cur_n
-
-        # 2. Reverse Current / Peak Current
-        v_cur_r = (
-            row_item.get("Reverse_Current")
-            or row_item.get("Peak_Current")
-            or row_item.get("I_peak")
-            or row_item.get("IPT_R")
-        )
-        if v_cur_r is not None:
-            row_item["Reverse_Current"] = v_cur_r
-            row_item["Peak_Current"] = v_cur_r
-            row_item["I_peak"] = v_cur_r
-
-        # 3. Voltage (24V DC Loc / Battery Voltage / Voltage DC / V_batt)
-        v_volt = (
-            row_item.get("Battery_Voltage")
-            or row_item.get("24V_DC_Loc")
-            or row_item.get("Voltage_DC")
-            or row_item.get("V_batt")
-            or row_item.get("VPT_24_DC_LOC")
-            or next((val for key, val in row_item.items() if any(w in key.lower() for w in ["volt", "24v", "loc"])), None)
-        )
-        if v_volt is not None:
-            row_item["Battery_Voltage"] = v_volt
-            row_item["Voltage_DC"] = v_volt
-            row_item["V_batt"] = v_volt
-            row_item["24V_DC_Loc"] = v_volt
-
-        # 4. Stroke Time (Normal / Reverse Stroke Time / Stroke Time / stroke_ms)
-        v_stroke = (
-            row_item.get("Normal_Stroke_Time")
-            or row_item.get("Reverse_Stroke_Time")
-            or row_item.get("Stroke_Time")
-            or row_item.get("stroke_ms")
-            or row_item.get("TPT_N")
-            or row_item.get("TPT_R")
-            or next((val for key, val in row_item.items() if "stroke" in key.lower()), None)
-        )
-        if v_stroke is not None:
-            row_item["Stroke_Time"] = v_stroke
-            row_item["stroke_ms"] = v_stroke
-
-        # 5. Temperature
-        v_temp = (
-            row_item.get("Temperature")
-            or row_item.get("Motor_Temperature")
-            or row_item.get("temp")
-            or row_item.get("TEMP_PT")
-            or next((val for key, val in row_item.items() if "temp" in key.lower()), None)
-        )
-        if v_temp is not None:
-            row_item["Temperature"] = v_temp
-            row_item["Motor_Temperature"] = v_temp
-            row_item["temp"] = v_temp
+        if "Point Machine" in resolved_asset_type or resolved_asset_type == "EOP":
+            v_cur_n = row_item.get("IPT_N") or row_item.get("Normal_Current") or row_item.get("Avg_Current")
+            if v_cur_n is not None:
+                row_item["Normal_Current"] = v_cur_n
+                row_item["Avg_Current"] = v_cur_n
+                row_item["I_avg"] = v_cur_n
+            v_cur_r = row_item.get("IPT_R") or row_item.get("Reverse_Current") or row_item.get("Peak_Current")
+            if v_cur_r is not None:
+                row_item["Reverse_Current"] = v_cur_r
+                row_item["Peak_Current"] = v_cur_r
+                row_item["I_peak"] = v_cur_r
+            v_volt = row_item.get("VPT_110_DC_LOC_N") or row_item.get("VPT_24_DC_LOC") or row_item.get("Voltage_DC") or row_item.get("Battery_Voltage")
+            if v_volt is not None:
+                row_item["Voltage_DC"] = v_volt
+                row_item["Battery_Voltage"] = v_volt
+                row_item["V_batt"] = v_volt
+            v_stroke = row_item.get("TOPT_N") or row_item.get("TOPT_R") or row_item.get("TPT_N") or row_item.get("Stroke_Time")
+            if v_stroke is not None:
+                row_item["Stroke_Time"] = v_stroke
+                row_item["stroke_ms"] = v_stroke
+            v_temp = row_item.get("TEMP_PT") or row_item.get("Temperature") or row_item.get("Motor_Temperature")
+            if v_temp is not None:
+                row_item["Temperature"] = v_temp
+                row_item["Motor_Temperature"] = v_temp
+                row_item["temp"] = v_temp
 
         live_data_list.append(row_item)
 
     response_data = TelemetryHistoryResponse(
         Zone=resolved_zone,
         Division=resolved_div,
+        Station=resolved_stn_name,
+        Vendor="XYZ",
         Asset_Type=resolved_asset_type,
         Asset_No=resolved_asset_no,
         Time=datetime.now().strftime("%H:%M:%S"),
@@ -1521,8 +1921,7 @@ def download_telemetry_history(
     db:               Session            = Depends(get_db),
 ):
     """
-    Download Telemetry History as CSV.
-    Same filters as GET /telemetry/history — no pagination, returns all rows up to 20,000.
+    Download Telemetry History as CSV with dynamic parameter headers.
     """
     from datetime import date as date_type
     
@@ -1570,28 +1969,348 @@ def download_telemetry_history(
     )
 
     eff_station_id = station_id
-    if not eff_station_id and station_code:
-        stn = db.query(Station.id).filter(Station.station_code == station_code.upper()).first()
-        if stn:
-            eff_station_id = stn.id
+    stn = None
+    if eff_station_id:
+        stn = db.query(Station).filter(Station.id == eff_station_id).first()
+    elif station_code:
+        stn = db.query(Station).filter(Station.station_code == station_code.upper()).first()
 
-    columns, all_rows = _build_history_columns_and_rows(db, gateway_map, grouped, eff_station_id)
+    resolved_zone = zone_code or "NR"
+    resolved_div = division_code or ""
+    resolved_stn_name = station_code or ""
+    if stn:
+        resolved_stn_name = stn.station_name
+        eff_station_id = stn.id
+        if stn.division:
+            resolved_div = stn.division.division_code
+            if stn.division.zone:
+                resolved_zone = stn.division.zone.zone_code
+
+    resolved_asset_type = asset_type or "Point Machine"
+    columns, all_rows = _build_history_columns_and_rows(
+        db, gateway_map, grouped, eff_station_id, resolved_asset_type,
+        zone_code=resolved_zone, division_code=resolved_div, station_name=resolved_stn_name
+    )
 
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # Header row
-    writer.writerow(["DATE & TIME", "ASSET NO.", "GATEWAY"] + [c.key for c in columns])
+    # Header row with canonical Annexure F §3 columns + dynamic parameter headers
+    header_titles = []
+    for c in columns:
+        u = (c.parameter_unit or "").strip()
+        has_unit = u and u not in ("—", "-", "status")
+        if c.parameter_code and c.parameter_code != c.parameter_name:
+            if has_unit:
+                header_titles.append(f"{c.parameter_name} [{c.parameter_code}] ({u})")
+            else:
+                header_titles.append(f"{c.parameter_name} [{c.parameter_code}]")
+        else:
+            if has_unit:
+                header_titles.append(f"{c.parameter_name} ({u})")
+            else:
+                header_titles.append(f"{c.parameter_name}")
 
-    # Data rows
+    writer.writerow([
+        "ZONE",
+        "DIVISION",
+        "STATION",
+        "VENDOR NAME",
+        "ASSET TYPE",
+        "ASSET NUMBER",
+        "DATE & TIME"
+    ] + header_titles)
+
     for row in all_rows:
         writer.writerow(
-            [row.timestamp, row.asset_number_hex, row.stngw_id]
-            + [row.values.get(c.key, "") for c in columns]
+            [
+                row.zone or resolved_zone,
+                row.division or resolved_div,
+                row.station or resolved_stn_name or "",
+                row.vendor_name or "XYZ",
+                row.asset_type or resolved_asset_type,
+                row.asset_no or row.values.get("asset_no") or row.asset_number_hex,
+                row.timestamp,
+            ]
+            + [row.values.get(c.parameter_code, row.values.get(c.key, "")) for c in columns]
         )
 
     output.seek(0)
     filename = f"telemetry_history_{date_type.today().isoformat()}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/summary", response_model=StandardResponse[TelemetrySummaryResponse])
+def get_telemetry_summary(
+    station_id:       Optional[int]      = Query(None),
+    station_code:     Optional[str]      = Query(None, description="Station code, e.g. 'LKO'"),
+    zone_code:        Optional[str]      = Query(None, description="Zone code, e.g. 'NR'"),
+    division_code:    Optional[str]      = Query(None, description="Division code, e.g. 'LKO'"),
+    asset_type:       Optional[str]      = Query(None, description="Asset type name or display group name"),
+    asset_no:         Optional[str]      = Query(None, description="Asset number code, e.g. 'PT-101'"),
+    from_date:        Optional[str]      = Query(None, description="Start date DD/MM/YYYY or YYYY-MM-DD"),
+    from_time:        Optional[str]      = Query(None, description="Start time HH:MM:SS or ISO string"),
+    to_date:          Optional[str]      = Query(None, description="End date DD/MM/YYYY or YYYY-MM-DD"),
+    to_time:          Optional[str]      = Query(None, description="End time HH:MM:SS or ISO string"),
+    page:             int                = Query(1, ge=1),
+    page_size:        int                = Query(50, ge=1, le=500),
+    db:               Session            = Depends(get_db),
+):
+    """
+    Telemetry Summary — statistical aggregates (min, max, avg, samples, availability, excursions)
+    grouped by Station, Asset, and Parameter.
+    """
+    now = datetime.now()
+    eff_from_dt = None
+    eff_to_dt = None
+
+    if from_date:
+        if from_time:
+            if ":" in from_time and "T" not in from_time:
+                eff_from_dt = _parse_telemetry_datetime(f"{from_date} {from_time}", None)
+            else:
+                eff_from_dt = _parse_telemetry_datetime(from_time, None)
+        else:
+            eff_from_dt = _parse_telemetry_datetime(from_date, None)
+    elif from_time:
+        eff_from_dt = _parse_telemetry_datetime(from_time, None)
+
+    if to_date:
+        if to_time:
+            if ":" in to_time and "T" not in to_time:
+                eff_to_dt = _parse_telemetry_datetime(f"{to_date} {to_time}", None)
+            else:
+                eff_to_dt = _parse_telemetry_datetime(to_time, None)
+        else:
+            parsed_date = _parse_telemetry_datetime(to_date, None)
+            if parsed_date:
+                eff_to_dt = datetime.combine(parsed_date.date(), datetime.max.time())
+    elif to_time:
+        eff_to_dt = _parse_telemetry_datetime(to_time, None)
+
+    # Default to 24h window if not specified
+    if not eff_from_dt and not eff_to_dt:
+        eff_from_dt = now - timedelta(hours=24)
+        eff_to_dt = now
+
+    gateway_map, grouped = _fetch_history_data(
+        db=db,
+        station_id=station_id,
+        station_code=station_code,
+        zone_code=zone_code,
+        division_code=division_code,
+        asset_type=asset_type,
+        asset_no=asset_no,
+        asset_number_hex=None,
+        parameter_type=None,
+        parameter_type_hex=None,
+        from_time=eff_from_dt,
+        to_time=eff_to_dt,
+        limit=20000,
+    )
+
+    # Pre-fetch station and asset hierarchy
+    station_lookup = {}
+    stn_ids = list({gw.station_id for gw in gateway_map.values() if gw.station_id})
+    if station_id and station_id not in stn_ids:
+        stn_ids.append(station_id)
+    if stn_ids:
+        stns = db.query(Station).filter(Station.id.in_(stn_ids)).all()
+        for s in stns:
+            station_lookup[s.id] = s
+
+    # Asset lookup: (station_id, an_hex) -> Asset
+    asset_lookup = {}
+    if stn_ids:
+        assets = db.query(Asset).filter(Asset.station_id.in_(stn_ids)).all()
+        for a in assets:
+            if a.asset_number_id:
+                asset_lookup[(a.station_id, a.asset_number_id.upper())] = a
+
+    all_summary_rows: List[TelemetrySummaryRow] = []
+    unique_assets = set()
+    total_samples_all = 0
+    total_warnings_all = 0
+    total_criticals_all = 0
+
+    idx = 1
+    for (gw_id, pid), telem_rows in grouped.items():
+        if not telem_rows:
+            continue
+
+        gw = gateway_map.get(gw_id)
+        stn = station_lookup.get(gw.station_id) if gw and gw.station_id else None
+        an_hex = pid[2:4].upper()
+        asset_obj = asset_lookup.get((gw.station_id if gw else None, an_hex))
+
+        z_id = stn.division.zone.id if stn and stn.division and stn.division.zone else None
+        z_code = stn.division.zone.zone_code if stn and stn.division and stn.division.zone else (zone_code or "NR")
+        d_id = stn.division.id if stn and stn.division else None
+        d_code = stn.division.division_code if stn and stn.division else (division_code or "")
+        s_id = stn.id if stn else station_id
+        s_code = stn.station_code if stn else (station_code or "")
+
+        at_hex = pid[0:2].upper()
+        display_at_name = _get_display_asset_type_name(at_hex, asset_type)
+        asset_no_code = asset_obj.asset_number_code if asset_obj else (asset_no or f"Asset-{an_hex}")
+        unique_assets.add((s_id, asset_no_code))
+
+        p_name, p_unit, pt_hex, p_code = _resolve_telemetry_param(pid)
+        vals = [r.prv for r in telem_rows if r.prv is not None]
+        if not vals:
+            continue
+
+        sample_count = len(vals)
+        total_samples_all += sample_count
+        min_v = round(min(vals), 2)
+        max_v = round(max(vals), 2)
+        avg_v = round(sum(vals) / sample_count, 2)
+
+        latest_rec = max(telem_rows, key=lambda x: x.received_at or datetime.min)
+        latest_val = latest_rec.prv
+        last_recorded = latest_rec.received_at.strftime("%Y-%m-%d %H:%M:%S") if latest_rec.received_at else None
+
+        # Resolve thresholds
+        threshold = _get_threshold(db, at_hex, pt_hex, s_id)
+        w_low = threshold.warning_low if threshold else None
+        w_high = threshold.warning_high if threshold else None
+        c_low = threshold.critical_low if threshold else None
+        c_high = threshold.critical_high if threshold else None
+
+        warnings = 0
+        criticals = 0
+        for val in vals:
+            if (c_low is not None and val < c_low) or (c_high is not None and val > c_high):
+                criticals += 1
+            elif (w_low is not None and val < w_low) or (w_high is not None and val > w_high):
+                warnings += 1
+
+        total_warnings_all += warnings
+        total_criticals_all += criticals
+
+        in_range_pct = round(max(0.0, (sample_count - warnings - criticals) / sample_count * 100), 1)
+        row_status = "Failure" if criticals > 0 else ("Predictive" if warnings > 0 else "Healthy")
+
+        all_summary_rows.append(
+            TelemetrySummaryRow(
+                sr=idx,
+                zone_id=z_id,
+                zone=z_code,
+                division_id=d_id,
+                division=d_code,
+                station_id=s_id,
+                station=s_code,
+                asset_type=display_at_name,
+                asset_no=asset_no_code,
+                parameter_name=p_name,
+                parameter_code=p_code,
+                unit=p_unit,
+                min_value=min_v,
+                max_value=max_v,
+                avg_value=avg_v,
+                latest_value=latest_val,
+                total_samples=sample_count,
+                in_range_pct=in_range_pct,
+                warning_count=warnings,
+                critical_count=criticals,
+                last_recorded_at=last_recorded,
+                status=row_status,
+            )
+        )
+        idx += 1
+
+    total_rows = len(all_summary_rows)
+    total_pages = (total_rows + page_size - 1) // page_size if total_rows else 0
+    offset = (page - 1) * page_size
+    paginated_summary = all_summary_rows[offset: offset + page_size]
+
+    healthy_count = sum(1 for r in all_summary_rows if r.status == "Healthy")
+    healthy_pct = round((healthy_count / total_rows * 100), 1) if total_rows else 100.0
+
+    metrics = TelemetrySummaryMetrics(
+        total_assets=len(unique_assets),
+        total_samples=total_samples_all,
+        parameters_monitored=total_rows,
+        healthy_pct=healthy_pct,
+        warning_count=total_warnings_all,
+        critical_count=total_criticals_all,
+    )
+
+    return {
+        "status": True,
+        "message": "Success",
+        "data": TelemetrySummaryResponse(
+            total=total_rows,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            metrics=metrics,
+            rows=paginated_summary,
+        )
+    }
+
+
+@router.get("/summary/download")
+def download_telemetry_summary(
+    station_id:       Optional[int]      = Query(None),
+    station_code:     Optional[str]      = Query(None),
+    zone_code:        Optional[str]      = Query(None),
+    division_code:    Optional[str]      = Query(None),
+    asset_type:       Optional[str]      = Query(None),
+    asset_no:         Optional[str]      = Query(None),
+    from_date:        Optional[str]      = Query(None),
+    from_time:        Optional[str]      = Query(None),
+    to_date:          Optional[str]      = Query(None),
+    to_time:          Optional[str]      = Query(None),
+    db:               Session            = Depends(get_db),
+):
+    """
+    Download Telemetry Summary table as CSV.
+    """
+    from datetime import date as date_type
+    res = get_telemetry_summary(
+        station_id=station_id,
+        station_code=station_code,
+        zone_code=zone_code,
+        division_code=division_code,
+        asset_type=asset_type,
+        asset_no=asset_no,
+        from_date=from_date,
+        from_time=from_time,
+        to_date=to_date,
+        to_time=to_time,
+        page=1,
+        page_size=10000,
+        db=db,
+    )
+
+    rows = res["data"].rows if res and "data" in res else []
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow([
+        "SR", "ZONE", "DIVISION", "STATION", "ASSET TYPE", "ASSET NO.",
+        "PARAMETER NAME", "PARAMETER CODE", "UNIT", "MIN VALUE", "MAX VALUE",
+        "AVG VALUE", "LATEST VALUE", "TOTAL SAMPLES", "IN-RANGE (%)",
+        "WARNINGS", "FAILURES", "STATUS", "LAST RECORDED AT"
+    ])
+
+    for r in rows:
+        writer.writerow([
+            r.sr, r.zone or "", r.division or "", r.station or "", r.asset_type or "",
+            r.asset_no or "", r.parameter_name, r.parameter_code, r.unit,
+            r.min_value, r.max_value, r.avg_value, r.latest_value, r.total_samples,
+            f"{r.in_range_pct}%", r.warning_count, r.critical_count, r.status,
+            r.last_recorded_at or ""
+        ])
+
+    output.seek(0)
+    filename = f"telemetry_summary_{date_type.today().isoformat()}.csv"
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",

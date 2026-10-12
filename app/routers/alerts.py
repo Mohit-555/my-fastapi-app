@@ -2,11 +2,13 @@ import csv
 import io
 import asyncio
 from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta, UTC
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func
+from sqlalchemy import case, func, or_, and_
 from sqlalchemy.orm import Session
 
 from app.services.websocket_manager import websocket_manager, safe_notify_dashboard
@@ -393,7 +395,13 @@ def _base_history_query(
     if feedback:
         q = q.filter(func.upper(AlertEvent.feedback) == feedback.upper())
     if alert_status:
-        q = q.filter(func.lower(AlertEvent.alert_status) == alert_status.lower())
+        st_clean = alert_status.strip().lower()
+        if st_clean == "pending":
+            q = q.filter(or_(AlertEvent.feedback.is_(None), AlertEvent.feedback == ""))
+        elif st_clean == "cleared":
+            q = q.filter(and_(AlertEvent.feedback.isnot(None), AlertEvent.feedback != ""))
+        else:
+            q = q.filter(func.lower(AlertEvent.alert_status) == st_clean)
 
     start_dt = _combine_datetime(from_date, from_time, is_end=False)
     end_dt = _combine_datetime(to_date, to_time, is_end=True)
@@ -412,6 +420,12 @@ def _history_rows(raw_rows, start: int = 1) -> List[AlertHistoryRow]:
         if row.rectification_time and row.alert_time:
             duration_min = round((row.rectification_time - row.alert_time).total_seconds() / 60, 2)
 
+        has_feedback = bool(row.feedback and row.feedback.strip())
+        if not has_feedback:
+            computed_status = "Pending"
+        else:
+            computed_status = "Cleared" if (row.alert_status or "").lower() == "cleared" or row.feedback in {"T", "PT", "F", "M"} else row.alert_status
+
         rows.append(AlertHistoryRow(
             sr=idx,
             id=row.id,
@@ -425,7 +439,7 @@ def _history_rows(raw_rows, start: int = 1) -> List[AlertHistoryRow]:
             asset_type_hex=row.asset_type_hex,
             asset_type=_asset_type_name(row.asset_type_hex),
             asset_no=row.asset_no,
-            alert_status=row.alert_status,
+            alert_status=computed_status,
             cause=row.cause,
             feedback=row.feedback,
             incidence_date_time=row.alert_time.isoformat(),
@@ -452,6 +466,8 @@ def _base_live_query(
     asset_type_hex: Optional[str],
     asset_no: Optional[str] = None,
 ):
+    now = datetime.now(UTC)
+    retention_cutoff = now - timedelta(hours=24)
     q = (
         db.query(
             AlertEvent.id.label("id"),
@@ -474,8 +490,15 @@ def _base_live_query(
         .join(Station, Station.id == AlertEvent.station_id)
         .join(Division, Division.id == Station.division_id)
         .join(Zone, Zone.id == Division.zone_id)
-        .filter(AlertEvent.rectification_time.is_(None))
-        .filter(func.lower(AlertEvent.alert_status) != "cleared")
+        .filter(
+            or_(
+                func.lower(AlertEvent.alert_status) != "cleared",
+                AlertEvent.rectification_time.is_(None),
+                AlertEvent.feedback_time >= retention_cutoff,
+                AlertEvent.rectification_time >= retention_cutoff,
+                AlertEvent.alert_time >= retention_cutoff,
+            )
+        )
     )
 
     zone = _blank_to_none(zone)
@@ -508,6 +531,15 @@ def _base_live_query(
             q = q.filter(AlertEvent.asset_type_hex.in_(asset_hexes))
 
     return q.order_by(AlertEvent.acknowledged.asc(), AlertEvent.alert_time.desc(), AlertEvent.id.desc())
+    return q.order_by(
+        case(
+            (func.lower(AlertEvent.alert_status) == "cleared", 2),
+            (AlertEvent.acknowledged == True, 1),
+            else_=0
+        ),
+        AlertEvent.alert_time.desc(),
+        AlertEvent.id.desc()
+    )
 
 
 def _live_cards(raw_rows) -> List[AlertLiveCard]:
@@ -709,13 +741,13 @@ def get_alert_live(
         alert_type, asset_type_hex, asset_no
     ).limit(limit).all()
     alerts = _live_cards(raw_rows)
-    predictive = sum(1 for row in alerts if row.alert_type.lower() == "predictive")
-    failure = sum(1 for row in alerts if row.alert_type.lower() == "failure")
+    predictive = sum(1 for row in alerts if row.alert_type.lower() == "predictive" and (row.alert_status or "").lower() != "cleared")
+    failure = sum(1 for row in alerts if row.alert_type.lower() == "failure" and (row.alert_status or "").lower() != "cleared")
     response_data = AlertLiveResponse(
         summary=AlertLiveSummary(
             predictive=predictive,
             failure=failure,
-            total=len(alerts),
+            total=len([r for r in alerts if (r.alert_status or "").lower() != "cleared"]),
         ),
         alerts=alerts,
     )
@@ -1201,9 +1233,20 @@ def get_alert_filters(db: Session = Depends(get_db)):
         for idx, val in enumerate(FEEDBACK_OPTIONS, start=1)
     ]
 
+    # Ensure Pending and Cleared are present in filter dropdown options
+    standard_statuses = ["Pending", "Cleared", "Active", "Acknowledged"]
+    merged_statuses = []
+    for s in standard_statuses:
+        if s not in merged_statuses:
+            merged_statuses.append(s)
+    for s in alert_statuses:
+        if s not in merged_statuses:
+            merged_statuses.append(s)
+
     alert_statuses_list = [
         AlertFilterOption(id=idx, label=val, value=val)
         for idx, val in enumerate(alert_statuses, start=1)
+        for idx, val in enumerate(merged_statuses, start=1)
     ]
 
     makes_inv = db.query(AssetInventory.asset_make).distinct().all()

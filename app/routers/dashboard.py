@@ -545,6 +545,7 @@ async def get_alert_history_report(
             "asset_type_hex": row.asset_type_hex,
             "asset_no": row.asset_no,
             "alert_status": row.alert_status,
+            "alert_status": "Pending" if not row.feedback or not row.feedback.strip() else ("Cleared" if (row.alert_status or "").lower() == "cleared" or row.feedback in {"T", "PT", "F", "M"} else row.alert_status),
             "cause": row.cause,
             "feedback": row.feedback,
             "incidence_date_time": row.incidence_date_time.isoformat() if row.incidence_date_time else None,

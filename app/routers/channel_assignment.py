@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.auth_utils import get_current_user
-from app.models.models import User, Zone, Division, Station, Gateway, SlaveCard
+from app.models.models import User, Zone, Division, Station, Gateway, SlaveCard, Asset, AssetParameter
 from app.models.schemas import (
     StandardResponse,
     ChannelAssignmentCreate,
@@ -12,10 +12,118 @@ from app.models.schemas import (
     ChannelAssignmentResponse,
     ChannelAssignmentListResponse,
     AvailableChannelsResponse,
+    AssetMappingAssignRequest,
+    AssetMappingUnassignRequest,
+    AssetMappingItemResponse,
 )
-from app.services.channel_assignment_service import ChannelAssignmentService
+from app.services.channel_assignment_service import ChannelAssignmentService, _get_or_create_asset_by_code
 
 router = APIRouter(prefix="/channel-assignments", tags=["Channel Assignment"])
+
+
+def _build_asset_mapping_item(ap: AssetParameter) -> AssetMappingItemResponse:
+    asset = ap.asset
+    sc = ap.slave_card
+    gw = sc.gateway if sc else (asset.gateway if asset else None)
+
+    asset_type_name = None
+    if asset and asset.asset_type_hex:
+        from app.constants import ASSET_TYPE_MAP
+        info = ASSET_TYPE_MAP.get(asset.asset_type_hex)
+        asset_type_name = info[1] if info else None
+
+    return AssetMappingItemResponse(
+        id=ap.id,
+        para_id=ap.para_id,
+        slave_card_id=ap.slave_card_id,
+        channel_number=ap.channel_number,
+        card_address=sc.card_address if sc else None,
+        card_type=sc.card_type if sc else None,
+        stngw_id=gw.stngw_id if gw else None,
+        is_assigned=bool(ap.is_assigned and ap.asset_id),
+        asset_id=ap.asset_id,
+        asset_number_code=asset.asset_number_code if asset else None,
+        asset_name=asset.smms_asset_name if asset else None,
+        asset_type_name=asset_type_name,
+        prloc=ap.prloc,
+        updated_at=ap.updated_at,
+    )
+
+
+@router.post("/map-asset", response_model=StandardResponse[AssetMappingItemResponse])
+def map_asset_parameter(
+    payload: AssetMappingAssignRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Phase 2: Signalling Asset Mapping.
+    Binds an 8-char hex para_id to an operational Asset and Location Box (prloc).
+    Sets is_assigned = True to enable live alerts and operational tracking.
+    """
+    clean_pid = payload.para_id.strip().upper()
+    asset = None
+    if payload.asset_id:
+        asset = db.query(Asset).filter(Asset.id == payload.asset_id).first()
+        if not asset:
+            raise HTTPException(status_code=404, detail=f"Asset with ID {payload.asset_id} not found.")
+    elif payload.asset_number_code:
+        gw = db.query(Gateway).first()
+        if not gw:
+            raise HTTPException(status_code=400, detail="No Gateway configured to associate asset with.")
+        asset = _get_or_create_asset_by_code(db, gw, payload.asset_number_code)
+    else:
+        raise HTTPException(status_code=400, detail="Either asset_id or asset_number_code is required.")
+
+    ap = db.query(AssetParameter).filter(AssetParameter.para_id == clean_pid).first()
+    if not ap:
+        ap = AssetParameter(
+            para_id=clean_pid,
+            asset_id=asset.id,
+            prloc=payload.prloc.strip() if payload.prloc else None,
+            is_assigned=True,
+        )
+        db.add(ap)
+    else:
+        ap.asset_id = asset.id
+        ap.prloc = payload.prloc.strip() if payload.prloc else None
+        ap.is_assigned = True
+
+    db.commit()
+    db.refresh(ap)
+    return {
+        "status": True,
+        "message": f"Parameter '{clean_pid}' mapped to asset '{asset.asset_number_code}' successfully.",
+        "data": _build_asset_mapping_item(ap),
+    }
+
+
+@router.post("/unmap-asset", response_model=StandardResponse[AssetMappingItemResponse])
+def unmap_asset_parameter(
+    payload: AssetMappingUnassignRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Phase 2: Signalling Asset Mapping.
+    Unmaps a para_id from its asset and location box, setting is_assigned = False.
+    Preserves hardware wiring on the channel without triggering false alerts.
+    """
+    clean_pid = payload.para_id.strip().upper()
+    ap = db.query(AssetParameter).filter(AssetParameter.para_id == clean_pid).first()
+    if not ap:
+        raise HTTPException(status_code=404, detail=f"Parameter '{clean_pid}' not found.")
+
+    ap.asset_id = None
+    ap.prloc = None
+    ap.is_assigned = False
+    db.commit()
+    db.refresh(ap)
+    return {
+        "status": True,
+        "message": f"Parameter '{clean_pid}' unmapped successfully.",
+        "data": _build_asset_mapping_item(ap),
+    }
 
 
 @router.get("/available-channels", response_model=StandardResponse[AvailableChannelsResponse])

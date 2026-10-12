@@ -26,6 +26,77 @@ from app.models.schemas import (
 )
 
 
+def _get_or_create_asset_by_code(db: Session, gateway: Gateway, code: str) -> Asset:
+    clean_code = code.strip()
+    # 1. Search for existing asset matching clean_code under this station / gateway
+    asset = db.query(Asset).filter(
+        func.lower(Asset.asset_number_code) == clean_code.lower(),
+        Asset.station_gateway_id == gateway.stngw_id
+    ).first()
+    if not asset and gateway.station_id:
+        asset = db.query(Asset).filter(
+            func.lower(Asset.asset_number_code) == clean_code.lower(),
+            Asset.station_id == gateway.station_id
+        ).first()
+    if not asset:
+        asset = db.query(Asset).filter(
+            func.lower(Asset.asset_number_code) == clean_code.lower()
+        ).first()
+
+    if asset:
+        return asset
+
+    # 2. Derive asset_type_hex:
+    # 'P' -> Point Machine (00), 'T' -> Track Circuit (20), 'S' -> Main Signal (10)
+    from app.models.models import AssetTypeMaster
+    valid_types = {t.asset_type_id: t for t in db.query(AssetTypeMaster).all()}
+    type_hex = "20"
+    u_code = clean_code.upper()
+    if u_code.startswith("P"):
+        type_hex = "00"
+    elif u_code.endswith("T") or u_code.startswith("T"):
+        type_hex = "20"
+    elif u_code.startswith("S"):
+        type_hex = "10"
+
+    if type_hex not in valid_types and valid_types:
+        type_hex = next(iter(valid_types.keys()))
+
+    # Find the next unused asset_number_id for this (gateway, type_hex)
+    existing_assets = db.query(Asset).filter(
+        Asset.station_gateway_id == gateway.stngw_id,
+        Asset.asset_type_hex == type_hex
+    ).all()
+    used_numbers = set()
+    for a in existing_assets:
+        try:
+            used_numbers.add(int(a.asset_number_id, 16))
+        except (ValueError, TypeError):
+            pass
+
+    next_num = 1
+    while next_num in used_numbers and next_num <= 255:
+        next_num += 1
+    next_num_hex = f"{next_num:02X}"
+
+    import uuid
+    smms_code = f"AST_{gateway.stngw_id}_{type_hex}_{next_num_hex}_{uuid.uuid4().hex[:4]}".upper()
+
+    asset = Asset(
+        smms_asset_code=smms_code,
+        smms_asset_name=f"Asset {clean_code}",
+        asset_number_code=clean_code,
+        asset_number_id=next_num_hex,
+        asset_type_hex=type_hex,
+        station_gateway_id=gateway.stngw_id,
+        station_id=gateway.station_id,
+        is_active=True,
+    )
+    db.add(asset)
+    db.flush()
+    return asset
+
+
 def normalize_channel(ch: str) -> str:
     """Normalize channel string, e.g. 'ch1' -> 'CH1', '1' -> 'CH1', 'CH-1' -> 'CH1'."""
     cleaned = ch.strip().upper()
@@ -422,10 +493,16 @@ class ChannelAssignmentService:
             if user.zone_id is not None and stn.division and stn.division.zone_id != user.zone_id:
                 raise HTTPException(status_code=403, detail="Access denied: Card belongs to another zone")
 
-        # 4. Validate Asset
-        asset = db.query(Asset).filter(Asset.id == payload.asset_id).first()
-        if not asset:
-            raise HTTPException(status_code=404, detail=f"Asset {payload.asset_id} not found")
+        # 4. Validate / Resolve Asset
+        asset = None
+        if payload.asset_id:
+            asset = db.query(Asset).filter(Asset.id == payload.asset_id).first()
+            if not asset:
+                raise HTTPException(status_code=404, detail=f"Asset {payload.asset_id} not found")
+        elif payload.asset_number_code:
+            asset = _get_or_create_asset_by_code(db, gateway, payload.asset_number_code)
+        else:
+            raise HTTPException(status_code=400, detail="Either asset_id or asset_number_code is required")
 
         # Verify asset station matches gateway station
         if gateway.station_id and asset.station_id != gateway.station_id:
@@ -556,6 +633,11 @@ class ChannelAssignmentService:
             if not asset:
                 raise HTTPException(status_code=404, detail=f"Asset {data['asset_id']} not found")
             ap.asset_id = asset.id
+        elif "asset_number_code" in data and data["asset_number_code"]:
+            gateway = ap.slave_card.gateway if ap.slave_card else None
+            if gateway:
+                asset = _get_or_create_asset_by_code(db, gateway, data["asset_number_code"])
+                ap.asset_id = asset.id
 
         target_card_id = ap.slave_card_id
         if "slave_card_id" in data and data["slave_card_id"] is not None:

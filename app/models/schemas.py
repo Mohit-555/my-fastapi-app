@@ -379,6 +379,7 @@ class GatewayResponse(BaseModel):
     gateway_number_hex: Optional[str] = None
     status: Optional[str] = None
     rtu_id: Optional[int] = None
+    slave_card_count: Optional[int] = 0
 
     @model_validator(mode="before")
     @classmethod
@@ -434,11 +435,14 @@ class GatewayResponse(BaseModel):
                 "gateway_number": gw_num,
                 "gateway_number_hex": gw_hex,
                 "status": status_val,
+                "slave_card_count": len(getattr(data, "slave_cards", [])) if getattr(data, "slave_cards", None) is not None else 0,
             }
         else:
             st_id = data.get("station_id")
             if "status" not in data:
                 data["status"] = "Linked" if st_id is not None else "Unlinked"
+            if "slave_card_count" not in data:
+                data["slave_card_count"] = len(data.get("slave_cards", [])) if data.get("slave_cards") is not None else 0
             gw_id_str = data.get("stngw_id", "") or ""
             if len(gw_id_str) == 8 and data.get("gateway_number") is None:
                 try:
@@ -493,6 +497,8 @@ class RTUCreate(BaseModel):
     rtu_name: str = Field(..., max_length=100, description="e.g. 'RTU-01'")
     location: str = Field("Relay Room", max_length=200, description="Physical location")
     description: Optional[str] = None
+    latitude: Optional[float] = Field(None, ge=-90.0, le=90.0, description="GPS Latitude (-90 to 90)")
+    longitude: Optional[float] = Field(None, ge=-180.0, le=180.0, description="GPS Longitude (-180 to 180)")
     master_cards: List[RTUMasterCardCreate] = Field(default_factory=list)
     master_card_ids: Optional[List[int]] = Field(
         default=None,
@@ -505,12 +511,30 @@ class RTUUpdate(BaseModel):
     rtu_name: Optional[str] = None
     location: Optional[str] = None
     description: Optional[str] = None
+    latitude: Optional[float] = Field(None, ge=-90.0, le=90.0, description="GPS Latitude (-90 to 90)")
+    longitude: Optional[float] = Field(None, ge=-180.0, le=180.0, description="GPS Longitude (-180 to 180)")
     is_active: Optional[bool] = None
     master_card_ids: Optional[List[int]] = Field(
         default=None,
         validation_alias=AliasChoices("master_card_ids", "master_cards_id", "masterCardIds", "masterCardsId"),
         description="Array of existing Master Card (Gateway) IDs to link",
     )
+
+
+class RTUBulkCreateRequest(BaseModel):
+    station_id: int
+    count: int = Field(..., ge=1, le=100, description="Number of RTUs to auto-generate (e.g. 35)")
+    prefix: str = Field("RTU-", description="Prefix for RTU naming (default: 'RTU-')")
+    location: str = Field("Relay Room", description="Default physical location")
+    start_index: Optional[int] = Field(None, ge=1, description="Starting sequence index (default: auto-detect)")
+
+
+class RTUBulkCreateResponse(BaseModel):
+    station_id: int
+    station_code: Optional[str] = None
+    station_name: Optional[str] = None
+    created_count: int
+    rtus: List["RTUResponse"]
 
 
 class RTUAddMasterCard(BaseModel):
@@ -554,6 +578,8 @@ class RTUResponse(BaseModel):
     rtu_code: Optional[str] = None
     location: str
     description: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     is_active: bool
     station_id: int
     station_code: Optional[str] = None
@@ -593,6 +619,70 @@ class RTUPreviewStngwIdResponse(BaseModel):
     station_name: Optional[str] = None
     can_provision: bool = True
     error: Optional[str] = None
+
+
+# ─── RTU Drill-down Hierarchy (Single Entry Point) ───────────────────────────
+
+class RTUChannelHierarchyItem(BaseModel):
+    id: Optional[int] = None
+    channel_number: str
+    para_id: Optional[str] = None
+    is_assigned: bool = False
+    asset_id: Optional[int] = None
+    asset_number_code: Optional[str] = None
+    asset_type_name: Optional[str] = None
+    prloc: Optional[str] = None
+
+
+class RTUSlaveCardHierarchyItem(BaseModel):
+    id: int
+    card_address: str
+    card_type: Optional[str] = None
+    total_channels: int = 12
+    channels: List[RTUChannelHierarchyItem] = []
+
+
+class RTUMasterCardHierarchyItem(BaseModel):
+    id: int
+    stngw_id: str
+    imei: Optional[str] = None
+    status: str = "Active"
+    slave_cards: List[RTUSlaveCardHierarchyItem] = []
+
+
+class RTUFullHierarchyResponse(BaseModel):
+    rtu: RTUResponse
+    master_cards: List[RTUMasterCardHierarchyItem] = []
+
+
+# ─── Decoupled Asset Mapping (Phase 2) ───────────────────────────────────────
+
+class AssetMappingAssignRequest(BaseModel):
+    para_id: str = Field(..., pattern=r"^[0-9A-Fa-f]{7,8}$", description="8-character hex parameter ID")
+    asset_id: Optional[int] = Field(None, description="Target Asset ID")
+    asset_number_code: Optional[str] = Field(None, max_length=50, description="Asset Number Code (e.g. '101T')")
+    prloc: Optional[str] = Field(None, max_length=50, description="Location box (e.g. 'LB-01')")
+
+
+class AssetMappingUnassignRequest(BaseModel):
+    para_id: str = Field(..., pattern=r"^[0-9A-Fa-f]{7,8}$", description="8-character hex parameter ID")
+
+
+class AssetMappingItemResponse(BaseModel):
+    id: int
+    para_id: str
+    slave_card_id: Optional[int] = None
+    channel_number: Optional[str] = None
+    card_address: Optional[str] = None
+    card_type: Optional[str] = None
+    stngw_id: Optional[str] = None
+    is_assigned: bool
+    asset_id: Optional[int] = None
+    asset_number_code: Optional[str] = None
+    asset_name: Optional[str] = None
+    asset_type_name: Optional[str] = None
+    prloc: Optional[str] = None
+    updated_at: Optional[datetime] = None
 
 
 # ─── Telemetry (Gateway Ingestion) ────────────────────────────────────────────
@@ -727,12 +817,19 @@ class TelemetryHistoryRow(BaseModel):
     asset_number_hex: str                   # e.g. "01"
     stngw_id: str
     values: dict                            # e.g. {"I_AVG (A)": 4.3, "I_PEAK (A)": 5.9}
+    zone: Optional[str] = None
+    division: Optional[str] = None
+    station: Optional[str] = None
+    vendor_name: Optional[str] = "XYZ"
+    asset_type: Optional[str] = None
+    asset_no: Optional[str] = None
 
 
 class TelemetryHistoryColumn(BaseModel):
     """Metadata for one column in the history table."""
     key: str                                # dict key used in TelemetryHistoryRow.values
     parameter_name: str                     # e.g. "Avg Current"
+    parameter_code: Optional[str] = None    # e.g. "IPT N"
     parameter_unit: str                     # e.g. "A"
     parameter_type_hex: str                 # e.g. "01"
     threshold_warning_low: Optional[float] = None
@@ -741,9 +838,54 @@ class TelemetryHistoryColumn(BaseModel):
     threshold_critical_high: Optional[float] = None
 
 
+class TelemetrySummaryRow(BaseModel):
+    sr: int
+    zone_id: Optional[int] = None
+    zone: Optional[str] = None
+    division_id: Optional[int] = None
+    division: Optional[str] = None
+    station_id: Optional[int] = None
+    station: Optional[str] = None
+    asset_type: Optional[str] = None
+    asset_no: Optional[str] = None
+    parameter_name: str
+    parameter_code: str
+    unit: str
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    avg_value: Optional[float] = None
+    latest_value: Optional[float] = None
+    total_samples: int = 0
+    in_range_pct: float = 100.0
+    warning_count: int = 0
+    critical_count: int = 0
+    last_recorded_at: Optional[str] = None
+    status: str = "Healthy"
+
+
+class TelemetrySummaryMetrics(BaseModel):
+    total_assets: int = 0
+    total_samples: int = 0
+    parameters_monitored: int = 0
+    healthy_pct: float = 100.0
+    warning_count: int = 0
+    critical_count: int = 0
+
+
+class TelemetrySummaryResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    metrics: TelemetrySummaryMetrics
+    rows: List[TelemetrySummaryRow]
+
+
 class TelemetryHistoryResponse(BaseModel):
     Zone: Optional[str] = None
     Division: Optional[str] = None
+    Station: Optional[str] = None
+    Vendor: Optional[str] = "XYZ"
     Asset_Type: Optional[str] = None
     Asset_No: Optional[str] = None
     Time: Optional[str] = None
@@ -1819,6 +1961,8 @@ class FaultyByStationItem(BaseModel):
     iot_faulty: int
     net_faulty: int
     gw_faulty: int
+    rtu: Optional[str] = None
+    division: Optional[str] = None
 
 
 class FaultyByStationResponse(BaseModel):
@@ -1927,7 +2071,8 @@ class ChannelAssignmentCreate(BaseModel):
     gateway_id: Optional[int] = Field(None, validation_alias=AliasChoices('gateway_id', 'gatewayId'))
     slave_card_id: int = Field(..., validation_alias=AliasChoices('slave_card_id', 'slaveCardId'))
     channel_number: str = Field(..., max_length=15, validation_alias=AliasChoices('channel_number', 'channelNumber', 'channel'))
-    asset_id: int = Field(..., validation_alias=AliasChoices('asset_id', 'assetId'))
+    asset_id: Optional[int] = Field(None, validation_alias=AliasChoices('asset_id', 'assetId'))
+    asset_number_code: Optional[str] = Field(None, max_length=50, validation_alias=AliasChoices('asset_number_code', 'assetNumberCode'))
     para_id: Optional[str] = Field(None, pattern=r"^[0-9A-Fa-f]{7,8}$", validation_alias=AliasChoices('para_id', 'paraId'))
     prloc: Optional[str] = Field(None, max_length=50, validation_alias=AliasChoices('prloc', 'location_box', 'locationBox'))
 
@@ -1936,6 +2081,7 @@ class ChannelAssignmentUpdate(BaseModel):
     gateway_id: Optional[int] = Field(None, validation_alias=AliasChoices('gateway_id', 'gatewayId'))
     slave_card_id: Optional[int] = Field(None, validation_alias=AliasChoices('slave_card_id', 'slaveCardId'))
     asset_id: Optional[int] = Field(None, validation_alias=AliasChoices('asset_id', 'assetId'))
+    asset_number_code: Optional[str] = Field(None, max_length=50, validation_alias=AliasChoices('asset_number_code', 'assetNumberCode'))
     channel_number: Optional[str] = Field(None, max_length=15, validation_alias=AliasChoices('channel_number', 'channelNumber', 'channel'))
     para_id: Optional[str] = Field(None, pattern=r"^[0-9A-Fa-f]{7,8}$", validation_alias=AliasChoices('para_id', 'paraId'))
     prloc: Optional[str] = Field(None, max_length=50, validation_alias=AliasChoices('prloc', 'location_box', 'locationBox'))
