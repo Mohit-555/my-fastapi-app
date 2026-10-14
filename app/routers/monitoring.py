@@ -315,8 +315,9 @@ async def get_faulty_by_station(
     if target_asset_no:
         if target_asset_no.isdigit():
             asset_obj = db.query(Asset).filter(Asset.id == int(target_asset_no)).first()
-            if asset_obj and asset_obj.asset_no:
-                query = query.filter(or_(AlertEvent.asset_no.ilike(f"%{target_asset_no}%"), AlertEvent.asset_no.ilike(f"%{asset_obj.asset_no}%")))
+            code_val = asset_obj.asset_number_code if asset_obj else None
+            if code_val:
+                query = query.filter(or_(AlertEvent.asset_no.ilike(f"%{target_asset_no}%"), AlertEvent.asset_no.ilike(f"%{code_val}%")))
             else:
                 query = query.filter(AlertEvent.asset_no.ilike(f"%{target_asset_no}%"))
         else:
