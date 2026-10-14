@@ -2113,6 +2113,8 @@ class ChannelAssignmentResponse(BaseModel):
     asset_name: Optional[str] = None
     prloc: Optional[str] = None
     location_box: Optional[str] = None
+    parameter_name: Optional[str] = None
+    parameter_type_hex: Optional[str] = None
     is_assigned: bool = True
     created_at: datetime
     updated_at: datetime
@@ -2130,6 +2132,8 @@ class ChannelAssignmentResponse(BaseModel):
     assetNumberCode: Optional[str] = None
     assetName: Optional[str] = None
     locationBox: Optional[str] = None
+    parameterName: Optional[str] = None
+    parameterTypeHex: Optional[str] = None
     isAssigned: bool = True
     updatedAt: Optional[str] = None
 
@@ -2148,6 +2152,8 @@ class ChannelAssignmentResponse(BaseModel):
         self.assetNumberCode = self.asset_number_code
         self.assetName = self.asset_name
         self.locationBox = self.prloc
+        self.parameterName = self.parameter_name
+        self.parameterTypeHex = self.parameter_type_hex
         self.isAssigned = self.is_assigned
         self.updatedAt = self.updated_at.isoformat() if self.updated_at else None
         return self

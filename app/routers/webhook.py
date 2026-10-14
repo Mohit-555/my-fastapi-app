@@ -643,6 +643,9 @@ def receive_fixed_parameters(
                                 asset_number_code=asset_number_code
                             )
                         )
+                safe_create_task(
+                    websocket_manager.broadcast_dashboard_update("telemetry_updated")
+                )
             
             status_msg = "success"
             if errors:
@@ -826,6 +829,9 @@ def receive_event_parameters(
                                 asset_number_code=asset_number_code
                             )
                         )
+                safe_create_task(
+                    websocket_manager.broadcast_dashboard_update("telemetry_updated")
+                )
             
             status_msg = "success"
             if errors:

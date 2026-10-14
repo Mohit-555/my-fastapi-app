@@ -266,10 +266,10 @@ def _resolve_station_ids_by_codes(
         
     q = db.query(Station.id).join(Division).join(Zone)
     
-    if station_id is not None:
-        q = q.filter(Station.id == station_id)
     if station_code:
         q = q.filter(Station.station_code == station_code.upper())
+    elif station_id is not None:
+        q = q.filter(Station.id == station_id)
     if division_code:
         q = q.filter(Division.division_code == division_code.upper())
     if zone_code:
@@ -1318,7 +1318,9 @@ def _fetch_history_data(
 
     # 4. Resolve Parameter Type Hexes
     target_parameter_type_hexes = None
-    eff_pt = parameter_type or parameter_type_hex
+    clean_pt = parameter_type.strip() if parameter_type and str(parameter_type).strip().lower() not in ("null", "undefined", "select", "all", "") else None
+    clean_pth = parameter_type_hex.strip() if parameter_type_hex and str(parameter_type_hex).strip().lower() not in ("null", "undefined", "select", "all", "") else None
+    eff_pt = clean_pt or clean_pth
     if eff_pt:
         hexes = []
         for hex_id, (code, name, unit) in PARAMETER_TYPE_MAP.items():
@@ -1722,6 +1724,20 @@ def get_telemetry_history(
     eff_from_dt = None
     eff_to_dt = None
     
+    station_code = station_code if isinstance(station_code, str) else None
+    zone_code = zone_code if isinstance(zone_code, str) else None
+    division_code = division_code if isinstance(division_code, str) else None
+    asset_type = asset_type if isinstance(asset_type, str) else None
+    asset_no = asset_no if isinstance(asset_no, str) else None
+    asset_number_hex = asset_number_hex if isinstance(asset_number_hex, str) else None
+    parameter_type = parameter_type if isinstance(parameter_type, str) else None
+    parameter_type_hex = parameter_type_hex if isinstance(parameter_type_hex, str) else None
+    from_date = from_date if isinstance(from_date, str) else None
+    from_time = from_time if isinstance(from_time, str) else None
+    to_date = to_date if isinstance(to_date, str) else None
+    to_time = to_time if isinstance(to_time, str) else None
+    station_id = station_id if isinstance(station_id, int) else None
+
     if from_date:
         if from_time:
             if ":" in from_time and "T" not in from_time:

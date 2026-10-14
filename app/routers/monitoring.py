@@ -753,7 +753,7 @@ def download_health_summary(
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        "SR", "RTU", "ASSET NO.",
+        "SR", "DIVISION", "RTU", "ASSET NO.",
         "TOTAL SENSORS", "% AVAIL. SENSORS",
         "TOTAL IOTS", "% AVAIL. IOTS",
         "TOTAL NETWORK", "% AVAIL. NETWORK",
@@ -766,7 +766,7 @@ def download_health_summary(
         n_pct = r["avail_network_pct"] if str(r["avail_network_pct"]).endswith("%") else f"{r['avail_network_pct']}%"
         g_pct = r["avail_gateway_pct"] if str(r["avail_gateway_pct"]).endswith("%") else f"{r['avail_gateway_pct']}%"
         writer.writerow([
-            r["sr_no"], r.get("rtu", "-"), r.get("asset_no", "-"),
+            r["sr_no"], r.get("division", "-"), r.get("rtu", "-"), r.get("asset_no", "-"),
             r["total_sensors"], s_pct,
             r["total_iots"], i_pct,
             r["total_network"], n_pct,

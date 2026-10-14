@@ -177,6 +177,9 @@ def build_assignment_response(ap: AssetParameter, db: Session) -> ChannelAssignm
     division = station.division if (station and station.division) else None
     zone = division.zone if (division and division.zone) else None
 
+    if not gateway and slave_card and slave_card.gateway_id:
+        gateway = db.query(Gateway).filter(Gateway.id == slave_card.gateway_id).first()
+
     # stngw_id: fallback to asset.station_gateway_id if gateway object is not loaded or missing
     stngw_id = None
     if gateway and gateway.stngw_id:
@@ -199,9 +202,17 @@ def build_assignment_response(ap: AssetParameter, db: Session) -> ChannelAssignm
             card_number_str = f"Card {idx}"
         else:
             card_number_str = f"Card #{slave_card.id}"
+    elif slave_card:
+        card_number_str = f"Card ({slave_card.card_address})" if slave_card.card_address else f"Card #{slave_card.id}"
 
     ch_norm = ap.channel_number or None
     resolved_loc = ap.prloc or (asset.location if asset else None)
+
+    # Parameter name and hex resolution
+    from app.constants import PARAMETER_TYPE_MAP
+    param_type_hex = ap.para_id[4:6] if ap.para_id and len(ap.para_id) >= 6 else None
+    param_info = PARAMETER_TYPE_MAP.get(param_type_hex) if param_type_hex else None
+    param_name = param_info[1] if param_info else None
 
     return ChannelAssignmentResponse(
         id=ap.id,
@@ -223,6 +234,8 @@ def build_assignment_response(ap: AssetParameter, db: Session) -> ChannelAssignm
         channel=ch_norm,
         channel_number=ch_norm,
         para_id=ap.para_id,
+        parameter_name=param_name,
+        parameter_type_hex=param_type_hex,
         asset_id=asset.id if asset else None,
         asset_number_code=asset.asset_number_code if asset else None,
         asset_name=asset.smms_asset_name if asset else None,
@@ -707,23 +720,19 @@ class ChannelAssignmentService:
 
     @staticmethod
     def delete_assignment(db: Session, assignment_id: int, user: User) -> bool:
-        """Unassign a channel assignment, retaining telemetry record or deleting unassigned entry."""
+        """Permanently delete a channel assignment record."""
         ap = db.query(AssetParameter).filter(AssetParameter.id == assignment_id).first()
         if not ap:
             raise HTTPException(status_code=404, detail=f"Channel assignment {assignment_id} not found")
 
         check_assignment_access(ap, user, db, action="write")
 
-        # Unassign asset mapping so the channel becomes immediately available again for reuse
-        ap.asset_id = None
-        ap.prloc = None
-        ap.is_assigned = False
-        ap.updated_at = datetime.now(UTC)
-
+        # Permanently delete the channel record from database
+        db.delete(ap)
         try:
             db.commit()
         except IntegrityError:
             db.rollback()
-            raise HTTPException(status_code=500, detail="Failed to unassign channel")
+            raise HTTPException(status_code=500, detail="Failed to delete channel assignment")
 
         return True
