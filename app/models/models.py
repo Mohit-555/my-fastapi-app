@@ -101,7 +101,7 @@ class Gateway(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     stngw_id = Column(String(8), unique=True, nullable=False, index=True)
-    imei = Column(String(20), nullable=True)
+    imei = Column(String(50), nullable=True)
     station_id = Column(Integer, ForeignKey("stations.id"), nullable=True)
     rtu_id = Column(Integer, ForeignKey("rtus.id"), nullable=True, index=True)
     # Certificate Common Name this gateway's client cert must present, when

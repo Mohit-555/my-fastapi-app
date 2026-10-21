@@ -8,7 +8,16 @@ from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel, Field
 from app.database import get_db
 from app.models.models import SlaveCard, Gateway, Station, Division, Zone, AssetParameter, User
-from app.models.schemas import SlaveCardCreate, SlaveCardUpdate, SlaveCardResponse, SlaveCardListResponse, StandardResponse
+from app.models.schemas import (
+    SlaveCardCreate,
+    SlaveCardUpdate,
+    SlaveCardResponse,
+    SlaveCardListResponse,
+    SlaveCardBulkCreateRequest,
+    SlaveCardBulkCreateResponse,
+    AvailableChannelsResponse,
+    StandardResponse,
+)
 from app.auth_utils import get_current_user
 from app.services.channel_assignment_service import ChannelAssignmentService
 
@@ -18,6 +27,7 @@ class ChannelConfigItem(BaseModel):
     channel_number: str = Field(..., max_length=10)
     para_id: Optional[str] = Field(None, max_length=8)
     asset_id: Optional[int] = None
+    asset_number_code: Optional[str] = Field(None, max_length=50)
     prloc: Optional[str] = Field(None, max_length=50)
 
 class BulkChannelsRequest(BaseModel):
@@ -95,6 +105,33 @@ def _check_gateway_ownership(gateway_id: int, user: User, db: Session, action: s
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied: User zone does not match the gateway station zone."
             )
+
+
+def _populate_card_numbers(cards: List[SlaveCard], db: Session) -> None:
+    """Populate card_no and card_number (e.g. Card 1, Card 2) sequentially per gateway."""
+    if not cards:
+        return
+    gateway_ids = {c.gateway_id for c in cards if c.gateway_id}
+    gateway_cards_map = {}
+    for gid in gateway_ids:
+        sibling_ids = [
+            cid for (cid,) in
+            db.query(SlaveCard.id)
+            .filter(SlaveCard.gateway_id == gid)
+            .order_by(SlaveCard.id.asc())
+            .all()
+        ]
+        gateway_cards_map[gid] = sibling_ids
+
+    for c in cards:
+        s_ids = gateway_cards_map.get(c.gateway_id, [])
+        if c.id in s_ids:
+            idx = s_ids.index(c.id) + 1
+            setattr(c, "card_no", idx)
+            setattr(c, "card_number", f"Card {idx}")
+        else:
+            setattr(c, "card_no", 1)
+            setattr(c, "card_number", "Card 1")
 
 
 @router.get("", response_model=StandardResponse[SlaveCardListResponse])
@@ -201,6 +238,7 @@ def list_slave_cards(
     total_pages = (total + effective_page_size - 1) // effective_page_size if total else 0
 
     rows = q_db.order_by(SlaveCard.id).offset(calc_offset).limit(effective_page_size).all()
+    _populate_card_numbers(rows, db)
 
     return {
         "status": True,
@@ -215,6 +253,70 @@ def list_slave_cards(
     }
 
 
+@router.get("/parameter-catalog", response_model=StandardResponse[List[dict]])
+def get_parameter_catalog(
+    card_type: Optional[str] = Query(None, description="Filter parameters by Card Type: Voltage, Current, Analog, DI, Digital"),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get standard parameter definitions from Annexure A, optionally filtered by card type.
+    Returns code, name, unit, and default 8-hex para_id (e.g. 00012020 for VPT 110 DC LOC N).
+    """
+    from app.services.parameter_config_service import param_config_service
+
+    norm_type = (card_type or "").strip().upper()
+    results = []
+    seen = set()
+
+    for config in param_config_service.config_cache.values():
+        p_code = config.parameter_representation_code or ""
+        p_name = config.parameter_representation_name or ""
+        p_unit = config.unit or ""
+        p_type = config.parameter_type_id or "20"
+        p_repr = config.parameter_representation_id or "00"
+        a_type = config.asset_type_id or "00"
+
+        # Filter by Card Type if specified
+        if norm_type:
+            if "VOLT" in norm_type:
+                # Voltage: parameter_type_id in ["20", "30"] or unit=="V" or code starts with "V"
+                if p_type not in ["20", "30"] and p_unit != "V" and not p_code.startswith("V"):
+                    continue
+            elif "ANALOG" in norm_type or "CURR" in norm_type:
+                # Current/Analog: parameter_type_id in ["00", "01"] or unit in ["A", "mA"] or code starts with "I"
+                if p_type not in ["00", "01"] and p_unit not in ["A", "mA"] and not p_code.startswith("I"):
+                    continue
+            elif "DI" in norm_type or "DIGITAL" in norm_type:
+                # Digital/DI: parameter_type_id == "40"
+                if p_type != "40":
+                    continue
+
+        para_id_example = f"{a_type}01{p_type}{p_repr}".upper()
+        unique_key = (p_code, para_id_example)
+        if unique_key in seen:
+            continue
+        seen.add(unique_key)
+
+        results.append({
+            "code": p_code,
+            "name": p_name,
+            "unit": p_unit,
+            "asset_type_id": a_type,
+            "parameter_type_id": p_type,
+            "parameter_representation_id": p_repr,
+            "default_para_id": para_id_example,
+            "display_label": f"{p_code} - {p_name} ({p_unit})" if p_unit else f"{p_code} - {p_name}",
+        })
+
+    results.sort(key=lambda x: x["code"])
+
+    return {
+        "status": True,
+        "message": "Success",
+        "data": results,
+    }
+
+
 @router.get("/{slave_card_id}", response_model=StandardResponse[SlaveCardResponse])
 def get_slave_card(
     slave_card_id: int,
@@ -223,6 +325,7 @@ def get_slave_card(
 ):
     """Retrieve details of a single Slave Card."""
     card = _check_slave_card_ownership(slave_card_id, current_user, db, action="read")
+    _populate_card_numbers([card], db)
     return {
         "status": True,
         "message": "Success",
@@ -243,16 +346,15 @@ def create_slave_card(
     # 2. Uppercase card address (e.g. "81" or "8A")
     card_addr = payload.card_address.strip().upper()
     
-    # 3. Check for unique constraint violation: (gateway_id, card_address, card_type)
+    # 3. Check for unique constraint violation: card_address must be unique under this gateway
     existing = db.query(SlaveCard).filter(
         SlaveCard.gateway_id == payload.gateway_id,
         SlaveCard.card_address == card_addr,
-        SlaveCard.card_type == payload.card_type,
     ).first()
     if existing:
         raise HTTPException(
             status_code=409,
-            detail=f"Slave Card with address '{card_addr}' and type '{payload.card_type}' already configured under Gateway {payload.gateway_id}"
+            detail=f"Slave Card with address '{card_addr}' already exists on Gateway #{payload.gateway_id}."
         )
         
     card = SlaveCard(
@@ -270,10 +372,115 @@ def create_slave_card(
             detail="Slave Card unique constraint violation."
         )
     db.refresh(card)
+    _populate_card_numbers([card], db)
     return {
         "status": True,
         "message": "Success",
         "data": card
+    }
+
+
+@router.post("/bulk-create", response_model=StandardResponse[SlaveCardBulkCreateResponse], status_code=status.HTTP_201_CREATED)
+def bulk_create_slave_cards(
+    payload: SlaveCardBulkCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Bulk auto-create N Slave Cards under a Master Card/Gateway.
+    Generates sequential hex card addresses (e.g. 81, 82, 83...) or accepts custom card definitions.
+    """
+    # 1. Validate Gateway exists and check user's ownership
+    gateway = _check_gateway_ownership(payload.gateway_id, current_user, db, action="write")
+
+    existing_cards = db.query(SlaveCard).filter(SlaveCard.gateway_id == payload.gateway_id).all()
+    existing_addrs = {c.card_address.strip().upper() for c in existing_cards}
+
+    cards_to_create = []
+
+    if payload.custom_cards and len(payload.custom_cards) > 0:
+        for item in payload.custom_cards:
+            addr = item.card_address.strip().upper()
+            ctype = item.card_type or payload.default_type or "Voltage"
+            if addr in existing_addrs:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Slave Card with address '{addr}' already exists for Gateway {gateway.stngw_id}."
+                )
+            existing_addrs.add(addr)
+            cards_to_create.append(SlaveCard(
+                gateway_id=payload.gateway_id,
+                card_address=addr,
+                card_type=ctype
+            ))
+    else:
+        # Determine starting hex address
+        if payload.start_address:
+            clean_start = payload.start_address.strip().upper()
+            if clean_start.startswith("0X"):
+                clean_start = clean_start[2:]
+            if clean_start in existing_addrs:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Address '{clean_start}' is already in use on Gateway '{gateway.stngw_id}'."
+                )
+            try:
+                start_val = int(clean_start, 16)
+            except ValueError:
+                start_val = 0x81
+        else:
+            # Auto-detect next available hex address
+            existing_hex = []
+            for c in existing_cards:
+                try:
+                    existing_hex.append(int(c.card_address.strip(), 16))
+                except (ValueError, TypeError):
+                    pass
+            if existing_hex:
+                start_val = max(existing_hex) + 1
+            else:
+                start_val = 0x81
+
+        created_count = 0
+        curr_val = start_val
+        default_type = payload.default_type or "Voltage"
+
+        while created_count < payload.count and curr_val <= 0xFF:
+            addr_hex = f"{curr_val:02X}"
+            if addr_hex not in existing_addrs:
+                cards_to_create.append(SlaveCard(
+                    gateway_id=payload.gateway_id,
+                    card_address=addr_hex,
+                    card_type=default_type
+                ))
+                existing_addrs.add(addr_hex)
+                created_count += 1
+            curr_val += 1
+
+    for sc in cards_to_create:
+        db.add(sc)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Slave Card unique constraint violation during bulk creation."
+        )
+
+    for sc in cards_to_create:
+        db.refresh(sc)
+    _populate_card_numbers(cards_to_create, db)
+
+    return {
+        "status": True,
+        "message": f"Successfully created {len(cards_to_create)} slave card(s)",
+        "data": {
+            "created_count": len(cards_to_create),
+            "gateway_id": payload.gateway_id,
+            "cards": cards_to_create
+        }
     }
 
 
@@ -295,22 +502,20 @@ def update_slave_card(
     if "card_address" in data:
         data["card_address"] = data["card_address"].strip().upper()
         
-    # Check uniqueness if modifying unique keys
+    # Check uniqueness if modifying card_address or gateway
     new_gw = data.get("gateway_id", card.gateway_id)
     new_addr = data.get("card_address", card.card_address)
-    new_type = data.get("card_type", card.card_type)
     
-    if new_gw != card.gateway_id or new_addr != card.card_address or new_type != card.card_type:
+    if new_gw != card.gateway_id or new_addr != card.card_address:
         existing = db.query(SlaveCard).filter(
             SlaveCard.gateway_id == new_gw,
             SlaveCard.card_address == new_addr,
-            SlaveCard.card_type == new_type,
             SlaveCard.id != slave_card_id,
         ).first()
         if existing:
             raise HTTPException(
                 status_code=409,
-                detail=f"Another Slave Card with address '{new_addr}' and type '{new_type}' exists under Gateway {new_gw}"
+                detail=f"Another Slave Card with address '{new_addr}' already exists under Gateway #{new_gw}."
             )
             
     for field, value in data.items():
@@ -325,6 +530,7 @@ def update_slave_card(
             detail="Slave Card unique constraint violation."
         )
     db.refresh(card)
+    _populate_card_numbers([card], db)
     return {
         "status": True,
         "message": "Success",
@@ -359,6 +565,26 @@ def delete_slave_card(
     }
 
 
+@router.get("/{slave_card_id}/channels", response_model=StandardResponse[AvailableChannelsResponse])
+def get_slave_card_channels(
+    slave_card_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve all configured channels and available capacity for a slave card."""
+    card = _check_slave_card_ownership(slave_card_id, current_user, db, action="read")
+    available_data = ChannelAssignmentService.get_available_channels(
+        db=db,
+        slave_card_id=card.id,
+        user=current_user,
+    )
+    return {
+        "status": True,
+        "message": "Success",
+        "data": available_data,
+    }
+
+
 @router.post("/{slave_card_id}/channels", response_model=StandardResponse[Any])
 @router.put("/{slave_card_id}/channels", response_model=StandardResponse[Any])
 def configure_slave_card_channels(
@@ -377,6 +603,25 @@ def configure_slave_card_channels(
         ch_num = ch_item.channel_number.strip().upper()
         clean_pid = ch_item.para_id.strip().upper() if ch_item.para_id and ch_item.para_id.strip() else None
 
+        # Cleanly detach any previous parameter assigned to this (card.id, ch_num)
+        old_params = db.query(AssetParameter).filter(
+            AssetParameter.slave_card_id == card.id,
+            AssetParameter.channel_number == ch_num,
+        ).all()
+        for op in old_params:
+            if not clean_pid or op.para_id != clean_pid:
+                op.slave_card_id = None
+                op.channel_number = None
+
+        target_asset_id = ch_item.asset_id
+        if ch_item.asset_number_code and ch_item.asset_number_code.strip():
+            clean_code = ch_item.asset_number_code.strip()
+            gw = card.gateway or db.query(Gateway).filter(Gateway.id == card.gateway_id).first()
+            if gw:
+                from app.services.channel_assignment_service import _get_or_create_asset_by_code
+                asset_obj = _get_or_create_asset_by_code(db, gw, clean_code)
+                target_asset_id = asset_obj.id
+
         if clean_pid:
             param = db.query(AssetParameter).filter(AssetParameter.para_id == clean_pid).first()
             if not param:
@@ -384,19 +629,19 @@ def configure_slave_card_channels(
                     para_id=clean_pid,
                     slave_card_id=card.id,
                     channel_number=ch_num,
-                    asset_id=ch_item.asset_id,
+                    asset_id=target_asset_id,
                     prloc=ch_item.prloc.strip() if ch_item.prloc else None,
-                    is_assigned=(ch_item.asset_id is not None),
+                    is_assigned=(target_asset_id is not None),
                 )
                 db.add(param)
             else:
                 param.slave_card_id = card.id
                 param.channel_number = ch_num
-                if ch_item.asset_id is not None:
-                    param.asset_id = ch_item.asset_id
+                if target_asset_id is not None:
+                    param.asset_id = target_asset_id
                     param.is_assigned = True
-                if ch_item.prloc:
-                    param.prloc = ch_item.prloc.strip()
+                if ch_item.prloc is not None:
+                    param.prloc = ch_item.prloc.strip() if ch_item.prloc else None
         else:
             # Unlink if previously assigned to this channel
             existing = db.query(AssetParameter).filter(

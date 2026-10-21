@@ -3,12 +3,12 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, distinct
 from typing import List, Optional, Any, Union
 
 from app.database import get_db
 from app.services.websocket_manager import safe_notify_dashboard
-from app.models.models import Gateway, Telemetry, Zone, Division, Station, AssetParameter, User, SlaveCard, Asset
+from app.models.models import Gateway, Telemetry, Zone, Division, Station, AssetParameter, User, SlaveCard, Asset, RTU
 from app.models.schemas import (
     GatewayDataPayload,
     TelemetryResponse,
@@ -521,10 +521,65 @@ def create_gateway(
 ):
     """
     Manually provision/register a new Station Gateway.
-    Strictly validates stngw_id (ZZ DD SS GG) and auto-resolves the station
-    hierarchy (Zone -> Division -> Station) from the database.
+    Strictly validates stngw_id (ZZ DD SS GG) or auto-derives it from (station_id, gateway_number)
+    and resolves the station hierarchy (Zone -> Division -> Station) from the database.
     """
-    stngw_id = payload.stngw_id.upper().strip()
+    raw_stngw_id = payload.stngw_id.upper().strip() if payload.stngw_id else None
+    rtu_id_val = payload.rtu_id
+
+    # If stngw_id is not directly provided, derive it from station and gateway_number
+    if not raw_stngw_id:
+        stn_id = payload.station_id
+        if not stn_id and rtu_id_val:
+            rtu_rec = db.query(RTU).filter(RTU.id == rtu_id_val).first()
+            if rtu_rec:
+                stn_id = rtu_rec.station_id
+
+        if not stn_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Either 'stngw_id' or 'station_id' (or 'rtu_id') with 'gateway_number' must be provided."
+            )
+
+        station_rec = db.query(Station).options(
+            joinedload(Station.division).joinedload(Division.zone)
+        ).filter(Station.id == stn_id).first()
+        if not station_rec or not station_rec.division or not station_rec.division.zone:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Station hierarchy (Zone/Division/Station) incomplete for station ID {stn_id}."
+            )
+
+        gw_num = payload.gateway_number
+        if gw_num is None:
+            # Auto-assign next sequence number for this station
+            existing_gws = db.query(Gateway.stngw_id).filter(Gateway.station_id == stn_id).all()
+            seqs = []
+            for (g_id,) in existing_gws:
+                if len(g_id) == 8:
+                    try:
+                        seqs.append(int(g_id[6:8], 16))
+                    except ValueError:
+                        pass
+            next_seq = (max(seqs) + 1) if seqs else 1
+            gw_hex = f"{next_seq:02X}"
+        elif isinstance(gw_num, int):
+            gw_hex = f"{gw_num:02X}"
+        else:
+            gw_str = str(gw_num).strip().upper()
+            if len(gw_str) <= 2 and all(c in "0123456789ABCDEF" for c in gw_str):
+                gw_hex = gw_str.zfill(2)
+            elif gw_str.isdigit():
+                gw_hex = f"{int(gw_str):02X}"
+            else:
+                raise HTTPException(status_code=400, detail="Invalid gateway_number format. Must be hex (01-FF) or integer.")
+
+        zz = (station_rec.division.zone.zone_id_hex or "00").zfill(2).upper()
+        dd = (station_rec.division.division_id_hex or "00").zfill(2).upper()
+        ss = (station_rec.station_id_hex or "00").zfill(2).upper()
+        stngw_id = f"{zz}{dd}{ss}{gw_hex}"
+    else:
+        stngw_id = raw_stngw_id
 
     # 1. Prevent duplicates (stngw_id is unique across Indian Railways)
     existing = db.query(Gateway).filter(Gateway.stngw_id == stngw_id).first()
@@ -559,11 +614,21 @@ def create_gateway(
             detail=f"Provided station_id {payload.station_id} conflicts with the decoded station hierarchy {resolved_station_id} for '{stngw_id}'."
         )
 
+    # Validate RTU belongs to this station if provided
+    if rtu_id_val:
+        rtu_check = db.query(RTU).filter(RTU.id == rtu_id_val).first()
+        if rtu_check and rtu_check.station_id != resolved_station_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"RTU #{rtu_id_val} does not belong to the resolved station #{resolved_station_id}."
+            )
+
     # 4. Create Gateway row
     gateway = Gateway(
         stngw_id=stngw_id,
         imei=imei_val,
         station_id=resolved_station_id,
+        rtu_id=rtu_id_val,
         mtls_cn=payload.mtls_cn.strip() if payload.mtls_cn else None,
     )
     db.add(gateway)
@@ -597,14 +662,17 @@ def link_gateway_station(
         raise HTTPException(status_code=404, detail=f"Gateway '{clean_stngw_id}' not found")
 
     hierarchy = _decode_and_resolve_hierarchy(clean_stngw_id, db)
-    if not hierarchy["can_register"] or not hierarchy["resolved_station_id"]:
+    if hierarchy["can_register"] and hierarchy["resolved_station_id"]:
+        resolved_station_id = hierarchy["resolved_station_id"]
+    elif gateway.station_id is not None:
+        resolved_station_id = (payload and payload.station_id) or gateway.station_id
+    else:
         raise HTTPException(
             status_code=422,
             detail=f"Could not resolve station for '{clean_stngw_id}': {hierarchy['error']}"
         )
 
-    resolved_station_id = hierarchy["resolved_station_id"]
-    if payload and payload.station_id and payload.station_id != resolved_station_id:
+    if payload and payload.station_id and hierarchy.get("can_register") and resolved_station_id and payload.station_id != resolved_station_id:
         raise HTTPException(
             status_code=400,
             detail=f"Cannot link gateway '{clean_stngw_id}' to station ID {payload.station_id}. It is encoded to station ID {resolved_station_id} ({hierarchy['station']['name']})."
@@ -653,18 +721,32 @@ def update_gateway(
     if not gateway:
         raise HTTPException(status_code=404, detail=f"Gateway '{clean_stngw_id}' not found")
 
-    hierarchy = _decode_and_resolve_hierarchy(clean_stngw_id, db)
-    if not hierarchy["can_register"] or not hierarchy["resolved_station_id"]:
+    target_stngw_id = payload.stngw_id.upper().strip() if payload.stngw_id else clean_stngw_id
+
+    # If updating stngw_id to a new value, verify uniqueness
+    if target_stngw_id != gateway.stngw_id:
+        existing_gw = db.query(Gateway).filter(Gateway.stngw_id == target_stngw_id).first()
+        if existing_gw:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Gateway with ID '{target_stngw_id}' already exists."
+            )
+
+    hierarchy = _decode_and_resolve_hierarchy(target_stngw_id, db)
+    if hierarchy["can_register"] and hierarchy["resolved_station_id"]:
+        resolved_station_id = hierarchy["resolved_station_id"]
+    elif gateway.station_id is not None:
+        resolved_station_id = payload.station_id or gateway.station_id
+    else:
         raise HTTPException(
             status_code=422,
-            detail=f"Could not resolve station for '{clean_stngw_id}': {hierarchy['error']}"
+            detail=f"Could not resolve station for '{target_stngw_id}': {hierarchy['error']}"
         )
 
-    resolved_station_id = hierarchy["resolved_station_id"]
-    if payload.station_id and payload.station_id != resolved_station_id:
+    if payload.station_id and hierarchy.get("can_register") and resolved_station_id and payload.station_id != resolved_station_id:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot link gateway '{clean_stngw_id}' to station ID {payload.station_id}. It is encoded to station ID {resolved_station_id} ({hierarchy['station']['name']})."
+            detail=f"Cannot link gateway '{target_stngw_id}' to station ID {payload.station_id}. It is encoded to station ID {resolved_station_id} ({hierarchy['station']['name']})."
         )
 
     if payload.imei is not None:
@@ -672,7 +754,7 @@ def update_gateway(
         if new_imei:
             existing_imei = db.query(Gateway).filter(
                 Gateway.imei == new_imei,
-                Gateway.stngw_id != clean_stngw_id
+                Gateway.stngw_id != gateway.stngw_id
             ).first()
             if existing_imei:
                 raise HTTPException(
@@ -683,8 +765,15 @@ def update_gateway(
         else:
             gateway.imei = None
 
+    # Update stngw_id if changed (cascades to assets via foreign key ON UPDATE CASCADE)
+    if target_stngw_id != gateway.stngw_id:
+        gateway.stngw_id = target_stngw_id
+
     if payload.station_id or gateway.station_id is None:
         gateway.station_id = resolved_station_id
+
+    if payload.rtu_id is not None:
+        gateway.rtu_id = payload.rtu_id if payload.rtu_id > 0 else None
 
     db.commit()
     db.refresh(gateway)
@@ -699,11 +788,13 @@ def update_gateway(
 @router.delete("/{stngw_id}", response_model=StandardResponse[Optional[dict]])
 def delete_gateway(
     stngw_id: str,
+    force: bool = Query(False, description="Force delete gateway and remove associated dependencies"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Safely delete a registered gateway if it has no dependent slave cards, assets, or telemetry.
+    If force=True, cascade-deletes or unlinks associated dependencies before deleting.
     """
     clean_stngw_id = stngw_id.upper().strip()
     gateway = _check_stngw_id_access(clean_stngw_id, current_user, db, action="write")
@@ -727,11 +818,28 @@ def delete_gateway(
     if telemetry_count > 0:
         reasons.append(f"{telemetry_count} telemetry record(s)")
 
-    if reasons:
+    if reasons and not force:
         raise HTTPException(
             status_code=400,
             detail=f"Cannot delete gateway '{clean_stngw_id}': It has associated {', '.join(reasons)}. Please remove these dependencies before deleting the gateway."
         )
+
+    if force:
+        from app.models.models import AlertEvent, MaintenanceMode
+        dep_assets = db.query(Asset).filter(Asset.station_gateway_id == gateway.stngw_id).all()
+        for ast in dep_assets:
+            db.query(AlertEvent).filter(AlertEvent.asset_id == ast.id).update({"asset_id": None}, synchronize_session=False)
+            db.query(MaintenanceMode).filter(MaintenanceMode.asset_id == ast.id).update({"asset_id": None}, synchronize_session=False)
+            db.query(AssetParameter).filter(AssetParameter.asset_id == ast.id).delete(synchronize_session=False)
+            db.delete(ast)
+
+        dep_slave_cards = db.query(SlaveCard).filter(SlaveCard.gateway_id == gateway.id).all()
+        for sc in dep_slave_cards:
+            db.query(AssetParameter).filter(AssetParameter.slave_card_id == sc.id).delete(synchronize_session=False)
+            db.delete(sc)
+
+        db.query(Telemetry).filter(Telemetry.gateway_id == gateway.id).delete(synchronize_session=False)
+        db.flush()
 
     db.delete(gateway)
     db.commit()
@@ -748,9 +856,11 @@ def list_gateways(
     zone_id: Optional[int] = Query(None, description="Filter by Zone ID"),
     division_id: Optional[int] = Query(None, description="Filter by Division ID"),
     station_id: Optional[int] = Query(None, description="Filter by Station ID"),
+    rtu_id: Optional[int] = Query(None, description="Filter by RTU ID"),
     zone: Optional[str] = Query(None, description="Filter by Zone Code or Name"),
     division: Optional[str] = Query(None, description="Filter by Division Code or Name"),
     station: Optional[str] = Query(None, description="Filter by Station Code or Name"),
+    rtu: Optional[str] = Query(None, description="Filter by RTU Name"),
     stngw_id: Optional[str] = Query(None, description="Filter by Gateway ID (stngw_id)"),
     status: Optional[str] = Query(None, description="Filter by status: Linked / Unlinked"),
     search: Optional[str] = Query(None, description="Search across Gateway ID, IMEI, or Station Code"),
@@ -760,9 +870,13 @@ def list_gateways(
     current_user: User = Depends(get_current_user),
 ):
     """List all registered gateways with comprehensive filtering and pagination."""
+    cur_page = int(page) if isinstance(page, int) or (isinstance(page, str) and page.isdigit()) else 1
+    cur_page_size = int(page_size) if isinstance(page_size, int) or (isinstance(page_size, str) and page_size.isdigit()) else 50
+
     q = db.query(Gateway).options(
         joinedload(Gateway.station).joinedload(Station.division).joinedload(Division.zone),
-        joinedload(Gateway.slave_cards)
+        joinedload(Gateway.slave_cards),
+        joinedload(Gateway.rtu)
     )
 
     joined_station = False
@@ -798,44 +912,52 @@ def list_gateways(
         q = q.filter(Division.zone_id == current_user.zone_id)
 
     # Filter by IDs
-    if station_id is not None and station_id != 0:
+    if isinstance(station_id, int) and station_id != 0:
         q = q.filter(Gateway.station_id == station_id)
 
-    if division_id is not None and division_id != 0:
+    if isinstance(division_id, int) and division_id != 0:
         join_station()
         q = q.filter(Station.division_id == division_id)
 
-    if zone_id is not None and zone_id != 0:
+    if isinstance(zone_id, int) and zone_id != 0:
         join_division()
         q = q.filter(Division.zone_id == zone_id)
 
+    if isinstance(rtu_id, int) and rtu_id != 0:
+        q = q.filter(Gateway.rtu_id == rtu_id)
+
+    if isinstance(rtu, str) and rtu.strip() and rtu.strip().upper() != "ALL":
+        q = q.join(RTU, Gateway.rtu_id == RTU.id)
+        rtu_term = rtu.strip().upper()
+        q = q.filter(or_(func.upper(RTU.rtu_name) == rtu_term, func.upper(RTU.rtu_code) == rtu_term))
+
     # Filter by codes / names
-    if station and station.strip() and station.strip().upper() != "ALL":
+    if isinstance(station, str) and station.strip() and station.strip().upper() != "ALL":
         join_station()
         stn_term = station.strip().upper()
         q = q.filter(or_(func.upper(Station.station_code) == stn_term, func.upper(Station.station_name) == stn_term))
 
-    if division and division.strip() and division.strip().upper() != "ALL":
+    if isinstance(division, str) and division.strip() and division.strip().upper() != "ALL":
         join_division()
         div_term = division.strip().upper()
         q = q.filter(or_(func.upper(Division.division_code) == div_term, func.upper(Division.division_name) == div_term))
 
-    if zone and zone.strip() and zone.strip().upper() != "ALL":
+    if isinstance(zone, str) and zone.strip() and zone.strip().upper() != "ALL":
         join_zone()
         zn_term = zone.strip().upper()
         q = q.filter(or_(func.upper(Zone.zone_code) == zn_term, func.upper(Zone.zone_name) == zn_term))
 
-    if stngw_id and stngw_id.strip() and stngw_id.strip().upper() != "ALL":
+    if isinstance(stngw_id, str) and stngw_id.strip() and stngw_id.strip().upper() != "ALL":
         q = q.filter(Gateway.stngw_id.ilike(f"%{stngw_id.strip()}%"))
 
-    if status and status.strip() and status.strip().upper() != "ALL":
+    if isinstance(status, str) and status.strip() and status.strip().upper() != "ALL":
         st_val = status.strip().lower()
         if st_val == "linked":
             q = q.filter(Gateway.station_id.isnot(None))
         elif st_val == "unlinked":
             q = q.filter(Gateway.station_id.is_(None))
 
-    if search and search.strip():
+    if isinstance(search, str) and search.strip():
         join_station()
         term = f"%{search.strip()}%"
         q = q.filter(or_(
@@ -846,17 +968,28 @@ def list_gateways(
         ))
 
     total = q.count()
-    total_pages = (total + page_size - 1) // page_size if total else 0
-    offset = (page - 1) * page_size
-    rows = q.order_by(Gateway.stngw_id).offset(offset).limit(page_size).all()
+    total_pages = (total + cur_page_size - 1) // cur_page_size if total else 0
+    offset = (cur_page - 1) * cur_page_size
+    rows = q.order_by(Gateway.stngw_id).offset(offset).limit(cur_page_size).all()
     
+    row_ids = [r.id for r in rows if r.id is not None]
+    active_gw_ids = set()
+    if row_ids:
+        active_gw_ids = set(
+            x[0] for x in db.query(distinct(Telemetry.gateway_id))
+            .filter(Telemetry.gateway_id.in_(row_ids))
+            .all()
+        )
+    for r in rows:
+        r.has_telemetry = r.id in active_gw_ids
+
     return {
         "status": True,
         "message": "Success",
         "data": {
             "total": total,
-            "page": page,
-            "page_size": page_size,
+            "page": cur_page,
+            "page_size": cur_page_size,
             "total_pages": total_pages,
             "rows": rows
         }

@@ -117,17 +117,17 @@ def get_channel_index(ch: str) -> int:
 
 
 def get_card_channel_count(card_type: Optional[str]) -> int:
-    """Determine hardware channel capacity based on card type."""
+    """Determine hardware channel capacity based on card type as per specification sheet."""
     if not card_type:
-        return 12
+        return 8
     ct = card_type.strip().upper()
-    if "DI" in ct or "DIGITAL" in ct:
-        return 16
-    if "VOLT" in ct:
-        return 12
     if "ANALOG" in ct or "CURRENT" in ct:
         return 12
-    return 12
+    if "VOLT" in ct:
+        return 8
+    if "DI" in ct or "DIGITAL" in ct:
+        return 8
+    return 8
 
 
 def check_assignment_access(

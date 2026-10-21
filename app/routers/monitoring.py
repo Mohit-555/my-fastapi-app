@@ -377,14 +377,14 @@ async def get_faulty_by_station(
 
         all_rows.append(
             FaultyByStationItem(
-                station_code=station_code,
-                asset_code=a_no,
+                station_code=str(station_code or "UNKNOWN"),
+                asset_code=str(a_no or ""),
                 asset_type=asset_type_name,
                 sensor_faulty=sensor_faulty,
                 iot_faulty=iot_faulty,
                 net_faulty=net_faulty,
                 gw_faulty=gw_faulty,
-                rtu=rtu_val,
+                rtu=str(rtu_val) if rtu_val is not None else None,
                 division=div_code,
             )
         )

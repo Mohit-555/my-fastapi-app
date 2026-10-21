@@ -58,6 +58,31 @@ def _build_rtu_response(rtu: RTU, db: Session) -> RTUResponse:
             )
         )
 
+    # Calculate operational status based on cards and telemetry
+    last_seen_dt = None
+    if not rtu.is_active:
+        rtu_status = "Inactive"
+    elif len(mc_responses) == 0:
+        rtu_status = "Unconfigured"
+    else:
+        # Check latest telemetry received for any master card under this RTU
+        last_seen_dt = (
+            db.query(func.max(Telemetry.received_at))
+            .filter(Telemetry.gateway_id.in_(mc_ids))
+            .scalar()
+        ) if mc_ids else None
+
+        if last_seen_dt:
+            now_utc = datetime.now(UTC)
+            if last_seen_dt.tzinfo is None:
+                last_seen_dt = last_seen_dt.replace(tzinfo=UTC)
+            if (now_utc - last_seen_dt).total_seconds() <= 15 * 60:
+                rtu_status = "Active"
+            else:
+                rtu_status = "Offline"
+        else:
+            rtu_status = "Offline"
+
     return RTUResponse(
         id=rtu.id,
         rtu_name=rtu.rtu_name,
@@ -67,6 +92,8 @@ def _build_rtu_response(rtu: RTU, db: Session) -> RTUResponse:
         latitude=rtu.latitude,
         longitude=rtu.longitude,
         is_active=rtu.is_active,
+        status=rtu_status,
+        last_seen=last_seen_dt,
         station_id=rtu.station_id,
         station_code=stn.station_code if stn else None,
         station_name=stn.station_name if stn else None,
@@ -188,7 +215,7 @@ def list_rtus(
     if station:
         query = query.filter(or_(Station.station_code.ilike(f"%{station}%"), Station.station_name.ilike(f"%{station}%")))
 
-    if status:
+    if status and isinstance(status, str):
         if status.lower() == "active":
             query = query.filter(RTU.is_active.is_(True))
         elif status.lower() == "inactive":
@@ -647,24 +674,12 @@ def delete_rtu(
     if not rtu:
         raise HTTPException(status_code=404, detail=f"RTU with ID {rtu_id} not found.")
 
-    # Guard: check if any master card has slave cards or telemetry
-    for mc in rtu.master_cards:
-        has_slaves = db.query(SlaveCard).filter(SlaveCard.gateway_id == mc.id).first()
-        if has_slaves:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cannot delete RTU: Master Card '{mc.stngw_id}' has configured Slave Cards. Remove them first.",
-            )
-        has_telemetry = db.query(Telemetry).filter(Telemetry.gateway_id == mc.id).first()
-        if has_telemetry:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cannot delete RTU: Master Card '{mc.stngw_id}' has historical telemetry data.",
-            )
-
-    # Safe to delete RTU and unlink master cards
-    for mc in rtu.master_cards:
-        db.delete(mc)
+    # Guard: RTU can only be deleted if empty (0 Master Cards)
+    if rtu.master_cards and len(rtu.master_cards) > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete RTU '{rtu.rtu_name}': It has {len(rtu.master_cards)} assigned Master Card(s). Remove or reassign them before deleting the RTU.",
+        )
 
     rtu_name = rtu.rtu_name
     db.delete(rtu)

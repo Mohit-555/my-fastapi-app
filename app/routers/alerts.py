@@ -15,7 +15,7 @@ from app.services.websocket_manager import websocket_manager, safe_notify_dashbo
 
 from app.constants import ASSET_TYPE_DISPLAY_GROUPS, ASSET_TYPE_MAP, PARAMETER_TYPE_MAP
 from app.database import get_db
-from app.models.models import AlertEvent, Asset, AssetParameter, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster, AssetInventory, MaintenanceMode, Role, SlaveCard, Gateway, User
+from app.models.models import AlertEvent, Asset, AssetParameter, Division, Station, Zone, AssetTypeMaster, AlertCauseMaster, AssetInventory, MaintenanceMode, Role, SlaveCard, Gateway, User, RTU
 from app.auth_utils import get_current_user
 from app.models.schemas import (
     AlertEventCreate,
@@ -1360,6 +1360,29 @@ def get_alert_filters(db: Session = Depends(get_db)):
             zone_name=z.zone_name if z else None,
         ))
 
+    rtus_db = db.query(RTU).order_by(RTU.rtu_name).all()
+    rtus_list = []
+    for r in rtus_db:
+        s = stations_by_id.get(r.station_id) if r.station_id else None
+        d = divisions_by_id.get(s.division_id) if s else None
+        z = zones_by_id.get(d.zone_id) if d else None
+        rtus_list.append(DropdownOption(
+            id=r.id,
+            label=r.rtu_name,
+            code=r.rtu_code or r.rtu_name,
+            hex_id=r.rtu_code or r.rtu_name,
+            value=r.rtu_name,
+            station_id=r.station_id,
+            station_code=s.station_code if s else None,
+            station_name=s.station_name if s else None,
+            division_id=s.division_id if s else None,
+            division_code=d.division_code if d else None,
+            division_name=d.division_name if d else None,
+            zone_id=d.zone_id if d else None,
+            zone_code=z.zone_code if z else None,
+            zone_name=z.zone_name if z else None,
+        ))
+
     # ── Slave Cards ──────────────────────────────────────────────────────────
     slave_cards_db = (
         db.query(SlaveCard)
@@ -1441,6 +1464,7 @@ def get_alert_filters(db: Session = Depends(get_db)):
         roles=roles_list,
         card_types=card_types_list,
         gateways=gateways_list,
+        rtus=rtus_list,
         slave_cards=slave_cards_list,
         channel_assignments=channel_assignments_list,
     )

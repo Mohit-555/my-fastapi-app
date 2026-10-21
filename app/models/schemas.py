@@ -275,15 +275,21 @@ class StationResponse(BaseModel):
 # ─── Gateway ──────────────────────────────────────────────────────────────────
 
 class GatewayCreate(BaseModel):
-    stngw_id: str = Field(..., description="4-Byte hexadecimal station gateway ID (8 characters e.g. 01011200)")
-    imei: Optional[str] = Field(None, max_length=20, description="Modem IMEI string (optional)")
+    stngw_id: Optional[str] = Field(None, description="4-Byte hexadecimal station gateway ID (8 characters e.g. 01011200)")
+    gateway_number: Optional[Union[str, int]] = Field(None, description="Gateway sequence number in hex (e.g. '01', '02') or int (1..255)")
+    rtu_id: Optional[int] = Field(None, description="RTU ID this gateway belongs to (optional)")
+    imei: Optional[str] = Field(None, max_length=50, description="Modem IMEI or RFID string (optional)")
     station_id: Optional[int] = Field(None, description="Station ID this gateway belongs to (optional)")
     mtls_cn: Optional[str] = Field(None, max_length=200, description="mTLS certificate Common Name (optional)")
 
     @field_validator("stngw_id")
     @classmethod
-    def validate_stngw_id(cls, v: str) -> str:
+    def validate_stngw_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
         cleaned = v.strip().upper()
+        if not cleaned:
+            return None
         if len(cleaned) != 8 or not all(c in "0123456789ABCDEF" for c in cleaned):
             raise ValueError("Gateway ID must be exactly 8 hexadecimal characters (0-9, A-F)")
         return cleaned
@@ -296,8 +302,8 @@ class GatewayCreate(BaseModel):
         cleaned = v.strip()
         if not cleaned:
             return None
-        if not (10 <= len(cleaned) <= 20 and cleaned.isdigit()):
-            raise ValueError("IMEI must be a valid numeric string between 10 and 20 digits")
+        if not (6 <= len(cleaned) <= 50):
+            raise ValueError("IMEI / RFID must be between 6 and 50 characters")
         return cleaned
 
 
@@ -336,14 +342,29 @@ class LinkStationRequest(BaseModel):
         cleaned = v.strip()
         if not cleaned:
             return None
-        if not (10 <= len(cleaned) <= 20 and cleaned.isdigit()):
-            raise ValueError("IMEI must be a valid numeric string between 10 and 20 digits")
+        if not (6 <= len(cleaned) <= 50):
+            raise ValueError("IMEI / RFID must be between 6 and 50 characters")
         return cleaned
 
 
 class GatewayUpdate(BaseModel):
+    stngw_id: Optional[str] = None
+    gateway_number: Optional[Union[str, int]] = None
     imei: Optional[str] = None
     station_id: Optional[int] = None
+    rtu_id: Optional[int] = None
+
+    @field_validator("stngw_id")
+    @classmethod
+    def validate_stngw_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip().upper()
+        if not cleaned:
+            return None
+        if len(cleaned) != 8 or not all(c in "0123456789ABCDEF" for c in cleaned):
+            raise ValueError("Gateway ID must be exactly 8 hexadecimal characters (0-9, A-F)")
+        return cleaned
 
     @field_validator("imei")
     @classmethod
@@ -353,8 +374,8 @@ class GatewayUpdate(BaseModel):
         cleaned = v.strip()
         if not cleaned:
             return None
-        if not (10 <= len(cleaned) <= 20 and cleaned.isdigit()):
-            raise ValueError("IMEI must be a valid numeric string between 10 and 20 digits")
+        if not (6 <= len(cleaned) <= 50):
+            raise ValueError("IMEI / RFID must be between 6 and 50 characters")
         return cleaned
 
 
@@ -379,6 +400,7 @@ class GatewayResponse(BaseModel):
     gateway_number_hex: Optional[str] = None
     status: Optional[str] = None
     rtu_id: Optional[int] = None
+    rtu_name: Optional[str] = None
     slave_card_count: Optional[int] = 0
 
     @model_validator(mode="before")
@@ -402,7 +424,18 @@ class GatewayResponse(BaseModel):
             z_code = getattr(zn, "zone_code", None) if zn else None
             z_name = getattr(zn, "zone_name", None) if zn else None
             z_hex = getattr(zn, "zone_id_hex", None) if zn else None
-            status_val = "Linked" if st_id is not None else "Unlinked"
+            has_telem = getattr(data, "has_telemetry", False)
+            if not has_telem:
+                telem_rel = getattr(data, "telemetry", None)
+                if telem_rel:
+                    has_telem = len(telem_rel) > 0
+
+            if st_id is None:
+                status_val = "Unlinked"
+            elif has_telem:
+                status_val = "Active"
+            else:
+                status_val = "Pending"
 
             gw_id_str = getattr(data, "stngw_id", "") or ""
             gw_num = None
@@ -414,12 +447,16 @@ class GatewayResponse(BaseModel):
                 except ValueError:
                     pass
 
+            rtu_obj = getattr(data, "rtu", None)
+            r_name = getattr(rtu_obj, "rtu_name", None) if rtu_obj else None
+
             return {
                 "id": int(data.id) if data.id is not None else 0,
                 "stngw_id": data.stngw_id,
                 "imei": data.imei,
                 "station_id": int(st_id) if st_id is not None else None,
                 "rtu_id": int(r_id) if r_id is not None else None,
+                "rtu_name": r_name,
                 "created_at": data.created_at,
                 "station_code": st_code,
                 "station_name": st_name,
@@ -439,8 +476,14 @@ class GatewayResponse(BaseModel):
             }
         else:
             st_id = data.get("station_id")
-            if "status" not in data:
-                data["status"] = "Linked" if st_id is not None else "Unlinked"
+            if "status" not in data or not data["status"]:
+                has_telem = data.get("has_telemetry", False)
+                if st_id is None:
+                    data["status"] = "Unlinked"
+                elif has_telem:
+                    data["status"] = "Active"
+                else:
+                    data["status"] = "Pending"
             if "slave_card_count" not in data:
                 data["slave_card_count"] = len(data.get("slave_cards", [])) if data.get("slave_cards") is not None else 0
             gw_id_str = data.get("stngw_id", "") or ""
@@ -487,8 +530,8 @@ class RTUMasterCardCreate(BaseModel):
         cleaned = v.strip()
         if not cleaned:
             return None
-        if not (10 <= len(cleaned) <= 20 and cleaned.isdigit()):
-            raise ValueError("IMEI must be a valid numeric string between 10 and 20 digits")
+        if not (3 <= len(cleaned) <= 20):
+            raise ValueError("IMEI must be between 3 and 20 characters")
         return cleaned
 
 
@@ -557,8 +600,8 @@ class RTUAddMasterCard(BaseModel):
         cleaned = v.strip()
         if not cleaned:
             return None
-        if not (10 <= len(cleaned) <= 20 and cleaned.isdigit()):
-            raise ValueError("IMEI must be a valid numeric string between 10 and 20 digits")
+        if not (3 <= len(cleaned) <= 20):
+            raise ValueError("IMEI must be between 3 and 20 characters")
         return cleaned
 
 
@@ -581,6 +624,8 @@ class RTUResponse(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     is_active: bool
+    status: Optional[str] = "Unconfigured"
+    last_seen: Optional[datetime] = None
     station_id: int
     station_code: Optional[str] = None
     station_name: Optional[str] = None
@@ -1286,6 +1331,7 @@ class AlertFiltersResponse(BaseModel):
     roles: List[AlertFilterOption] = []
     card_types: List[AlertFilterOption] = []
     gateways: List[DropdownOption] = []
+    rtus: List[DropdownOption] = []
     slave_cards: List[SlaveCardFilterOption] = []
     channel_assignments: List[ChannelFilterOption] = []
 
@@ -1917,6 +1963,11 @@ class SlaveCardResponse(SlaveCardBase):
     station_name: Optional[str] = None
     stationName: Optional[str] = None
 
+    card_no: Optional[int] = None
+    cardNo: Optional[int] = None
+    card_number: Optional[str] = None
+    cardNumber: Optional[str] = None
+
     @model_validator(mode="after")
     def populate_aliases(self) -> "SlaveCardResponse":
         self.gatewayId = self.gateway_id
@@ -1925,6 +1976,8 @@ class SlaveCardResponse(SlaveCardBase):
         self.stngwId = self.stngw_id
         self.stationId = self.station_id
         self.stationName = self.station_name
+        self.cardNo = self.card_no
+        self.cardNumber = self.card_number
         if not self.updated_at:
             self.updated_at = self.created_at
         return self
@@ -1939,6 +1992,37 @@ class SlaveCardListResponse(BaseModel):
     page_size: int
     total_pages: int
     rows: List[SlaveCardResponse]
+
+
+class SlaveCardBulkItem(BaseModel):
+    card_address: str = Field(..., pattern=r"^[0-9A-Fa-f]{1,2}$", validation_alias=AliasChoices('card_address', 'cardAddress'))
+    card_type: Optional[str] = Field("Voltage", max_length=20, validation_alias=AliasChoices('card_type', 'cardType'))
+
+    @field_validator("card_address", mode="before")
+    @classmethod
+    def normalize_card_address(cls, v: Any) -> str:
+        if v is None:
+            return v
+        if isinstance(v, int):
+            v = str(v)
+        v_str = str(v).strip().upper()
+        if v_str.startswith("0X"):
+            v_str = v_str[2:]
+        return v_str
+
+
+class SlaveCardBulkCreateRequest(BaseModel):
+    gateway_id: int = Field(..., validation_alias=AliasChoices('gateway_id', 'gatewayId'))
+    count: int = Field(..., ge=1, le=64)
+    start_address: Optional[str] = Field(None, validation_alias=AliasChoices('start_address', 'startAddress'))
+    default_type: Optional[str] = Field("Voltage", max_length=20, validation_alias=AliasChoices('default_type', 'defaultType'))
+    custom_cards: Optional[List[SlaveCardBulkItem]] = Field(None, validation_alias=AliasChoices('custom_cards', 'customCards'))
+
+
+class SlaveCardBulkCreateResponse(BaseModel):
+    created_count: int
+    gateway_id: int
+    cards: List[SlaveCardResponse]
 
 
 class SystemHealthItem(BaseModel):
