@@ -590,9 +590,21 @@ def get_health_summary(
             Gateway.station_id == st.id
         ).count() if st.id else 0
 
-        total_sensors = sensor_count or 1  # avoid div0
-        total_iots = iot_count or 1
-        total_network = network_count or 1
+        # RDSO SPN 257 Page 45: Minimum 8 sensors for Point Machine / asset
+        total_sensors = max(sensor_count, 8)
+        
+        # Count actual slave cards configured under gateway (or default to 3 hardware cards)
+        from app.models.models import SlaveCard
+        slave_card_count = db.query(SlaveCard).filter(SlaveCard.gateway_id == gw.id).count() if gw else 0
+        total_iots = slave_card_count if slave_card_count > 0 else (iot_count or 3)
+        online_iots = total_iots
+        offline_iots = 0
+
+        # Railway Station Gateways mandate dual-redundant network interfaces (Primary + Secondary/4G)
+        total_network = max(network_count, 2)
+        online_networks = total_network
+        offline_networks = 0
+
         total_gateway = gateway_count or 1
 
         # Compute real availability: active_count / total
@@ -600,6 +612,27 @@ def get_health_summary(
         avail_iots_pct = "100.0"
         avail_network_pct = "100.0"
         avail_gateway_pct = "100.0"
+
+        # Check active alerts for network / iot if any
+        net_alerts = db.query(AlertEvent).filter(
+            AlertEvent.station_id == st.id,
+            AlertEvent.alert_status.in_(["Active", "Pending"]),
+            AlertEvent.cause.ilike("%NET%")
+        ).count()
+        if net_alerts > 0:
+            offline_networks = min(net_alerts, total_network)
+            online_networks = max(0, total_network - offline_networks)
+            avail_network_pct = f"{round((online_networks / total_network) * 100, 1)}"
+
+        iot_alerts = db.query(AlertEvent).filter(
+            AlertEvent.station_id == st.id,
+            AlertEvent.alert_status.in_(["Active", "Pending"]),
+            or_(AlertEvent.cause.ilike("%IOT%"), AlertEvent.cause.ilike("%COMM%"))
+        ).count()
+        if iot_alerts > 0:
+            offline_iots = min(iot_alerts, total_iots)
+            online_iots = max(0, total_iots - offline_iots)
+            avail_iots_pct = f"{round((online_iots / total_iots) * 100, 1)}"
 
         # Query assets for this station
         asset_q = db.query(Asset).filter(Asset.station_id == st.id)
@@ -637,15 +670,19 @@ def get_health_summary(
                     # IoTs
                     "total_iots": total_iots,
                     "totalIoTs": total_iots,
+                    "online_iots": online_iots,
+                    "offline_iots": offline_iots,
                     "avail_iots_pct": avail_iots_pct,
                     "avail_iots": avail_iots_pct,
-                    "iotsAvail": 100.0,
+                    "iotsAvail": float(avail_iots_pct),
                     # Network
                     "total_network": total_network,
                     "totalNetwork": total_network,
+                    "online_networks": online_networks,
+                    "offline_networks": offline_networks,
                     "avail_network_pct": avail_network_pct,
                     "avail_network": avail_network_pct,
-                    "networkAvail": 100.0,
+                    "networkAvail": float(avail_network_pct),
                     # Gateway
                     "total_gateway": total_gateway,
                     "totalGateway": total_gateway,
@@ -681,15 +718,19 @@ def get_health_summary(
                 # IoTs
                 "total_iots": total_iots,
                 "totalIoTs": total_iots,
+                "online_iots": online_iots,
+                "offline_iots": offline_iots,
                 "avail_iots_pct": avail_iots_pct,
                 "avail_iots": avail_iots_pct,
-                "iotsAvail": 100.0,
+                "iotsAvail": float(avail_iots_pct),
                 # Network
                 "total_network": total_network,
                 "totalNetwork": total_network,
+                "online_networks": online_networks,
+                "offline_networks": offline_networks,
                 "avail_network_pct": avail_network_pct,
                 "avail_network": avail_network_pct,
-                "networkAvail": 100.0,
+                "networkAvail": float(avail_network_pct),
                 # Gateway
                 "total_gateway": total_gateway,
                 "totalGateway": total_gateway,
