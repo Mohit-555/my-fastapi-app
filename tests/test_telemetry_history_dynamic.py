@@ -315,3 +315,75 @@ def test_telemetry_history_csv_header_format_compliance(client, setup_test_data)
     assert "NWKR Digital Status [NWKR] (status)" not in header_line
 
 
+def test_telemetry_history_and_summary_accept_location_ids(client, setup_test_data):
+    """
+    Verify /telemetry/history, /telemetry/history/download, /telemetry/summary, and
+    /telemetry/summary/download accept zone_id and division_id interchangeably with codes.
+    """
+    res_hist_id = client.get("/telemetry/history", params={
+        "zone_id": 1,
+        "division_id": 1,
+        "asset_type": "Point Machine",
+    })
+    res_hist_code = client.get("/telemetry/history", params={
+        "zone_code": "NR",
+        "division_code": "DLI",
+        "asset_type": "Point Machine",
+    })
+    assert res_hist_id.status_code == 200
+    assert res_hist_code.status_code == 200
+    assert res_hist_id.json()["data"]["total"] == res_hist_code.json()["data"]["total"] > 0
+    assert res_hist_id.json()["data"]["Zone"] == "NR"
+    assert res_hist_id.json()["data"]["Division"] == "DLI"
+
+    # History with non-existent division_id returns empty rows
+    res_hist_empty = client.get("/telemetry/history", params={
+        "zone_id": 1,
+        "division_id": 9999,
+        "asset_type": "Point Machine",
+    })
+    assert res_hist_empty.status_code == 200
+    assert res_hist_empty.json()["data"]["total"] == 0
+    assert res_hist_empty.json()["data"]["rows"] == []
+
+    # History CSV download by IDs matches code-based CSV download
+    res_hist_dl = client.get("/telemetry/history/download", params={
+        "zone_id": 1,
+        "division_id": 1,
+        "asset_type": "Point Machine",
+    })
+    res_hist_dl_code = client.get("/telemetry/history/download", params={
+        "zone_code": "NR",
+        "division_code": "DLI",
+        "asset_type": "Point Machine",
+    })
+    assert res_hist_dl.status_code == 200
+    assert res_hist_dl_code.status_code == 200
+    assert res_hist_dl.text == res_hist_dl_code.text
+    assert "2.45" in res_hist_dl.text
+
+    # Summary by IDs vs codes
+    res_sum_id = client.get("/telemetry/summary", params={
+        "zone_id": 1,
+        "division_id": 1,
+        "asset_type": "DC Track Circuit",
+    })
+    res_sum_code = client.get("/telemetry/summary", params={
+        "zone_code": "NR",
+        "division_code": "DLI",
+        "asset_type": "DC Track Circuit",
+    })
+    assert res_sum_id.status_code == 200
+    assert res_sum_code.status_code == 200
+    assert res_sum_id.json()["data"]["total"] == res_sum_code.json()["data"]["total"] > 0
+
+    # Summary CSV download by IDs
+    res_sum_dl = client.get("/telemetry/summary/download", params={
+        "zone_id": 1,
+        "division_id": 1,
+        "asset_type": "DC Track Circuit",
+    })
+    assert res_sum_dl.status_code == 200
+    assert "VTC TFC O/P" in res_sum_dl.text
+
+

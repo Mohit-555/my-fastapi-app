@@ -218,3 +218,32 @@ def test_telemetry_live_main_signal_parameters():
     assert data["status"] is True
     codes = [r["parameter_code"] for r in data["data"]["rows"]]
     assert any("VSIG" in c for c in codes)
+
+
+def test_telemetry_live_filter_by_zone_and_division_ids():
+    """
+    Verify /telemetry/live accepts zone_id and division_id (without codes),
+    matches code-based filtering, treats 0 as unfiltered, and returns empty
+    rows when a non-existent ID is passed.
+    """
+    res_by_id = client.get("/telemetry/live?zone_id=1&division_id=1&asset_type=Point Machine")
+    res_by_code = client.get("/telemetry/live?zone_code=NR&division_code=DLI&asset_type=Point Machine")
+    assert res_by_id.status_code == 200
+    assert res_by_code.status_code == 200
+
+    data_id = res_by_id.json()["data"]
+    data_code = res_by_code.json()["data"]
+    assert data_id["Zone"] == "NR"
+    assert data_id["Division"] == "DLI"
+    assert len(data_id["rows"]) == len(data_code["rows"]) > 0
+
+    # Zero IDs behave as "All" (unfiltered)
+    res_zero = client.get("/telemetry/live?zone_id=0&division_id=0&asset_type=Point Machine")
+    assert res_zero.status_code == 200
+    assert len(res_zero.json()["data"]["rows"]) == len(data_code["rows"])
+
+    # Non-existent ID must return empty rows rather than leaking all stations
+    res_missing = client.get("/telemetry/live?zone_id=9999&asset_type=Point Machine")
+    assert res_missing.status_code == 200
+    assert res_missing.json()["data"]["rows"] == []
+    assert res_missing.json()["data"]["total"] == 0

@@ -253,30 +253,109 @@ def _parse_telemetry_datetime(dt_str: Optional[str], default: Optional[datetime]
         return default
 
 
+def _clean_loc_code(val: Optional[str]) -> Optional[str]:
+    if not isinstance(val, str):
+        return None
+    s = val.strip()
+    if not s or s.lower() in ("all", "select", "null", "undefined", "none"):
+        return None
+    return s.upper()
+
+
+def _clean_loc_id(val: Optional[int]) -> Optional[int]:
+    if isinstance(val, int) and val > 0:
+        return val
+    return None
+
+
 def _resolve_station_ids_by_codes(
     db: Session,
     zone_code: Optional[str] = None,
     division_code: Optional[str] = None,
     station_code: Optional[str] = None,
     station_id: Optional[int] = None,
+    zone_id: Optional[int] = None,
+    division_id: Optional[int] = None,
 ) -> Optional[List[int]]:
+    z_code = _clean_loc_code(zone_code)
+    d_code = _clean_loc_code(division_code)
+    s_code = _clean_loc_code(station_code)
+    z_id = _clean_loc_id(zone_id)
+    d_id = _clean_loc_id(division_id)
+    s_id = _clean_loc_id(station_id)
+
     # If no filters at all are provided, return None
-    if not (zone_code or division_code or station_code or station_id is not None):
+    if not (z_code or d_code or s_code or z_id is not None or d_id is not None or s_id is not None):
         return None
-        
+
     q = db.query(Station.id).join(Division).join(Zone)
-    
-    if station_code:
-        q = q.filter(Station.station_code == station_code.upper())
-    elif station_id is not None:
-        q = q.filter(Station.id == station_id)
-    if division_code:
-        q = q.filter(Division.division_code == division_code.upper())
-    if zone_code:
-        q = q.filter(Zone.zone_code == zone_code.upper())
-        
+
+    if s_code:
+        q = q.filter(Station.station_code == s_code)
+    elif s_id is not None:
+        q = q.filter(Station.id == s_id)
+    if d_code:
+        q = q.filter(Division.division_code == d_code)
+    elif d_id is not None:
+        q = q.filter(Division.id == d_id)
+    if z_code:
+        q = q.filter(Zone.zone_code == z_code)
+    elif z_id is not None:
+        q = q.filter(Zone.id == z_id)
+
     rows = q.all()
     return [r.id for r in rows]
+
+
+def _resolve_location_labels(
+    db: Session,
+    zone_id: Optional[int] = None,
+    division_id: Optional[int] = None,
+    station_id: Optional[int] = None,
+    zone_code: Optional[str] = None,
+    division_code: Optional[str] = None,
+    station_code: Optional[str] = None,
+) -> tuple[str, str, Optional[str], Optional[int]]:
+    """
+    Resolve canonical (zone_code, division_code, station_name, station_id) from any
+    combination of location IDs and codes.
+    """
+    z_id = _clean_loc_id(zone_id)
+    d_id = _clean_loc_id(division_id)
+    s_id = _clean_loc_id(station_id)
+    z_code = _clean_loc_code(zone_code)
+    d_code = _clean_loc_code(division_code)
+    s_code = _clean_loc_code(station_code)
+
+    stn = None
+    if s_id:
+        stn = db.query(Station).filter(Station.id == s_id).first()
+    elif s_code:
+        stn = db.query(Station).filter(Station.station_code == s_code).first()
+
+    resolved_stn_name = s_code
+    resolved_stn_id = s_id
+    if stn:
+        resolved_stn_name = stn.station_name
+        resolved_stn_id = stn.id
+        if stn.division:
+            d_code = stn.division.division_code
+            if stn.division.zone:
+                z_code = stn.division.zone.zone_code
+
+    if not d_code and d_id:
+        div = db.query(Division).filter(Division.id == d_id).first()
+        if div:
+            d_code = div.division_code
+            if not z_code and div.zone:
+                z_code = div.zone.zone_code
+
+    if not z_code and z_id:
+        zn = db.query(Zone).filter(Zone.id == z_id).first()
+        if zn:
+            z_code = zn.zone_code
+
+    return (z_code or "NR"), (d_code or ""), resolved_stn_name, resolved_stn_id
 
 
 def _get_threshold(
@@ -356,9 +435,12 @@ def _build_series(
 @router.get("", response_model=StandardResponse[TelemetryQueryResponse])
 def query_telemetry(
     # ── Location filters ──────────────────────────────────────────────────────
-    zone_id:     Optional[int]  = Query(None, description="Filter by zone"),
-    division_id: Optional[int]  = Query(None, description="Filter by division"),
-    station_id:  Optional[int]  = Query(None, description="Filter by station"),
+    zone_id:       Optional[int]  = Query(None, description="Filter by zone ID"),
+    division_id:   Optional[int]  = Query(None, description="Filter by division ID"),
+    station_id:    Optional[int]  = Query(None, description="Filter by station ID"),
+    zone_code:     Optional[str]  = Query(None, description="Filter by zone code, e.g. 'NR'"),
+    division_code: Optional[str]  = Query(None, description="Filter by division code, e.g. 'LKO'"),
+    station_code:  Optional[str]  = Query(None, description="Filter by station code, e.g. 'LKO'"),
     # ── Asset filters ─────────────────────────────────────────────────────────
     asset_type: Optional[str] = Query(
         None,
@@ -403,7 +485,15 @@ def query_telemetry(
     asset_type_hex = _resolve_asset_types_to_hex(db, asset_type)
 
     # ── Resolve station IDs from location filter ──────────────────────────────
-    station_ids = _resolve_station_ids(db, zone_id, division_id, station_id)
+    station_ids = _resolve_station_ids_by_codes(
+        db,
+        zone_code=zone_code,
+        division_code=division_code,
+        station_code=station_code,
+        station_id=station_id,
+        zone_id=zone_id,
+        division_id=division_id,
+    )
 
     _empty = TelemetryQueryResponse(
         station_id=station_id,
@@ -959,6 +1049,9 @@ def _build_live_telemetry_response(
     zone_code: Optional[str] = None,
     division_code: Optional[str] = None,
     station_code: Optional[str] = None,
+    zone_id: Optional[int] = None,
+    division_id: Optional[int] = None,
+    station_id: Optional[int] = None,
 ) -> dict:
     """
     Build the complete Live Telemetry response per RDSO SPN 257/2025.
@@ -968,38 +1061,40 @@ def _build_live_telemetry_response(
       - Mode B (user selected specific Asset No.):
         Returns rows with: parameter_name, parameter_code, pr_location, value, unit, status, timestamp.
     """
-    asset_q = db.query(Asset)
-    if stn_ids is not None:
+    if stn_ids is not None and not stn_ids:
+        assets = []
+    else:
+        asset_q = db.query(Asset)
         if stn_ids:
             asset_q = asset_q.filter(Asset.station_id.in_(stn_ids))
 
-    if asset_type:
-        asset_type_hexes = None
-        if asset_type in ASSET_TYPE_DISPLAY_GROUPS:
-            asset_type_hexes = ASSET_TYPE_DISPLAY_GROUPS[asset_type]
-        else:
-            at_master = db.query(AssetTypeMaster.asset_type_id).filter(
-                or_(
-                    AssetTypeMaster.asset_type_code == asset_type.upper(),
-                    AssetTypeMaster.asset_type_name == asset_type
-                )
-            ).all()
-            if at_master:
-                asset_type_hexes = [r.asset_type_id for r in at_master]
+        if asset_type:
+            asset_type_hexes = None
+            if asset_type in ASSET_TYPE_DISPLAY_GROUPS:
+                asset_type_hexes = ASSET_TYPE_DISPLAY_GROUPS[asset_type]
             else:
-                asset_type_hexes = [asset_type]
-        if asset_type_hexes:
-            asset_q = asset_q.filter(Asset.asset_type_hex.in_(asset_type_hexes))
+                at_master = db.query(AssetTypeMaster.asset_type_id).filter(
+                    or_(
+                        AssetTypeMaster.asset_type_code == asset_type.upper(),
+                        AssetTypeMaster.asset_type_name == asset_type
+                    )
+                ).all()
+                if at_master:
+                    asset_type_hexes = [r.asset_type_id for r in at_master]
+                else:
+                    asset_type_hexes = [asset_type]
+            if asset_type_hexes:
+                asset_q = asset_q.filter(Asset.asset_type_hex.in_(asset_type_hexes))
 
-    if eff_asset_no:
-        asset_q = asset_q.filter(
-            or_(
-                Asset.asset_number_code == eff_asset_no,
-                Asset.smms_asset_code == eff_asset_no
+        if eff_asset_no:
+            asset_q = asset_q.filter(
+                or_(
+                    Asset.asset_number_code == eff_asset_no,
+                    Asset.smms_asset_code == eff_asset_no
+                )
             )
-        )
 
-    assets = asset_q.order_by(Asset.id.asc()).limit(100).all()
+        assets = asset_q.order_by(Asset.id.asc()).limit(100).all()
 
     if eff_asset_no and not assets:
         raise HTTPException(
@@ -1008,21 +1103,30 @@ def _build_live_telemetry_response(
         )
 
     # Resolve display locations
+    fallback_zone, fallback_div, fallback_stn, _ = _resolve_location_labels(
+        db,
+        zone_id=zone_id,
+        division_id=division_id,
+        station_id=station_id,
+        zone_code=zone_code,
+        division_code=division_code,
+        station_code=station_code,
+    )
     sample_asset = assets[0] if assets else None
     resolved_zone = (
         sample_asset.station.division.zone.zone_code
         if sample_asset and sample_asset.station and sample_asset.station.division and sample_asset.station.division.zone
-        else (zone_code or "NR")
+        else fallback_zone
     )
     resolved_div = (
         sample_asset.station.division.division_code
         if sample_asset and sample_asset.station and sample_asset.station.division
-        else (division_code or "")
+        else fallback_div
     )
     resolved_stn = (
         sample_asset.station.station_name
         if sample_asset and sample_asset.station
-        else (station_code or "Station")
+        else (fallback_stn or "Station")
     )
     resolved_asset_type_name = (
         asset_type
@@ -1170,6 +1274,9 @@ async def _sse_live_summary_generator(
     zone_code: Optional[str],
     division_code: Optional[str],
     station_code: Optional[str],
+    zone_id: Optional[int] = None,
+    division_id: Optional[int] = None,
+    station_id: Optional[int] = None,
 ):
     """
     SSE stream yielding live telemetry data packets periodically.
@@ -1183,7 +1290,9 @@ async def _sse_live_summary_generator(
                 db = SessionLocal()
                 try:
                     return _build_live_telemetry_response(
-                        db, stn_ids, eff_asset_no, asset_type, zone_code, division_code, station_code
+                        db, stn_ids, eff_asset_no, asset_type,
+                        zone_code, division_code, station_code,
+                        zone_id=zone_id, division_id=division_id, station_id=station_id,
                     )
                 finally:
                     db.close()
@@ -1198,7 +1307,9 @@ async def _sse_live_summary_generator(
 @router.get("/live")
 async def live_telemetry_stream(
     request: Request,
-    station_id: Optional[int] = Query(None),
+    zone_id: Optional[int] = Query(None, description="Zone ID"),
+    division_id: Optional[int] = Query(None, description="Division ID"),
+    station_id: Optional[int] = Query(None, description="Station ID"),
     station_code: Optional[str] = Query(None),
     zone_code: Optional[str] = Query(None),
     division_code: Optional[str] = Query(None),
@@ -1222,8 +1333,13 @@ async def live_telemetry_stream(
     eff_asset_no = clean_no or clean_number
 
     stn_ids = _resolve_station_ids_by_codes(
-        db, zone_code=zone_code, division_code=division_code,
-        station_code=station_code, station_id=station_id
+        db,
+        zone_code=zone_code,
+        division_code=division_code,
+        station_code=station_code,
+        station_id=station_id,
+        zone_id=zone_id,
+        division_id=division_id,
     )
 
     accept_header = request.headers.get("accept", "")
@@ -1231,7 +1347,8 @@ async def live_telemetry_stream(
         return StreamingResponse(
             _sse_live_summary_generator(
                 request, stn_ids, eff_asset_no, asset_type, poll_interval,
-                zone_code, division_code, station_code
+                zone_code, division_code, station_code,
+                zone_id=zone_id, division_id=division_id, station_id=station_id,
             ),
             media_type="text/event-stream",
             headers={
@@ -1242,7 +1359,9 @@ async def live_telemetry_stream(
 
     # Standard JSON response
     data = _build_live_telemetry_response(
-        db, stn_ids, eff_asset_no, asset_type, zone_code, division_code, station_code
+        db, stn_ids, eff_asset_no, asset_type,
+        zone_code, division_code, station_code,
+        zone_id=zone_id, division_id=division_id, station_id=station_id,
     )
     return {
         "status": True,
@@ -1267,6 +1386,8 @@ def _fetch_history_data(
     from_time: Optional[datetime] = None,
     to_time: Optional[datetime] = None,
     limit: int = 50000,
+    zone_id: Optional[int] = None,
+    division_id: Optional[int] = None,
 ):
     """
     Shared data-fetch logic for history table and CSV download.
@@ -1274,8 +1395,13 @@ def _fetch_history_data(
     """
     # 1. Resolve Station IDs
     station_ids = _resolve_station_ids_by_codes(
-        db, zone_code=zone_code, division_code=division_code,
-        station_code=station_code, station_id=station_id
+        db,
+        zone_code=zone_code,
+        division_code=division_code,
+        station_code=station_code,
+        station_id=station_id,
+        zone_id=zone_id,
+        division_id=division_id,
     )
 
     # 2. Resolve Asset Type Hexes
@@ -1701,7 +1827,9 @@ def _build_history_columns_and_rows(
 
 @router.get("/history", response_model=StandardResponse[TelemetryHistoryResponse])
 def get_telemetry_history(
-    station_id:       Optional[int]      = Query(None),
+    zone_id:          Optional[int]      = Query(None, description="Zone ID"),
+    division_id:      Optional[int]      = Query(None, description="Division ID"),
+    station_id:       Optional[int]      = Query(None, description="Station ID"),
     station_code:     Optional[str]      = Query(None, description="Station code, e.g. 'LKO'"),
     zone_code:        Optional[str]      = Query(None, description="Zone code, e.g. 'NR'"),
     division_code:    Optional[str]      = Query(None, description="Division code, e.g. 'LKO'"),
@@ -1736,6 +1864,8 @@ def get_telemetry_history(
     from_time = from_time if isinstance(from_time, str) else None
     to_date = to_date if isinstance(to_date, str) else None
     to_time = to_time if isinstance(to_time, str) else None
+    zone_id = zone_id if isinstance(zone_id, int) else None
+    division_id = division_id if isinstance(division_id, int) else None
     station_id = station_id if isinstance(station_id, int) else None
 
     if from_date:
@@ -1775,28 +1905,19 @@ def get_telemetry_history(
         parameter_type_hex=parameter_type_hex,
         from_time=eff_from_dt,
         to_time=eff_to_dt,
+        zone_id=zone_id,
+        division_id=division_id,
     )
 
-    resolved_zone = zone_code or "NR"
-    resolved_div = division_code or ""
-    resolved_stn_name = None
-    eff_station_id = station_id
-
-    stn = None
-    if station_id:
-        stn = db.query(Station).filter(Station.id == station_id).first()
-    elif station_code:
-        stn = db.query(Station).filter(Station.station_code == station_code.upper()).first()
-        
-    if stn:
-        resolved_stn_name = stn.station_name
-        eff_station_id = stn.id
-        if stn.division:
-            resolved_div = stn.division.division_code
-            if stn.division.zone:
-                resolved_zone = stn.division.zone.zone_code
-    elif station_code:
-        resolved_stn_name = station_code
+    resolved_zone, resolved_div, resolved_stn_name, eff_station_id = _resolve_location_labels(
+        db,
+        zone_id=zone_id,
+        division_id=division_id,
+        station_id=station_id,
+        zone_code=zone_code,
+        division_code=division_code,
+        station_code=station_code,
+    )
 
     resolved_asset_type = asset_type or "Point Machine"
     if resolved_asset_type.upper() == "EOP":
@@ -1921,7 +2042,9 @@ def get_telemetry_history(
 
 @router.get("/history/download")
 def download_telemetry_history(
-    station_id:       Optional[int]      = Query(None),
+    zone_id:          Optional[int]      = Query(None, description="Zone ID"),
+    division_id:      Optional[int]      = Query(None, description="Division ID"),
+    station_id:       Optional[int]      = Query(None, description="Station ID"),
     station_code:     Optional[str]      = Query(None, description="Station code, e.g. 'LKO'"),
     zone_code:        Optional[str]      = Query(None, description="Zone code, e.g. 'NR'"),
     division_code:    Optional[str]      = Query(None, description="Division code, e.g. 'LKO'"),
@@ -1982,25 +2105,20 @@ def download_telemetry_history(
         from_time=eff_from_dt,
         to_time=eff_to_dt,
         limit=20000,
+        zone_id=zone_id,
+        division_id=division_id,
     )
 
-    eff_station_id = station_id
-    stn = None
-    if eff_station_id:
-        stn = db.query(Station).filter(Station.id == eff_station_id).first()
-    elif station_code:
-        stn = db.query(Station).filter(Station.station_code == station_code.upper()).first()
-
-    resolved_zone = zone_code or "NR"
-    resolved_div = division_code or ""
-    resolved_stn_name = station_code or ""
-    if stn:
-        resolved_stn_name = stn.station_name
-        eff_station_id = stn.id
-        if stn.division:
-            resolved_div = stn.division.division_code
-            if stn.division.zone:
-                resolved_zone = stn.division.zone.zone_code
+    resolved_zone, resolved_div, resolved_stn_name, eff_station_id = _resolve_location_labels(
+        db,
+        zone_id=zone_id,
+        division_id=division_id,
+        station_id=station_id,
+        zone_code=zone_code,
+        division_code=division_code,
+        station_code=station_code,
+    )
+    resolved_stn_name = resolved_stn_name or ""
 
     resolved_asset_type = asset_type or "Point Machine"
     columns, all_rows = _build_history_columns_and_rows(
@@ -2062,7 +2180,9 @@ def download_telemetry_history(
 
 @router.get("/summary", response_model=StandardResponse[TelemetrySummaryResponse])
 def get_telemetry_summary(
-    station_id:       Optional[int]      = Query(None),
+    zone_id:          Optional[int]      = Query(None, description="Zone ID"),
+    division_id:      Optional[int]      = Query(None, description="Division ID"),
+    station_id:       Optional[int]      = Query(None, description="Station ID"),
     station_code:     Optional[str]      = Query(None, description="Station code, e.g. 'LKO'"),
     zone_code:        Optional[str]      = Query(None, description="Zone code, e.g. 'NR'"),
     division_code:    Optional[str]      = Query(None, description="Division code, e.g. 'LKO'"),
@@ -2127,6 +2247,8 @@ def get_telemetry_summary(
         from_time=eff_from_dt,
         to_time=eff_to_dt,
         limit=20000,
+        zone_id=zone_id,
+        division_id=division_id,
     )
 
     # Pre-fetch station and asset hierarchy
@@ -2272,7 +2394,9 @@ def get_telemetry_summary(
 
 @router.get("/summary/download")
 def download_telemetry_summary(
-    station_id:       Optional[int]      = Query(None),
+    zone_id:          Optional[int]      = Query(None, description="Zone ID"),
+    division_id:      Optional[int]      = Query(None, description="Division ID"),
+    station_id:       Optional[int]      = Query(None, description="Station ID"),
     station_code:     Optional[str]      = Query(None),
     zone_code:        Optional[str]      = Query(None),
     division_code:    Optional[str]      = Query(None),
@@ -2289,6 +2413,8 @@ def download_telemetry_summary(
     """
     from datetime import date as date_type
     res = get_telemetry_summary(
+        zone_id=zone_id,
+        division_id=division_id,
         station_id=station_id,
         station_code=station_code,
         zone_code=zone_code,
