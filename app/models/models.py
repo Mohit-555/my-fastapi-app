@@ -608,7 +608,7 @@ class Asset(Base):
     asset_number_code = Column(String(50), nullable=False)   # e.g., "PT-101"
     asset_number_id = Column(String(2), nullable=False)      # hex 00-FF (part of para_id)
     asset_type_hex = Column(String(2), ForeignKey("asset_type_master.asset_type_id"), nullable=False)
-    station_gateway_id = Column(String(8), ForeignKey("gateways.stngw_id"), nullable=False)
+    station_gateway_id = Column(String(8), ForeignKey("gateways.stngw_id", onupdate="CASCADE"), nullable=False)
     station_id = Column(Integer, ForeignKey("stations.id"), nullable=False)
     make = Column(String(80))
     model = Column(String(50))

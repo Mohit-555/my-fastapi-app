@@ -775,7 +775,14 @@ def update_gateway(
     if payload.rtu_id is not None:
         gateway.rtu_id = payload.rtu_id if payload.rtu_id > 0 else None
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to update gateway '{clean_stngw_id}': {exc.orig}",
+        )
     db.refresh(gateway)
     safe_notify_dashboard("gateway_updated")
     return {
