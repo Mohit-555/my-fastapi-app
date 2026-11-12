@@ -176,7 +176,8 @@ def preview_rtu_stngw_id(
     }
 
 
-@router.get("/", response_model=StandardResponse[RTUListResponse])
+@router.get("", response_model=StandardResponse[RTUListResponse])
+@router.get("/", response_model=StandardResponse[RTUListResponse], include_in_schema=False)
 def list_rtus(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=500, description="Items per page"),
@@ -468,7 +469,8 @@ def get_rtu_hierarchy(
     }
 
 
-@router.post("/", response_model=StandardResponse[RTUResponse], status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=StandardResponse[RTUResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=StandardResponse[RTUResponse], status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_rtu(
     payload: RTUCreate,
     db: Session = Depends(get_db),

@@ -433,6 +433,7 @@ def _build_series(
 
 
 @router.get("", response_model=StandardResponse[TelemetryQueryResponse])
+@router.get("/", response_model=StandardResponse[TelemetryQueryResponse], include_in_schema=False)
 def query_telemetry(
     # ── Location filters ──────────────────────────────────────────────────────
     zone_id:       Optional[int]  = Query(None, description="Filter by zone ID"),

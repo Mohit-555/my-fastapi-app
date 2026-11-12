@@ -10,7 +10,8 @@ from app.models.schemas import ZoneCreate, ZoneUpdate, ZoneResponse, ZoneWithDiv
 router = APIRouter(prefix="/zones", tags=["Zones"])
 
 
-@router.get("/", response_model=StandardResponse[List[ZoneResponse]])
+@router.get("", response_model=StandardResponse[List[ZoneResponse]])
+@router.get("/", response_model=StandardResponse[List[ZoneResponse]], include_in_schema=False)
 def get_all_zones(db: Session = Depends(get_db)):
     """Get all zones"""
     zones = db.query(Zone).order_by(Zone.zone_name).all()
@@ -51,7 +52,8 @@ def get_zone(zone_id: int, db: Session = Depends(get_db)):
     }
 
 
-@router.post("/", response_model=StandardResponse[ZoneResponse], status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=StandardResponse[ZoneResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=StandardResponse[ZoneResponse], status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_zone(payload: ZoneCreate, db: Session = Depends(get_db)):
     """Create a new zone"""
     existing = db.query(Zone).filter(Zone.zone_code == payload.zone_code).first()

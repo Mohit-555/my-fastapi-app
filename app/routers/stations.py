@@ -10,7 +10,8 @@ from app.models.schemas import StationCreate, StationUpdate, StationResponse, Dr
 router = APIRouter(prefix="/stations", tags=["Stations"])
 
 
-@router.get("/", response_model=StandardResponse[List[StationResponse]])
+@router.get("", response_model=StandardResponse[List[StationResponse]])
+@router.get("/", response_model=StandardResponse[List[StationResponse]], include_in_schema=False)
 def get_all_stations(db: Session = Depends(get_db)):
     """Get all stations"""
     stations = db.query(Station).order_by(Station.station_name).all()
@@ -70,7 +71,8 @@ def get_station(station_id: int, db: Session = Depends(get_db)):
     }
 
 
-@router.post("/", response_model=StandardResponse[StationResponse], status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=StandardResponse[StationResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=StandardResponse[StationResponse], status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_station(payload: StationCreate, db: Session = Depends(get_db)):
     """Create a new station"""
     division_id = payload.division_id

@@ -234,7 +234,8 @@ def get_channel_filter_options(
     }
 
 
-@router.get("/", response_model=StandardResponse[ChannelAssignmentListResponse])
+@router.get("", response_model=StandardResponse[ChannelAssignmentListResponse])
+@router.get("/", response_model=StandardResponse[ChannelAssignmentListResponse], include_in_schema=False)
 def list_channel_assignments(
     zone_id: Optional[int] = Query(None, description="Filter by Zone ID"),
     division_id: Optional[int] = Query(None, description="Filter by Division ID"),
@@ -277,7 +278,8 @@ def list_channel_assignments(
     }
 
 
-@router.post("/", response_model=StandardResponse[ChannelAssignmentResponse], status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=StandardResponse[ChannelAssignmentResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=StandardResponse[ChannelAssignmentResponse], status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_channel_assignment(
     payload: ChannelAssignmentCreate,
     db: Session = Depends(get_db),

@@ -135,6 +135,7 @@ def _populate_card_numbers(cards: List[SlaveCard], db: Session) -> None:
 
 
 @router.get("", response_model=StandardResponse[SlaveCardListResponse])
+@router.get("/", response_model=StandardResponse[SlaveCardListResponse], include_in_schema=False)
 def list_slave_cards(
     gateway_id: Optional[int] = Query(None, description="Filter by Gateway ID"),
     stngw_id: Optional[str] = Query(None, description="Filter by Gateway Code (stngw_id)"),
@@ -334,6 +335,7 @@ def get_slave_card(
 
 
 @router.post("", response_model=StandardResponse[SlaveCardResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=StandardResponse[SlaveCardResponse], status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_slave_card(
     payload: SlaveCardCreate,
     db: Session = Depends(get_db),

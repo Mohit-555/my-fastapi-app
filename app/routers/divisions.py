@@ -10,7 +10,8 @@ from app.models.schemas import DivisionCreate, DivisionUpdate, DivisionResponse,
 router = APIRouter(prefix="/divisions", tags=["Divisions"])
 
 
-@router.get("/", response_model=StandardResponse[List[DivisionResponse]])
+@router.get("", response_model=StandardResponse[List[DivisionResponse]])
+@router.get("/", response_model=StandardResponse[List[DivisionResponse]], include_in_schema=False)
 def get_all_divisions(db: Session = Depends(get_db)):
     """Get all divisions"""
     divisions = db.query(Division).order_by(Division.division_name).all()
@@ -70,7 +71,8 @@ def get_division(division_id: int, db: Session = Depends(get_db)):
     }
 
 
-@router.post("/", response_model=StandardResponse[DivisionResponse], status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=StandardResponse[DivisionResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=StandardResponse[DivisionResponse], status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_division(payload: DivisionCreate, db: Session = Depends(get_db)):
     """Create a new division"""
     zone_id = payload.zone_id

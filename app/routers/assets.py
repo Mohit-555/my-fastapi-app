@@ -1349,6 +1349,7 @@ def download_asset_utilization(
 
 
 @router.get("", response_model=StandardResponse[AssetListResponse])
+@router.get("/", response_model=StandardResponse[AssetListResponse], include_in_schema=False)
 def list_assets(
     zone_id:        Optional[Union[int, str]] = Query(None, description="Filter by zone ID/code/name"),
     zone_code:      Optional[str]             = Query(None, description="Filter by zone code"),
@@ -1475,6 +1476,7 @@ def get_asset(asset_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=StandardResponse[AssetResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=StandardResponse[AssetResponse], status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_asset(payload: AssetCreate, db: Session = Depends(get_db)):
     """
     Register a new physical asset instance.

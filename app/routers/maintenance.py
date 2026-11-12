@@ -138,6 +138,7 @@ def _base_query(
 
 
 @router.get("", response_model=StandardResponse[MaintenanceModeListResponse])
+@router.get("/", response_model=StandardResponse[MaintenanceModeListResponse], include_in_schema=False)
 def list_maintenance_modes(
     zone_id: Optional[int] = Query(None),
     division_id: Optional[int] = Query(None),
@@ -173,6 +174,7 @@ def list_maintenance_modes(
 
 
 @router.post("", response_model=StandardResponse[MaintenanceModeResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=StandardResponse[MaintenanceModeResponse], status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def activate_maintenance_mode(payload: MaintenanceModeRequest, db: Session = Depends(get_db)):
     """Activate maintenance mode for a specific asset."""
     station = db.query(Station).filter(Station.id == payload.station_id).first()

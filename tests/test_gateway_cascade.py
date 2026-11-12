@@ -149,3 +149,45 @@ def test_update_gateway_stngw_id_cascades_to_assets(cascade_db):
     updated_asset = cascade_db.query(Asset).filter(Asset.id == 21).first()
     assert updated_asset is not None
     assert updated_asset.station_gateway_id == "00000001"
+
+
+def test_root_routes_do_not_return_307_redirect(cascade_db):
+    """
+    Both trailing-slash and non-trailing-slash root endpoints must resolve
+    directly without returning 307 Temporary Redirect.
+    """
+    client = TestClient(app, follow_redirects=False)
+
+    # POST /gateway (without trailing slash) must create directly (201, not 307)
+    res_no_slash = client.post(
+        "/gateway",
+        json={
+            "stngw_id": "00000002",
+            "imei": "111122223333444",
+            "station_id": 9,
+        },
+    )
+    assert res_no_slash.status_code == 201, res_no_slash.text
+
+    # POST /gateway/ (with trailing slash) must also resolve directly (201, not 307)
+    res_slash = client.post(
+        "/gateway/",
+        json={
+            "stngw_id": "00000003",
+            "imei": "111122223333555",
+            "station_id": 9,
+        },
+    )
+    assert res_slash.status_code == 201, res_slash.text
+
+    for path in (
+        "/rtu", "/rtu/",
+        "/channel-assignments", "/channel-assignments/",
+        "/slave-cards", "/slave-cards/",
+        "/assets", "/assets/",
+        "/zones", "/zones/",
+        "/divisions", "/divisions/",
+        "/stations", "/stations/",
+    ):
+        r = client.get(path)
+        assert r.status_code != 307, f"Unexpected 307 redirect on GET {path}"
