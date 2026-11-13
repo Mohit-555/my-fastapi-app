@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, case
 
 from app.database import get_db, settings
-from app.models.models import AlertEvent, Asset, AssetParameter, Station, Division, Zone, Gateway, Telemetry
+from app.models.models import AlertEvent, Asset, AssetParameter, Station, Division, Zone, Gateway, Telemetry, RTU
 from app.services.statistics_service import statistics_service
 from app.services.redis_service import redis_service
 from app.models.schemas import (
@@ -1600,6 +1600,149 @@ def get_mobile_dashboard_summary(
             )
         )
     }
+
+
+# ============ 7. RTU Map Pins Endpoint ============
+
+@router.get("/map-pins")
+@router.get("/map-pins/", include_in_schema=False)
+def get_dashboard_map_pins(
+    zone_id: Optional[str] = Query(None, description="Optional Zone ID"),
+    division_id: Optional[str] = Query(None, description="Optional Division ID"),
+    station_id: Optional[str] = Query(None, description="Optional Station ID"),
+    zone_code: Optional[str] = Query(None, description="Optional Zone Code"),
+    division_code: Optional[str] = Query(None, description="Optional Division Code"),
+    station_code: Optional[str] = Query(None, description="Optional Station Code"),
+    db: Session = Depends(get_db)
+):
+    """
+    Fetch all active RTUs that have geographical coordinates (latitude and longitude)
+    along with their real-time health status (Healthy, Predictive, Failure)
+    calculated dynamically from active alert events.
+    """
+    clean_z_id = _clean_dashboard_param(zone_id)
+    clean_d_id = _clean_dashboard_param(division_id)
+    clean_s_id = _clean_dashboard_param(station_id)
+    clean_z_code = _clean_dashboard_param(zone_code)
+    clean_d_code = _clean_dashboard_param(division_code)
+    clean_s_code = _clean_dashboard_param(station_code)
+
+    rtu_query = (
+        db.query(RTU)
+        .join(Station, Station.id == RTU.station_id)
+        .filter(
+            RTU.latitude.isnot(None),
+            RTU.longitude.isnot(None),
+            RTU.is_active == True,
+        )
+    )
+
+    if clean_s_id and clean_s_id.isdigit():
+        rtu_query = rtu_query.filter(RTU.station_id == int(clean_s_id))
+    elif clean_s_code:
+        rtu_query = rtu_query.filter(Station.station_code == clean_s_code.upper())
+
+    has_div_join = False
+    has_zone_join = False
+
+    if clean_d_id and clean_d_id.isdigit():
+        rtu_query = rtu_query.filter(Station.division_id == int(clean_d_id))
+    elif clean_d_code:
+        rtu_query = rtu_query.join(Division, Division.id == Station.division_id)
+        has_div_join = True
+        rtu_query = rtu_query.filter(Division.division_code == clean_d_code.upper())
+
+    if clean_z_id and clean_z_id.isdigit():
+        if not has_div_join:
+            rtu_query = rtu_query.join(Division, Division.id == Station.division_id)
+            has_div_join = True
+        rtu_query = rtu_query.filter(Division.zone_id == int(clean_z_id))
+    elif clean_z_code:
+        if not has_div_join:
+            rtu_query = rtu_query.join(Division, Division.id == Station.division_id)
+            has_div_join = True
+        if not has_zone_join:
+            rtu_query = rtu_query.join(Zone, Zone.id == Division.zone_id)
+            has_zone_join = True
+        rtu_query = rtu_query.filter(Zone.zone_code == clean_z_code.upper())
+
+    rtus = rtu_query.order_by(RTU.id.asc()).all()
+
+    pins = []
+    for rtu in rtus:
+        # Find gateways linked to this RTU
+        gateways = db.query(Gateway).filter(Gateway.rtu_id == rtu.id).all()
+        gw_stngw_ids = [gw.stngw_id for gw in gateways if gw.stngw_id]
+
+        linked_assets = []
+        if gw_stngw_ids:
+            linked_assets = db.query(Asset).filter(Asset.station_gateway_id.in_(gw_stngw_ids)).all()
+
+        asset_ids = [a.id for a in linked_assets]
+        asset_codes = [a.asset_number_code for a in linked_assets if a.asset_number_code]
+
+        # Determine Health Status (Red, Yellow, Green)
+        # Check active alerts for the station + linked assets/gateways
+        alert_filters = [
+            AlertEvent.station_id == rtu.station_id,
+            AlertEvent.alert_status.in_(["Active", "Pending", "TRIGGERED", "ACKNOWLEDGED"]),
+        ]
+        if asset_ids or asset_codes:
+            asset_conditions = []
+            if asset_ids:
+                asset_conditions.append(AlertEvent.asset_id.in_(asset_ids))
+            if asset_codes:
+                asset_conditions.append(AlertEvent.asset_no.in_(asset_codes))
+            alert_filters.append(or_(*asset_conditions))
+
+        active_alerts = db.query(AlertEvent).filter(*alert_filters).all()
+
+        status = "Healthy"
+        failure_count = sum(1 for a in active_alerts if a.alert_type == "Failure")
+        predictive_count = sum(1 for a in active_alerts if a.alert_type == "Predictive")
+
+        if failure_count > 0:
+            status = "Failure"
+        elif predictive_count > 0:
+            status = "Predictive"
+
+        station = rtu.station
+        division = station.division if station else None
+        zone = division.zone if division else None
+
+        pins.append({
+            "rtu_id": rtu.id,
+            "rtu_name": rtu.rtu_name,
+            "rtu_code": rtu.rtu_code,
+            "location": rtu.location,
+            "description": rtu.description,
+            "station_id": rtu.station_id,
+            "station_code": station.station_code if station else None,
+            "station_name": station.station_name if station else None,
+            "division_id": station.division_id if station else None,
+            "division_code": division.division_code if division else None,
+            "division_name": division.division_name if division else None,
+            "zone_id": division.zone_id if division else None,
+            "zone_code": zone.zone_code if zone else None,
+            "zone_name": zone.zone_name if zone else None,
+            "lat": rtu.latitude,
+            "lng": rtu.longitude,
+            "latitude": rtu.latitude,
+            "longitude": rtu.longitude,
+            "status": status,
+            "active_alerts_count": len(active_alerts),
+            "failure_alerts_count": failure_count,
+            "predictive_alerts_count": predictive_count,
+            "master_cards_count": len(gateways),
+            "is_active": rtu.is_active,
+        })
+
+    return {
+        "status": True,
+        "message": "Map pins fetched successfully",
+        "data": pins
+    }
+
 
 
 

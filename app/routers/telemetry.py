@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 
 from app.database import get_db, SessionLocal
-from app.models.models import Telemetry, Gateway, Station, Division, Zone, Threshold, Asset, AssetTypeMaster
+from app.models.models import Telemetry, Gateway, Station, Division, Zone, Threshold, Asset, AssetTypeMaster, RTU
 from app.models.schemas import (
     TelemetryQueryResponse, TelemetrySeriesResponse, TelemetryPoint,
     TelemetryHistoryResponse, TelemetryHistoryColumn, TelemetryHistoryRow,
@@ -442,6 +442,7 @@ def query_telemetry(
     zone_code:     Optional[str]  = Query(None, description="Filter by zone code, e.g. 'NR'"),
     division_code: Optional[str]  = Query(None, description="Filter by division code, e.g. 'LKO'"),
     station_code:  Optional[str]  = Query(None, description="Filter by station code, e.g. 'LKO'"),
+    rtu_id:        Optional[int]  = Query(None, description="Filter by RTU ID"),
     # ── Asset filters ─────────────────────────────────────────────────────────
     asset_type: Optional[str] = Query(
         None,
@@ -508,6 +509,8 @@ def query_telemetry(
 
     # ── Resolve gateway IDs ───────────────────────────────────────────────────
     gw_query = db.query(Gateway)
+    if rtu_id:
+        gw_query = gw_query.filter(Gateway.rtu_id == rtu_id)
     if station_ids is not None:
         if not station_ids:
             # Location filter matched nothing
@@ -1053,6 +1056,7 @@ def _build_live_telemetry_response(
     zone_id: Optional[int] = None,
     division_id: Optional[int] = None,
     station_id: Optional[int] = None,
+    rtu_id: Optional[int] = None,
 ) -> dict:
     """
     Build the complete Live Telemetry response per RDSO SPN 257/2025.
@@ -1068,6 +1072,14 @@ def _build_live_telemetry_response(
         asset_q = db.query(Asset)
         if stn_ids:
             asset_q = asset_q.filter(Asset.station_id.in_(stn_ids))
+
+        if rtu_id:
+            rtu_gw_rows = db.query(Gateway.stngw_id).filter(Gateway.rtu_id == rtu_id).all()
+            rtu_stngw_ids = [r[0] for r in rtu_gw_rows if r[0]]
+            if rtu_stngw_ids:
+                asset_q = asset_q.filter(Asset.station_gateway_id.in_(rtu_stngw_ids))
+            else:
+                asset_q = asset_q.filter(Asset.id == -1)
 
         if asset_type:
             asset_type_hexes = None
@@ -1278,6 +1290,7 @@ async def _sse_live_summary_generator(
     zone_id: Optional[int] = None,
     division_id: Optional[int] = None,
     station_id: Optional[int] = None,
+    rtu_id: Optional[int] = None,
 ):
     """
     SSE stream yielding live telemetry data packets periodically.
@@ -1294,6 +1307,7 @@ async def _sse_live_summary_generator(
                         db, stn_ids, eff_asset_no, asset_type,
                         zone_code, division_code, station_code,
                         zone_id=zone_id, division_id=division_id, station_id=station_id,
+                        rtu_id=rtu_id,
                     )
                 finally:
                     db.close()
@@ -1306,11 +1320,13 @@ async def _sse_live_summary_generator(
 
 
 @router.get("/live")
+@router.get("/live/", include_in_schema=False)
 async def live_telemetry_stream(
     request: Request,
     zone_id: Optional[int] = Query(None, description="Zone ID"),
     division_id: Optional[int] = Query(None, description="Division ID"),
     station_id: Optional[int] = Query(None, description="Station ID"),
+    rtu_id: Optional[int] = Query(None, description="RTU ID filter"),
     station_code: Optional[str] = Query(None),
     zone_code: Optional[str] = Query(None),
     division_code: Optional[str] = Query(None),
@@ -1333,6 +1349,11 @@ async def live_telemetry_stream(
     clean_number = raw_asset_number.strip() if raw_asset_number and raw_asset_number.strip().lower() not in ("null", "undefined", "") else None
     eff_asset_no = clean_no or clean_number
 
+    if rtu_id and not station_id and not station_code and not zone_id and not division_id and not zone_code and not division_code:
+        rtu_obj = db.query(RTU).filter(RTU.id == rtu_id).first()
+        if rtu_obj and rtu_obj.station_id:
+            station_id = rtu_obj.station_id
+
     stn_ids = _resolve_station_ids_by_codes(
         db,
         zone_code=zone_code,
@@ -1350,6 +1371,7 @@ async def live_telemetry_stream(
                 request, stn_ids, eff_asset_no, asset_type, poll_interval,
                 zone_code, division_code, station_code,
                 zone_id=zone_id, division_id=division_id, station_id=station_id,
+                rtu_id=rtu_id,
             ),
             media_type="text/event-stream",
             headers={
@@ -1363,6 +1385,7 @@ async def live_telemetry_stream(
         db, stn_ids, eff_asset_no, asset_type,
         zone_code, division_code, station_code,
         zone_id=zone_id, division_id=division_id, station_id=station_id,
+        rtu_id=rtu_id,
     )
     return {
         "status": True,
@@ -1389,6 +1412,7 @@ def _fetch_history_data(
     limit: int = 50000,
     zone_id: Optional[int] = None,
     division_id: Optional[int] = None,
+    rtu_id: Optional[int] = None,
 ):
     """
     Shared data-fetch logic for history table and CSV download.
@@ -1460,6 +1484,8 @@ def _fetch_history_data(
 
     # Query gateways
     gw_query = db.query(Gateway)
+    if rtu_id:
+        gw_query = gw_query.filter(Gateway.rtu_id == rtu_id)
     if station_ids is not None:
         if not station_ids:
             return {}, {}
@@ -1827,10 +1853,12 @@ def _build_history_columns_and_rows(
 
 
 @router.get("/history", response_model=StandardResponse[TelemetryHistoryResponse])
+@router.get("/history/", response_model=StandardResponse[TelemetryHistoryResponse], include_in_schema=False)
 def get_telemetry_history(
     zone_id:          Optional[int]      = Query(None, description="Zone ID"),
     division_id:      Optional[int]      = Query(None, description="Division ID"),
     station_id:       Optional[int]      = Query(None, description="Station ID"),
+    rtu_id:           Optional[int]      = Query(None, description="RTU ID filter"),
     station_code:     Optional[str]      = Query(None, description="Station code, e.g. 'LKO'"),
     zone_code:        Optional[str]      = Query(None, description="Zone code, e.g. 'NR'"),
     division_code:    Optional[str]      = Query(None, description="Division code, e.g. 'LKO'"),
@@ -1893,6 +1921,11 @@ def get_telemetry_history(
     elif to_time:
         eff_to_dt = _parse_telemetry_datetime(to_time, None)
 
+    if rtu_id and not station_id and not station_code and not zone_id and not division_id and not zone_code and not division_code:
+        rtu_obj = db.query(RTU).filter(RTU.id == rtu_id).first()
+        if rtu_obj and rtu_obj.station_id:
+            station_id = rtu_obj.station_id
+
     gateway_map, grouped = _fetch_history_data(
         db=db,
         station_id=station_id,
@@ -1908,6 +1941,7 @@ def get_telemetry_history(
         to_time=eff_to_dt,
         zone_id=zone_id,
         division_id=division_id,
+        rtu_id=rtu_id,
     )
 
     resolved_zone, resolved_div, resolved_stn_name, eff_station_id = _resolve_location_labels(
@@ -2042,10 +2076,12 @@ def get_telemetry_history(
 
 
 @router.get("/history/download")
+@router.get("/history/download/", include_in_schema=False)
 def download_telemetry_history(
     zone_id:          Optional[int]      = Query(None, description="Zone ID"),
     division_id:      Optional[int]      = Query(None, description="Division ID"),
     station_id:       Optional[int]      = Query(None, description="Station ID"),
+    rtu_id:           Optional[int]      = Query(None, description="RTU ID filter"),
     station_code:     Optional[str]      = Query(None, description="Station code, e.g. 'LKO'"),
     zone_code:        Optional[str]      = Query(None, description="Zone code, e.g. 'NR'"),
     division_code:    Optional[str]      = Query(None, description="Division code, e.g. 'LKO'"),
@@ -2092,6 +2128,11 @@ def download_telemetry_history(
     elif to_time:
         eff_to_dt = _parse_telemetry_datetime(to_time, None)
 
+    if rtu_id and not station_id and not station_code and not zone_id and not division_id and not zone_code and not division_code:
+        rtu_obj = db.query(RTU).filter(RTU.id == rtu_id).first()
+        if rtu_obj and rtu_obj.station_id:
+            station_id = rtu_obj.station_id
+
     gateway_map, grouped = _fetch_history_data(
         db=db,
         station_id=station_id,
@@ -2108,6 +2149,7 @@ def download_telemetry_history(
         limit=20000,
         zone_id=zone_id,
         division_id=division_id,
+        rtu_id=rtu_id,
     )
 
     resolved_zone, resolved_div, resolved_stn_name, eff_station_id = _resolve_location_labels(
@@ -2180,10 +2222,12 @@ def download_telemetry_history(
 
 
 @router.get("/summary", response_model=StandardResponse[TelemetrySummaryResponse])
+@router.get("/summary/", response_model=StandardResponse[TelemetrySummaryResponse], include_in_schema=False)
 def get_telemetry_summary(
     zone_id:          Optional[int]      = Query(None, description="Zone ID"),
     division_id:      Optional[int]      = Query(None, description="Division ID"),
     station_id:       Optional[int]      = Query(None, description="Station ID"),
+    rtu_id:           Optional[int]      = Query(None, description="RTU ID filter"),
     station_code:     Optional[str]      = Query(None, description="Station code, e.g. 'LKO'"),
     zone_code:        Optional[str]      = Query(None, description="Zone code, e.g. 'NR'"),
     division_code:    Optional[str]      = Query(None, description="Division code, e.g. 'LKO'"),
@@ -2234,6 +2278,11 @@ def get_telemetry_summary(
         eff_from_dt = now - timedelta(hours=24)
         eff_to_dt = now
 
+    if rtu_id and not station_id and not station_code and not zone_id and not division_id and not zone_code and not division_code:
+        rtu_obj = db.query(RTU).filter(RTU.id == rtu_id).first()
+        if rtu_obj and rtu_obj.station_id:
+            station_id = rtu_obj.station_id
+
     gateway_map, grouped = _fetch_history_data(
         db=db,
         station_id=station_id,
@@ -2250,6 +2299,7 @@ def get_telemetry_summary(
         limit=20000,
         zone_id=zone_id,
         division_id=division_id,
+        rtu_id=rtu_id,
     )
 
     # Pre-fetch station and asset hierarchy
@@ -2394,10 +2444,12 @@ def get_telemetry_summary(
 
 
 @router.get("/summary/download")
+@router.get("/summary/download/", include_in_schema=False)
 def download_telemetry_summary(
     zone_id:          Optional[int]      = Query(None, description="Zone ID"),
     division_id:      Optional[int]      = Query(None, description="Division ID"),
     station_id:       Optional[int]      = Query(None, description="Station ID"),
+    rtu_id:           Optional[int]      = Query(None, description="RTU ID filter"),
     station_code:     Optional[str]      = Query(None),
     zone_code:        Optional[str]      = Query(None),
     division_code:    Optional[str]      = Query(None),
@@ -2417,6 +2469,7 @@ def download_telemetry_summary(
         zone_id=zone_id,
         division_id=division_id,
         station_id=station_id,
+        rtu_id=rtu_id,
         station_code=station_code,
         zone_code=zone_code,
         division_code=division_code,
