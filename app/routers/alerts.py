@@ -627,27 +627,7 @@ def list_alert_asset_numbers(
         if row.asset_number_code
     }
 
-    # ── 2. Fallback: AlertEvent for any unregistered numbers ──────────────────
-    event_q = db.query(AlertEvent.asset_no).distinct()
-
-    if station_id is not None:
-        event_q = event_q.filter(AlertEvent.station_id == station_id)
-    elif division_id is not None:
-        event_q = event_q.join(Station, Station.id == AlertEvent.station_id)\
-                         .filter(Station.division_id == division_id)
-    elif zone_id is not None:
-        event_q = event_q.join(Station, Station.id == AlertEvent.station_id)\
-                         .join(Division, Division.id == Station.division_id)\
-                         .filter(Division.zone_id == zone_id)
-
-    if hex_list:
-        event_q = event_q.filter(AlertEvent.asset_type_hex.in_(hex_list))
-
-    for row in event_q.all():
-        if row.asset_no:
-            registered.add(row.asset_no)
-
-    # ── 3. Build sorted response ─────────────────────────────────────────
+    # ── 2. Build sorted response ─────────────────────────────────────────
     options = [
         AlertFilterOption(id=idx, label=code, value=code)
         for idx, code in enumerate(sorted(registered), start=1)
@@ -1185,46 +1165,6 @@ def get_alert_filters(db: Session = Depends(get_db)):
             asset_type_name=a.asset_type.asset_type_name if a.asset_type else None,
             asset_type_hex=a.asset_type_hex
         )
-
-    # Ensure any custom/manual event assets are also in the list
-    event_assets = (
-        db.query(AlertEvent.asset_no, AlertEvent.station_id, AlertEvent.asset_type_hex)
-        .distinct()
-        .all()
-    )
-
-    idx_counter = len(db_assets) + 1
-    for row in event_assets:
-        if not row.asset_no:
-            continue
-        key = (row.asset_no.upper(), row.station_id, row.asset_type_hex.upper())
-        if key not in asset_numbers_map:
-            s = stations_by_id.get(row.station_id)
-            d = divisions_by_id.get(s.division_id) if s else None
-            z = zones_by_id.get(d.zone_id) if d else None
-            t = db_types_map.get(row.asset_type_hex.upper())
-            
-            asset_numbers_map[key] = DropdownOption(
-                id=idx_counter,
-                label=row.asset_no,
-                code=row.asset_no,
-                hex_id="00",
-                value=row.asset_no,
-                zone_id=z.id if z else None,
-                zone_code=z.zone_code if z else None,
-                zone_name=z.zone_name if z else None,
-                division_id=d.id if d else None,
-                division_code=d.division_code if d else None,
-                division_name=d.division_name if d else None,
-                station_id=row.station_id,
-                station_code=s.station_code if s else None,
-                station_name=s.station_name if s else None,
-                asset_type_id=t.id if t else None,
-                asset_type_code=t.asset_type_code if t else None,
-                asset_type_name=t.asset_type_name if t else None,
-                asset_type_hex=row.asset_type_hex
-            )
-            idx_counter += 1
 
     asset_numbers_list = sorted(list(asset_numbers_map.values()), key=lambda x: x.label)
 
