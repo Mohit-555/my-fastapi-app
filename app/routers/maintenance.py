@@ -192,9 +192,9 @@ def activate_maintenance_mode(payload: MaintenanceModeRequest, db: Session = Dep
             detail=f"Asset '{payload.asset_no}' not found at station {payload.station_id}"
         )
 
-    # Resolve start and end times
-    from_dt = payload.from_date or payload.from_time
-    to_dt = payload.to_date or payload.to_time
+    # Resolve start and end times (prioritize exact timestamp with time over date-only)
+    from_dt = payload.from_time or payload.from_date
+    to_dt = payload.to_time or payload.to_date
     if not from_dt or not to_dt:
         raise HTTPException(
             status_code=400,
@@ -365,9 +365,9 @@ def update_maintenance_mode(id: int, payload: MaintenanceModeRequest, db: Sessio
     if record.from_time <= now <= record.to_time:
         raise HTTPException(status_code=400, detail="Cannot modify an Active maintenance mode")
 
-    # Resolve dates and times
-    from_dt = payload.from_date or payload.from_time
-    to_dt = payload.to_date or payload.to_time
+    # Resolve dates and times (prioritize exact timestamp with time over date-only)
+    from_dt = payload.from_time or payload.from_date
+    to_dt = payload.to_time or payload.to_date
 
     if not from_dt or not to_dt:
         raise HTTPException(
