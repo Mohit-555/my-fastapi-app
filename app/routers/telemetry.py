@@ -1817,19 +1817,8 @@ def _build_history_columns_and_rows(
             display_ts = row_dt.strftime("%Y-%m-%d %H:%M:%S")
             index_key = (display_ts, an_hex, stngw_id, row_dt, asset_label, vendor_val)
             if index_key not in row_index:
-                row_index[index_key] = {
-                    "asset_no": asset_label,
-                    "vendor_name": vendor_val,
-                    "vendor_code": vendor_val,
-                    "zone": res_zone,
-                    "division": res_div,
-                    "station": res_stn,
-                    "asset_type": asset_type or "Point Machine",
-                }
+                row_index[index_key] = {}
             row_index[index_key][col_key] = row.prv
-            row_index[index_key][p_name] = row.prv
-            if p_unit:
-                row_index[index_key][f"{p_name} ({p_unit})"] = row.prv
 
     history_rows = [
         TelemetryHistoryRow(
@@ -1837,12 +1826,12 @@ def _build_history_columns_and_rows(
             asset_number_hex=an_hex,
             stngw_id=stngw_id,
             values=vals,
-            zone=vals.get("zone", res_zone),
-            division=vals.get("division", res_div),
-            station=vals.get("station", res_stn),
-            vendor_name=vals.get("vendor_name", vendor_val),
-            asset_type=vals.get("asset_type", asset_type or "Point Machine"),
-            asset_no=vals.get("asset_no", asset_label),
+            zone=res_zone,
+            division=res_div,
+            station=res_stn,
+            vendor_name=vendor_val,
+            asset_type=asset_type or "Point Machine",
+            asset_no=asset_label,
         )
         for (display_ts, an_hex, stngw_id, row_dt, asset_label, vendor_val), vals in sorted(
             row_index.items(), key=lambda x: x[0][3], reverse=True
