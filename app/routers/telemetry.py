@@ -1799,6 +1799,18 @@ def _build_history_columns_and_rows(
         ainfo = asset_info_map.get(an_hex.upper(), {})
         asset_label = ainfo.get("asset_no") or f"Asset-{an_hex}"
         vendor_val = ainfo.get("vendor_code") or "XYZ"
+        at_hex = pid[0:2]
+
+        row_at = asset_type or _get_display_asset_type_name(at_hex)
+        row_stn = res_stn
+        row_div = res_div
+        row_zone = res_zone
+        if not row_stn and gw and gw.station:
+            row_stn = gw.station.station_name or gw.station.station_code or ""
+            if not row_div and gw.station.division:
+                row_div = gw.station.division.division_code or ""
+                if not row_zone and gw.station.division.zone:
+                    row_zone = gw.station.division.zone.zone_code or "NR"
 
         for row in telem_rows:
             row_dt = None
@@ -1815,7 +1827,7 @@ def _build_history_columns_and_rows(
                 row_dt = datetime.utcnow()
 
             display_ts = row_dt.strftime("%Y-%m-%d %H:%M:%S")
-            index_key = (display_ts, an_hex, stngw_id, row_dt, asset_label, vendor_val)
+            index_key = (display_ts, an_hex, stngw_id, row_dt, asset_label, vendor_val, row_at, row_stn, row_div, row_zone)
             if index_key not in row_index:
                 row_index[index_key] = {}
             row_index[index_key][col_key] = row.prv
@@ -1826,14 +1838,14 @@ def _build_history_columns_and_rows(
             asset_number_hex=an_hex,
             stngw_id=stngw_id,
             values=vals,
-            zone=res_zone,
-            division=res_div,
-            station=res_stn,
+            zone=r_zone,
+            division=r_div,
+            station=r_stn,
             vendor_name=vendor_val,
-            asset_type=asset_type or "Point Machine",
+            asset_type=r_at,
             asset_no=asset_label,
         )
-        for (display_ts, an_hex, stngw_id, row_dt, asset_label, vendor_val), vals in sorted(
+        for (display_ts, an_hex, stngw_id, row_dt, asset_label, vendor_val, r_at, r_stn, r_div, r_zone), vals in sorted(
             row_index.items(), key=lambda x: x[0][3], reverse=True
         )
     ]
@@ -2004,26 +2016,26 @@ def get_telemetry_history(
         }
         for k, v in r.values.items():
             row_item[k] = v
-            clean_k = k.split("(")[0].strip().replace(" ", "_")
-            row_item[clean_k] = v
 
-        if "Point Machine" in resolved_asset_type or resolved_asset_type == "EOP":
-            v_cur_n = row_item.get("IPT_N") or row_item.get("Normal_Current") or row_item.get("Avg_Current")
+        cur_row_at = r.asset_type or resolved_asset_type
+        if "Point Machine" in cur_row_at or cur_row_at == "EOP":
+            v_cur_n = row_item.get("IPT N") or row_item.get("IPT_N") or row_item.get("Normal_Current") or row_item.get("Avg_Current")
             if v_cur_n is not None:
                 row_item["Normal_Current"] = v_cur_n
                 row_item["Avg_Current"] = v_cur_n
                 row_item["I_avg"] = v_cur_n
-            v_cur_r = row_item.get("IPT_R") or row_item.get("Reverse_Current") or row_item.get("Peak_Current")
+                row_item["IPT_N"] = v_cur_n
+            v_cur_r = row_item.get("IPT R") or row_item.get("IPT_R") or row_item.get("Reverse_Current") or row_item.get("Peak_Current")
             if v_cur_r is not None:
                 row_item["Reverse_Current"] = v_cur_r
                 row_item["Peak_Current"] = v_cur_r
                 row_item["I_peak"] = v_cur_r
-            v_volt = row_item.get("VPT_110_DC_LOC_N") or row_item.get("VPT_24_DC_LOC") or row_item.get("Voltage_DC") or row_item.get("Battery_Voltage")
+            v_volt = row_item.get("VPT 110 DC LOC N") or row_item.get("VPT_110_DC_LOC_N") or row_item.get("VPT_24_DC_LOC") or row_item.get("Voltage_DC") or row_item.get("Battery_Voltage")
             if v_volt is not None:
                 row_item["Voltage_DC"] = v_volt
                 row_item["Battery_Voltage"] = v_volt
                 row_item["V_batt"] = v_volt
-            v_stroke = row_item.get("TOPT_N") or row_item.get("TOPT_R") or row_item.get("TPT_N") or row_item.get("Stroke_Time")
+            v_stroke = row_item.get("TPT N") or row_item.get("TOPT_N") or row_item.get("TOPT_R") or row_item.get("Stroke_Time")
             if v_stroke is not None:
                 row_item["Stroke_Time"] = v_stroke
                 row_item["stroke_ms"] = v_stroke
